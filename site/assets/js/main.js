@@ -45,7 +45,7 @@ const utterancesBox = document.getElementById('utterancesBox');
 if (utterancesBox) {
   const s = document.createElement('script');
   s.src = 'https://utteranc.es/client.js';
-  s.setAttribute('repo', 'H0308/qq-music-lyrics-displayer');
+  s.setAttribute('repo', 'H0308/taskbar-lyrics-displayer');
   s.setAttribute('issue-term', '官网反馈与建议');
   s.setAttribute('theme', root.dataset.theme === 'light' ? 'github-light' : 'github-dark');
   s.setAttribute('crossorigin', 'anonymous');
@@ -66,7 +66,7 @@ if (utterancesBox) {
     if (utterancesBox.classList.contains('loaded')) return;
     utterancesBox.innerHTML =
       '<p class="feedback-fallback">评论组件加载失败，可能是网络问题或组件服务暂时不可用。' +
-      '可以直接前往 <a href="https://github.com/H0308/qq-music-lyrics-displayer/issues" target="_blank" rel="noopener">GitHub Issues</a> 提交反馈。</p>';
+      '可以直接前往 <a href="https://github.com/H0308/taskbar-lyrics-displayer/issues" target="_blank" rel="noopener">GitHub Issues</a> 提交反馈。</p>';
   }, 6000);
 }
 
@@ -217,7 +217,7 @@ function ghCacheSet(key, data) {
   if (cached) {
     showVersion(cached);
   } else {
-    fetch('https://api.github.com/repos/H0308/qq-music-lyrics-displayer/releases/latest')
+    fetch('https://api.github.com/repos/H0308/taskbar-lyrics-displayer/releases/latest')
       .then(r => (r.ok ? r.json() : Promise.reject(r.status)))
       .then(data => { ghCacheSet(cacheKey, data); showVersion(data); })
       .catch(() => {});

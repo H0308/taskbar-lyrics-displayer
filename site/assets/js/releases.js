@@ -36,7 +36,7 @@ async function fetchReleasePage(pageNum) {
   const cached = ghCacheGet(cacheKey);
   if (cached) return cached;
   const r = await fetch(
-    `https://api.github.com/repos/H0308/qq-music-lyrics-displayer/releases?per_page=${PER_PAGE}&page=${pageNum}`);
+    `https://api.github.com/repos/H0308/taskbar-lyrics-displayer/releases?per_page=${PER_PAGE}&page=${pageNum}`);
   if (!r.ok) throw r.status;
   const data = await r.json();
   ghCacheSet(cacheKey, data);
@@ -161,7 +161,7 @@ async function loadTimelineMore() {
   } catch {
     if (totalLoaded === 0) {
       statusEl.innerHTML = '加载失败，可能是网络问题或 GitHub 接口限流。可直接前往 ' +
-        '<a href="https://github.com/H0308/qq-music-lyrics-displayer/releases" target="_blank" rel="noopener">GitHub Releases</a> 查看。';
+        '<a href="https://github.com/H0308/taskbar-lyrics-displayer/releases" target="_blank" rel="noopener">GitHub Releases</a> 查看。';
       loadMoreWrap.remove();
       sentinelObserver.disconnect();
     } else {
