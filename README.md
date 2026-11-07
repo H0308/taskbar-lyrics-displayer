@@ -3,9 +3,9 @@
    <h1>QQ 音乐/网易云任务栏歌词</h1>
    <p>把 QQ 音乐和网易云音乐的歌词嵌入 Windows 10/11 任务栏——滚动歌词、每日一言、逐字高亮、播放控制、音频频谱，支持Windows 11任务栏上、下、左、右四边布局，程序本体为 C++ 原生实现，无 Electron、WebView 和 .NET/WPF 运行时，秉持工具软件应尽可能少占内存的原则</p>
    <p>
-      <a href="https://github.com/H0308/qq-music-lyrics-displayer/releases/latest"><img src="https://img.shields.io/github/v/release/H0308/qq-music-lyrics-displayer?display_name=tag&amp;sort=semver" alt="最新版本"></a>
-      <a href="https://github.com/H0308/qq-music-lyrics-displayer/actions/workflows/build-and-release.yml"><img src="https://github.com/H0308/qq-music-lyrics-displayer/actions/workflows/build-and-release.yml/badge.svg?branch=main" alt="构建状态"></a>
-      <a href="LICENSE"><img src="https://img.shields.io/github/license/H0308/qq-music-lyrics-displayer" alt="许可证"></a>
+      <a href="https://github.com/H0308/taskbar-lyrics-displayer/releases/latest"><img src="https://img.shields.io/github/v/release/H0308/taskbar-lyrics-displayer?display_name=tag&amp;sort=semver" alt="最新版本"></a>
+      <a href="https://github.com/H0308/taskbar-lyrics-displayer/actions/workflows/build-and-release.yml"><img src="https://github.com/H0308/taskbar-lyrics-displayer/actions/workflows/build-and-release.yml/badge.svg?branch=main" alt="构建状态"></a>
+      <a href="LICENSE"><img src="https://img.shields.io/github/license/H0308/taskbar-lyrics-displayer" alt="许可证"></a>
       <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows11&amp;logoColor=white" alt="Windows 10/11">
    </p>
    <p>
@@ -18,9 +18,9 @@
    <p>
       <a href="https://www.taskbar-lyrics.top">官方网站</a> ·
       <a href="https://www.taskbar-lyrics.top/docs.html">文档中心</a> ·
-      <a href="https://github.com/H0308/qq-music-lyrics-displayer/releases/latest">GitHub 下载</a> ·
-      <a href="https://gitee.com/EPSDA/qq-music-lyrics-displayer/releases">Gitee 下载</a> ·
-      <a href="https://github.com/H0308/qq-music-lyrics-displayer/releases">更新日志</a> ·
+      <a href="https://github.com/H0308/taskbar-lyrics-displayer/releases/latest">GitHub 下载</a> ·
+      <a href="https://gitee.com/EPSDA/taskbar-lyrics-displayer/releases">Gitee 下载</a> ·
+      <a href="https://github.com/H0308/taskbar-lyrics-displayer/releases">更新日志</a> ·
       <a href="https://www.taskbar-lyrics.top/feedback.html">问题反馈</a>
    </p>
    <p align="center">
@@ -131,7 +131,7 @@ git push origin v2.7.0
 
 ## 安装包
 
-可以从 [GitHub Releases](https://github.com/H0308/qq-music-lyrics-displayer/releases/latest) 或 [Gitee Releases](https://gitee.com/EPSDA/qq-music-lyrics-displayer/releases) 获取 x64 安装包
+可以从 [GitHub Releases](https://github.com/H0308/taskbar-lyrics-displayer/releases/latest) 或 [Gitee Releases](https://gitee.com/EPSDA/taskbar-lyrics-displayer/releases) 获取 x64 安装包
 
 ## 使用
 
