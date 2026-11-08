@@ -24,7 +24,12 @@
       <a href="https://www.taskbar-lyrics.top/feedback.html">问题反馈</a>
    </p>
    <p align="center">
-      <img src="asset/social-preview.png" width="100%" alt="QQ 音乐/网易云任务栏歌词界面预览">
+      <a href="https://www.taskbar-lyrics.top/#product-video"><img src="asset/social-preview.png" width="100%" alt="点击观看任务栏歌词产品介绍视频"></a>
+   </p>
+   <p>
+      <a href="https://www.taskbar-lyrics.top/#product-video">▶ 观看产品介绍视频</a> ·
+      <a href="asset/taskbar-lyrics-promo.mp4">视频文件</a> ·
+      <a href="https://www.taskbar-lyrics.top/showcase.html">截图与功能示例</a>
    </p>
 </div>
 

@@ -11,3 +11,5 @@ Thumbs.db
 dist/
 installer/prereq/
 .idea
+# Pages 发布时从 asset 复制；本地保留同一份发布副本用于浏览。
+/site/assets/media/taskbar-lyrics-promo.mp4
