@@ -4,10 +4,16 @@ on:
   push:
     branches:
       - main
-    # 官网与 Pages 部署配置的变动不触发软件构建
+    # 官网、宣传视频工程及制作素材的变动不触发软件构建。
+    # 不排除整个 asset：软件图标与宠物精灵图仍是构建输入。
     paths-ignore:
       - "site/**"
       - ".github/workflows/deploy-pages.yml"
+      - "promo-video/**"
+      - "asset/screenshots/**"
+      - "asset/screenrecords/**"
+      - "asset/music/**"
+      - "asset/taskbar-lyrics-cover-*.png"
     tags:
       - "v*"
   pull_request:
@@ -16,6 +22,11 @@ on:
     paths-ignore:
       - "site/**"
       - ".github/workflows/deploy-pages.yml"
+      - "promo-video/**"
+      - "asset/screenshots/**"
+      - "asset/screenrecords/**"
+      - "asset/music/**"
+      - "asset/taskbar-lyrics-cover-*.png"
   workflow_dispatch:
     inputs:
       publish_release:

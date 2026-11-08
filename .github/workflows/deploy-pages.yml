@@ -3,6 +3,7 @@ name: Deploy static content to Pages
 on:
   push:
     branches: ["main"]
+    # 仅发布站点源文件；宣传视频工程与原始素材不属于 Pages 输入。
     paths:
       - 'site/**'
       - '.github/workflows/deploy-pages.yml'
