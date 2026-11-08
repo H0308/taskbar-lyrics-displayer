@@ -3,9 +3,10 @@ name: Deploy static content to Pages
 on:
   push:
     branches: ["main"]
-    # 仅发布站点源文件；宣传视频工程与原始素材不属于 Pages 输入。
+    # 发布站点和选定的产品介绍成片；视频制作工程不属于 Pages 输入。
     paths:
       - 'site/**'
+      - 'asset/taskbar-lyrics-promo.mp4'
       - '.github/workflows/deploy-pages.yml'
   workflow_dispatch:
 
@@ -27,6 +28,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Prepare product introduction video
+        run: |
+          mkdir -p site/assets/media
+          cp asset/taskbar-lyrics-promo.mp4 site/assets/media/taskbar-lyrics-promo.mp4
       - name: Setup Pages
         uses: actions/configure-pages@v5
         with:
