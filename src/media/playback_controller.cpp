@@ -93,6 +93,12 @@ TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap,
     const bool newSmtcThumbnail =
         snap.thumbnail && !snap.thumbnail->empty() &&
         (!state_.lastSmtcThumbnail || state_.lastSmtcThumbnail != snap.thumbnail);
+    // Soda 会先给出旧封面，再通过同曲属性事件补齐新图。取色结果应随图片内容
+    // 失效，而不是只在换歌时失效；相同图片重新读取不需要重复取色。
+    const bool sodaCoverChanged =
+        snap.player == SmtcPlayerType::Soda && newSmtcThumbnail &&
+        (!state_.lastCover_ || (snap.thumbnail != state_.lastCover_ &&
+                                *snap.thumbnail != *state_.lastCover_));
     if (snap.status != state_.lastStatus) {
         runtime_log::writef(L"[smtc] %s status: %s", playerName(snap.player),
                             statusName(snap.status));
@@ -167,6 +173,8 @@ TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap,
         }
     }
     state_.lastSmtcThumbnail = snap.thumbnail;
+    if (sodaCoverChanged)
+        state_.hasAlbumColor_ = false;
     // 时间线从残留恢复可信（stale 1→0）：若当前歌词请求是在不可信期间发出的
     // （等待超时被迫发出），用可信时长立即重发，覆盖可能已被时长过滤淘汰的结果。
     if (!trackChanged && snap.player == SmtcPlayerType::QQMusic && state_.lyricRequestStale_ &&
