@@ -79,6 +79,7 @@ public:
                              ReadyCallback cb);
 
     // 汽水按元数据搜索歌曲 ID 并取原生逐字/LRC；试听片段映射到本地时间轴。
+    // 联网前合并切歌元数据事件，新请求使旧请求取消；手动覆盖和缓存立即返回。
     // 手动覆盖独立保存，不读取 QQ 本地 QRC。
     void requestSodaAsync(const std::wstring& title, const std::wstring& artist,
                             int64_t durationMs, ReadyCallback cb);

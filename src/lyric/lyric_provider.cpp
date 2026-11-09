@@ -56,6 +56,17 @@ int curlXferAbort(void*, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
     return g_shutdown.load() ? 1 : 0; // 返回非 0：curl 以 CURLE_ABORTED_BY_CALLBACK 立即返回
 }
 
+struct SodaRequest {
+    const std::atomic<uint64_t>& generation;
+    uint64_t expected;
+
+    bool cancelled() const { return g_shutdown.load() || generation.load() != expected; }
+};
+
+int curlSodaXferAbort(void* context, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+    return static_cast<const SodaRequest*>(context)->cancelled() ? 1 : 0;
+}
+
 std::string toUtf8(const std::wstring& w) {
     if (w.empty()) return {};
     int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), nullptr, 0, nullptr, nullptr);
@@ -78,7 +89,10 @@ size_t curlWrite(char* ptr, size_t size, size_t nmemb, void* userdata) {
     return size * nmemb;
 }
 
-bool httpGet(CURL* curl, const std::string& url, const char* referer, std::string& out) {
+bool httpGet(CURL* curl, const std::string& url, const char* referer, std::string& out,
+             const SodaRequest* sodaRequest = nullptr, const wchar_t* sodaOperation = nullptr) {
+    if (g_shutdown.load() || (sodaRequest && sodaRequest->cancelled()))
+        return false;
     curl_easy_reset(curl);
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWrite);
@@ -90,11 +104,37 @@ bool httpGet(CURL* curl, const std::string& url, const char* referer, std::strin
     curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 10000L);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L); // 进度回调用于退出时立即中断
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, curlXferAbort);
-    out.clear();
-    CURLcode rc = curl_easy_perform(curl);
-    long code = 0;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
-    return rc == CURLE_OK && code == 200;
+    if (sodaRequest) {
+        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, curlSodaXferAbort);
+        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, sodaRequest);
+    }
+    // 仅汽水对临时网络错误重试一次；其他歌词来源仍执行原有单次请求。
+    for (int attempt = 1; attempt <= (sodaOperation ? 2 : 1); ++attempt) {
+        if (g_shutdown.load() || (sodaRequest && sodaRequest->cancelled()))
+            return false;
+        out.clear();
+        const CURLcode rc = curl_easy_perform(curl);
+        long code = 0;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
+        if (g_shutdown.load() || (sodaRequest && sodaRequest->cancelled()))
+            return false;
+        if (rc == CURLE_OK && code == 200)
+            return true;
+        if (!sodaOperation)
+            return false;
+        const bool transient = rc == CURLE_OPERATION_TIMEDOUT || rc == CURLE_COULDNT_CONNECT ||
+                               rc == CURLE_COULDNT_RESOLVE_HOST || rc == CURLE_RECV_ERROR ||
+                               rc == CURLE_SEND_ERROR ||
+                               (rc == CURLE_OK && (code == 429 || (code >= 500 && code < 600)));
+        runtime_log::writef(
+            L"[lyric][Soda Music] http-failed operation=%ls attempt=%d curl=%d reason=%S http=%ld retry=%d",
+            sodaOperation, attempt, static_cast<int>(rc), curl_easy_strerror(rc), code,
+            transient && attempt == 1 ? 1 : 0);
+        if (!transient || attempt == 2)
+            return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    }
+    return false;
 }
 
 struct Candidate {
@@ -1801,11 +1841,11 @@ bool parseKrc(std::string content, std::vector<LyricLine>& out) {
 
 
 bool searchSodaSongs(CURL* curl, const std::wstring& title, const std::wstring& artist,
-                       std::vector<SodaSong>& out) {
+                       std::vector<SodaSong>& out, const SodaRequest* request = nullptr) {
     out.clear();
     if (!curl || g_shutdown.load())
         return false;
-    const std::string keyword = toUtf8(title + L" " + artist);
+    const std::string keyword = toUtf8(makeSearchQuery({title, artist}));
     char* escaped = curl_easy_escape(curl, keyword.c_str(), static_cast<int>(keyword.size()));
     if (!escaped)
         return false;
@@ -1813,14 +1853,16 @@ bool searchSodaSongs(CURL* curl, const std::wstring& title, const std::wstring& 
                                   std::string(escaped) + "&cursor=0&count=20&aid=386088";
     curl_free(escaped);
     std::string body;
-    if (!httpGet(curl, searchUrl, "https://music.douyin.com/", body)) {
-        runtime_log::writef(L"[lyric][Soda Music] search request failed");
+    if (!httpGet(curl, searchUrl, "https://music.douyin.com/", body, request, L"search")) {
         return false;
     }
     try {
         const auto root = nlohmann::json::parse(body, nullptr, false);
-        if (!root.is_object() || !root.contains("result_groups") || !root["result_groups"].is_array())
+        if (!root.is_object() || !root.contains("result_groups") || !root["result_groups"].is_array()) {
+            runtime_log::writef(L"[lyric][Soda Music] invalid search response title=\"%ls\" artist=\"%ls\"",
+                                title.c_str(), artist.c_str());
             return false;
+        }
         for (const auto& group : root["result_groups"]) {
             if (!group.is_object() || group.value("id", std::string()) != "tracks" ||
                 !group.contains("data") || !group["data"].is_array())
@@ -1856,6 +1898,8 @@ bool searchSodaSongs(CURL* curl, const std::wstring& title, const std::wstring& 
                 out.push_back(std::move(song));
             }
         }
+        runtime_log::writef(L"[lyric][Soda Music] search title=\"%ls\" artist=\"%ls\" candidates=%zu",
+                            title.c_str(), artist.c_str(), out.size());
         return true;
     } catch (const nlohmann::json::exception&) {
         runtime_log::writef(L"[lyric][Soda Music] invalid native API response");
@@ -1864,7 +1908,7 @@ bool searchSodaSongs(CURL* curl, const std::wstring& title, const std::wstring& 
 }
 
 bool downloadSodaLyrics(CURL* curl, const SodaSong& song, int64_t playbackDurationMs,
-                          std::vector<LyricLine>& out) {
+                          std::vector<LyricLine>& out, const SodaRequest* request = nullptr) {
     out.clear();
     if (song.id.empty() || song.id.find_first_not_of("0123456789") != std::string::npos ||
         g_shutdown.load())
@@ -1872,15 +1916,17 @@ bool downloadSodaLyrics(CURL* curl, const SodaSong& song, int64_t playbackDurati
     const std::string url = "https://beta-luna.douyin.com/luna/h5/seo_track?track_id=" +
                              song.id + "&device_platform=web";
     std::string body;
-    if (!httpGet(curl, url, "https://music.douyin.com/", body))
+    if (!httpGet(curl, url, "https://music.douyin.com/", body, request, L"lyrics"))
         return false;
     try {
         const auto detail = nlohmann::json::parse(body, nullptr, false);
         if (!detail.is_object() || !detail.contains("seo_track") ||
             !detail["seo_track"].is_object() || !detail["seo_track"].contains("track") ||
             !detail["seo_track"]["track"].is_object() || !detail.contains("lyric") ||
-            !detail["lyric"].is_object())
+            !detail["lyric"].is_object()) {
+            runtime_log::writef(L"[lyric][Soda Music] missing lyric data id=%S", song.id.c_str());
             return false;
+        }
         const auto& track = detail["seo_track"]["track"];
         if (!track.contains("id") || jsonString(track["id"]) != song.id)
             return false;
@@ -1892,8 +1938,11 @@ bool downloadSodaLyrics(CURL* curl, const SodaSong& song, int64_t playbackDurati
             parseKrc(content, lines);
         else if (type == "lrc")
             lines = parseLrcText(content);
-        if (lines.empty())
+        if (lines.empty()) {
+            runtime_log::writef(L"[lyric][Soda Music] empty or unsupported lyrics id=%S type=%S bytes=%zu",
+                                song.id.c_str(), type.c_str(), content.size());
             return false;
+        }
         if (lyric.contains("translations") && lyric["translations"].is_object()) {
             const std::string translation = lyric["translations"].value("cn", std::string());
             attachSecondary(lines, parseLrcText(translation), true);
@@ -1901,8 +1950,12 @@ bool downloadSodaLyrics(CURL* curl, const SodaSong& song, int64_t playbackDurati
         const int64_t offsetMs = soda_lyrics::previewOffset(
             song.durationMs, song.previewStartMs, song.previewDurationMs, playbackDurationMs);
         soda_lyrics::alignPreview(lines, offsetMs, playbackDurationMs, song.durationMs);
-        if (lines.empty())
+        if (lines.empty()) {
+            runtime_log::writef(L"[lyric][Soda Music] empty aligned lyrics id=%S offset=%lldms duration=%lldms",
+                                song.id.c_str(), static_cast<long long>(offsetMs),
+                                static_cast<long long>(playbackDurationMs));
             return false;
+        }
         runtime_log::writef(L"[lyric][Soda Music] native id=%S type=%S offset=%lldms lines=%zu",
                             song.id.c_str(), type.c_str(),
                             static_cast<long long>(offsetMs), lines.size());
@@ -1915,28 +1968,48 @@ bool downloadSodaLyrics(CURL* curl, const SodaSong& song, int64_t playbackDurati
 }
 
 bool fetchSodaLyrics(const std::wstring& title, const std::wstring& artist,
-                       int64_t durationMs, std::vector<LyricLine>& out) {
+                       int64_t durationMs, std::vector<LyricLine>& out, const SodaRequest& request) {
     out.clear();
     std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl(curl_easy_init(), &curl_easy_cleanup);
-    std::vector<SodaSong> songs;
-    if (!curl || !searchSodaSongs(curl.get(), title, artist, songs))
+    if (!curl || request.cancelled())
         return false;
     const MatchQuery query{title, artist, durationMs, extractVersionTags(title)};
-    std::vector<std::pair<int, const SodaSong*>> ranked;
-    for (const auto& song : songs) {
-        const int64_t matchedDurationMs =
-            soda_lyrics::previewOffset(song.durationMs, song.previewStartMs,
-                                         song.previewDurationMs, durationMs) > 0
-                ? song.previewDurationMs : song.durationMs;
-        const int score = scoreCandidate(query, song.title, song.artist, matchedDurationMs);
-        if (score >= kScoreThreshold)
-            ranked.emplace_back(score, &song);
-    }
-    std::stable_sort(ranked.begin(), ranked.end(),
-                     [](const auto& a, const auto& b) { return a.first > b.first; });
-    for (size_t i = 0; i < std::min<size_t>(ranked.size(), 3) && !g_shutdown.load(); ++i) {
-        if (downloadSodaLyrics(curl.get(), *ranked[i].second, durationMs, out))
-            return true;
+    std::unordered_set<std::wstring> searched;
+    std::unordered_set<std::string> attempted;
+    for (const auto& variant : buildSearchVariants(query)) {
+        if (request.cancelled())
+            return false;
+        if (!searched.insert(makeSearchQuery(variant)).second)
+            continue;
+        std::vector<SodaSong> songs;
+        // 网络失败不是关键词不匹配，不继续增加搜索请求。
+        if (!searchSodaSongs(curl.get(), variant.title, variant.artist, songs, &request))
+            return false;
+        std::vector<std::pair<int, const SodaSong*>> ranked;
+        int bestScore = 0;
+        for (const auto& song : songs) {
+            const int64_t matchedDurationMs =
+                soda_lyrics::previewOffset(song.durationMs, song.previewStartMs,
+                                           song.previewDurationMs, durationMs) > 0
+                    ? song.previewDurationMs : song.durationMs;
+            // 搜索可以简化关键词，录用仍用原始歌曲的版本、歌手和时长校验。
+            const int score = scoreCandidate(query, song.title, song.artist, matchedDurationMs);
+            bestScore = std::max(bestScore, score);
+            if (score >= kScoreThreshold && !attempted.contains(song.id))
+                ranked.emplace_back(score, &song);
+        }
+        runtime_log::writef(L"[lyric][Soda Music] match title=\"%ls\" candidates=%zu eligible=%zu best=%d duration=%lldms",
+                            title.c_str(), songs.size(), ranked.size(), bestScore,
+                            static_cast<long long>(durationMs));
+        std::stable_sort(ranked.begin(), ranked.end(),
+                         [](const auto& a, const auto& b) { return a.first > b.first; });
+        for (size_t i = 0; i < std::min<size_t>(ranked.size(), 3); ++i) {
+            if (request.cancelled())
+                return false;
+            attempted.insert(ranked[i].second->id);
+            if (downloadSodaLyrics(curl.get(), *ranked[i].second, durationMs, out, &request))
+                return !request.cancelled();
+        }
     }
     return false;
 }
@@ -2914,8 +2987,7 @@ void LyricProvider::requestSodaAsync(const std::wstring& title, const std::wstri
     worker.thread = std::thread([impl, gen, key, title, artist, durationMs,
                                  cb = std::move(cb), done]() mutable {
         DoneFlag flag{done};
-        runtime_log::writef(L"[lyric][request][Soda Music] title=\"%ls\" artist=\"%ls\" duration=%lldms",
-                            title.c_str(), artist.c_str(), static_cast<long long>(durationMs));
+        const SodaRequest request{impl->generation, gen};
         LyricResult ready;
         {
             std::lock_guard<std::mutex> lock(impl->mtx);
@@ -2928,9 +3000,16 @@ void LyricProvider::requestSodaAsync(const std::wstring& title, const std::wstri
                 ready = {true, std::move(entry.lines), std::move(entry.info)};
         }
         if (!ready.ok) {
-            ready.ok = fetchSodaLyrics(title, artist, durationMs, ready.lines);
+            // Soda 的歌名和真实时长通常分两批到达，合并这段事件再联网。
+            // 缓存和手动覆盖不等待；新代次同时让旧请求在 curl 中止或循环边界退出。
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            if (request.cancelled())
+                return;
+            runtime_log::writef(L"[lyric][request][Soda Music] title=\"%ls\" artist=\"%ls\" duration=%lldms",
+                                title.c_str(), artist.c_str(), static_cast<long long>(durationMs));
+            ready.ok = fetchSodaLyrics(title, artist, durationMs, ready.lines, request);
             std::lock_guard<std::mutex> lock(impl->mtx);
-            if (impl->generation != gen)
+            if (request.cancelled())
                 return;
             if (ready.ok)
                 impl->cachePut(key, CacheEntry{ready.lines, ready.info});
@@ -2938,7 +3017,7 @@ void LyricProvider::requestSodaAsync(const std::wstring& title, const std::wstri
         runtime_log::writef(L"[lyric][Soda Music] result=%ls source=%ls lines=%zu",
                             ready.ok ? L"success" : L"failed",
                             ready.fromManual ? L"manual" : L"native", ready.lines.size());
-        if (impl->generation == gen && cb)
+        if (!request.cancelled() && cb)
             cb(std::move(ready));
     });
     std::lock_guard<std::mutex> lock(impl_->mtx);
