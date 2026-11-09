@@ -29,6 +29,8 @@ const wchar_t* playerName(SmtcPlayerType player) {
         return L"QQ Music";
     case SmtcPlayerType::NetEase:
         return L"NetEase Music";
+    case SmtcPlayerType::Qishui:
+        return L"Soda Music";
     default:
         return L"Unknown";
     }
@@ -128,6 +130,9 @@ TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap,
             startLyricRequest(snap);
             if (!snap.thumbnail || snap.thumbnail->empty())
                 requestNeteaseCoverFallback(snap.neteaseSongId);
+        } else if (snap.player == SmtcPlayerType::Qishui) {
+            cancelLyricDebounce();
+            startLyricRequest(snap);
         } else if (timerWindow_) {
             // QQ：等 SMTC 切歌事件批合并后再请求；期间 state_.lyricLoading_ 保持 true，
             // 界面停留在「歌词加载中…」而不是闪「暂无歌词」。
@@ -191,9 +196,9 @@ void PlaybackController::applyManualLyrics(LyricResult result, const SmtcSnapsho
     if (!state_.lastSmtcThumbnail || state_.lastSmtcThumbnail->empty()) {
         if (snap.player == SmtcPlayerType::NetEase)
             requestNeteaseCoverFallback(snap.neteaseSongId);
-        else if (!result.info.albummid.empty())
+        else if (snap.player == SmtcPlayerType::QQMusic && !result.info.albummid.empty())
             requestQqCoverFallback(result.info.albummid);
-        else
+        else if (snap.player == SmtcPlayerType::QQMusic)
             requestQqCoverInfoFallback(snap);
     }
 }
@@ -324,6 +329,8 @@ void PlaybackController::startLyricRequest(const SmtcSnapshot& snap, bool forceO
     if (snap.player == SmtcPlayerType::NetEase) {
         provider.requestNeteaseAsync(snap.neteaseSongId, snap.title, snap.artist, durationMs,
                                      postLyricResult);
+    } else if (snap.player == SmtcPlayerType::Qishui) {
+        provider.requestQishuiAsync(snap.title, snap.artist, durationMs, postLyricResult);
     } else {
         provider.requestAsync(snap.title, snap.artist, durationMs, postLyricResult, forceOnline,
                               forceLocal, persistOrder);

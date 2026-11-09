@@ -234,6 +234,8 @@ const wchar_t* spectrumProcessName(SmtcPlayerType player) {
         return L"QQMusic.exe";
     case SmtcPlayerType::NetEase:
         return L"cloudmusic.exe";
+    case SmtcPlayerType::Qishui:
+        return L"SodaMusic.exe";
     default:
         return L"";
     }
@@ -245,6 +247,8 @@ std::vector<std::wstring> volumeProcessNames(SmtcPlayerType player) {
         return {L"QQMusic.exe"};
     case SmtcPlayerType::NetEase:
         return {L"cloudmusic.exe", L"NeteaseBridge.exe"};
+    case SmtcPlayerType::Qishui:
+        return {L"SodaMusic.exe"};
     default:
         return {};
     }

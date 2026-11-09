@@ -28,7 +28,8 @@ enum class LyricSource {
     Qrc, // QQ 音乐原生逐字歌词
     Krc, // 酷狗逐字歌词
     Lrc, // QQ 音乐整行歌词
-    Yrc  // 网易云音乐逐字歌词
+    Yrc, // 网易云音乐逐字歌词
+    Qishui // 汽水原生歌词（逐字或 LRC，由歌词接口确定）
 };
 
 // 手动搜索返回的候选歌曲
@@ -42,9 +43,12 @@ struct SearchCandidate {
     int64_t durationMs = 0;
     LyricSource source = LyricSource::Lrc;
     std::wstring neteaseSongId; // 网易云歌曲 ID（YRC 候选使用）
+    std::wstring qishuiSongId;
+    int64_t previewStartMs = 0;
+    int64_t previewDurationMs = 0;
 };
 
-// 歌词获取：QQ 使用现有 QRC/KRC/LRC 链路；网易云按歌曲 ID 获取 YRC，失败后回退 LRC。
+// 歌词获取：QQ 匹配 QRC/KRC/LRC；汽水取原生逐字/LRC；网易云按歌曲 ID 取 YRC/LRC。
 class LyricProvider {
 public:
     // 所有异步接口均在工作线程回调，调用前已释放内部锁；UI 更新由调用方投递。
@@ -74,21 +78,27 @@ public:
                              const std::wstring& artist, int64_t durationMs,
                              ReadyCallback cb);
 
+    // 汽水按元数据搜索歌曲 ID 并取原生逐字/LRC；试听片段映射到本地时间轴。
+    // 手动覆盖独立保存，不读取 QQ 本地 QRC。
+    void requestQishuiAsync(const std::wstring& title, const std::wstring& artist,
+                            int64_t durationMs, ReadyCallback cb);
+
     // 仅按当前元数据查询 QQ songmid/albummid，不读取或替换当前歌词。
     void requestQqSongInfoAsync(const std::wstring& title, const std::wstring& artist,
                                 int64_t durationMs, SongInfoCallback cb);
 
-    // 手动搜索候选（网易云 YRC/LRC、QQ QRC/KRC/LRC 各最多 5 条）。
+    // 手动搜索候选；汽水目标仅搜索汽水曲库，其他目标保留既有来源。
     void searchCandidatesAsync(const std::wstring& title, const std::wstring& artist,
-                               SearchCallback cb);
+                               SearchCallback cb, bool qishuiOnly = false);
 
     // 按候选歌曲异步取歌词，不修改当前播放内容。
-    void fetchLyricAsync(const SearchCandidate& cand, FetchCallback cb);
+    void fetchLyricAsync(const SearchCandidate& cand, FetchCallback cb,
+                         int64_t playbackDurationMs = 0);
 
-    // 保存手动选择；QQ 按标题/歌手/时长复用，
-    // 网易云按歌曲 ID 复用。
+    // 保存手动选择；QQ、汽水分别按标题/歌手/时长复用，网易云按歌曲 ID 复用。
     void setManualOverride(const std::wstring& title, const std::wstring& artist,
-                           int64_t durationMs, std::vector<LyricLine> lines, SongInfo info);
+                           int64_t durationMs, std::vector<LyricLine> lines, SongInfo info,
+                           bool qishui = false);
 
     // 设置手动歌词的持久化目录；每首歌保存为独立文件，请求歌词时按 key 查找对应文件
     void setManualOverrideDir(const std::wstring& dir);

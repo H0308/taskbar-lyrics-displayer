@@ -6,6 +6,8 @@
 
 namespace media_popup_paint {
 std::wstring sourceLabel(const std::wstring& source) {
+    if (source == L"汽水音乐")
+        return L"汽水音乐";
     if (source.find(L"QQMusic") != std::wstring::npos ||
         source.find(L"qqmusic") != std::wstring::npos)
         return L"QQ音乐";

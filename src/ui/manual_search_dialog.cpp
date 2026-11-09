@@ -135,6 +135,7 @@ struct ManualSearchDialog::Impl {
     int64_t targetDurationMs = 0;
     std::wstring targetNeteaseSongId;
     bool targetIsNetease = false;
+    bool targetIsQishui = false;
 
     std::vector<SearchCandidate> candidates;
     std::vector<CandidateItem> candidateItems;
@@ -1283,7 +1284,8 @@ struct ManualSearchDialog::Impl {
     void paint(fluent::FluentDialogSurface::Painter& painter, float, float) {
         const auto& p = fluent::palette();
         painter.drawText(L"手动搜索歌词", painter.textFormat(20.0f, 600), titleRect, p.text);
-        painter.drawText(L"从多个来源选择并预览歌词", painter.textFormat(13.0f, 400), subtitleRect,
+        painter.drawText(targetIsQishui ? L"搜索汽水音乐并预览原生歌词" : L"从多个来源选择并预览歌词",
+                         painter.textFormat(13.0f, 400), subtitleRect,
                          p.textSecondary);
         drawTextField(painter, titleEditRect, titleEdit, kIdTitleEdit);
         drawTextField(painter, artistEditRect, artistEdit, kIdArtistEdit);
@@ -1292,10 +1294,12 @@ struct ManualSearchDialog::Impl {
         painter.drawTrimmedText(statusText, painter.textFormat(13.0f, 400, false, true), statusRect,
                                  p.text);
         painter.drawTrimmedText(
-            L"YRC/LRC 为网易云歌词；QRC 为 QQ 原生逐字歌词；KRC 为酷狗逐字歌词",
+            targetIsQishui ? L"来自汽水音乐的原生歌词，支持逐字和逐行显示。"
+                           : L"YRC/LRC 为网易云歌词；QRC 为 QQ 原生逐字歌词；KRC 为酷狗逐字歌词",
             painter.textFormat(12.0f, 400, false, true), hintRect, p.textSecondary);
         painter.drawTrimmedText(
-            targetIsNetease ? L"当前为网易云音乐，仅显示网易云歌词候选。"
+            targetIsQishui ? L"当前为汽水音乐，仅显示汽水音乐歌词候选。"
+            : targetIsNetease ? L"当前为网易云音乐，仅显示网易云歌词候选。"
                             : L"当前仅显示酷狗和 QQ 音乐歌词候选。",
             painter.textFormat(13.0f, 600, false, true), compatibilityRect, p.text);
 
@@ -1452,13 +1456,14 @@ struct ManualSearchDialog::Impl {
                 if (!PostMessageW(hwndCopy, kMsgCandidatesReady, generation,
                                   reinterpret_cast<LPARAM>(payload)))
                     delete payload;
-            });
+            }, targetIsQishui);
     }
 
     void handleCandidatesReady(const std::vector<SearchCandidate>& result) {
         candidates.clear();
         for (const auto& candidate : result) {
-            if (targetIsNetease ? candidate.source == LyricSource::Yrc
+            if (targetIsQishui ? candidate.source == LyricSource::Qishui
+                : targetIsNetease ? candidate.source == LyricSource::Yrc
                                 : (candidate.source == LyricSource::Krc ||
                                    candidate.source == LyricSource::Qrc ||
                                    candidate.source == LyricSource::Lrc))
@@ -1479,8 +1484,11 @@ struct ManualSearchDialog::Impl {
         int qrcCount = 0;
         int krcCount = 0;
         int lrcCount = 0;
+        int qishuiCount = 0;
         for (const auto& candidate : candidates) {
-            if (candidate.source == LyricSource::Yrc)
+            if (candidate.source == LyricSource::Qishui)
+                ++qishuiCount;
+            else if (candidate.source == LyricSource::Yrc)
                 ++yrcCount;
             else if (candidate.source == LyricSource::Qrc)
                 ++qrcCount;
@@ -1498,6 +1506,12 @@ struct ManualSearchDialog::Impl {
             candidateItems.push_back(
                 {candidate.name + L" - " + candidate.singer, index, false});
         };
+        if (qishuiCount > 0) {
+            addHeader(L"汽水音乐原生歌词（逐字／LRC）");
+            for (int i = 0; i < static_cast<int>(candidates.size()); ++i)
+                if (candidates[i].source == LyricSource::Qishui)
+                    addCandidate(i);
+        }
         if (yrcCount > 0) {
             addHeader(L"网易云歌词（YRC/LRC）");
             for (int i = 0; i < static_cast<int>(candidates.size()); ++i)
@@ -1526,7 +1540,9 @@ struct ManualSearchDialog::Impl {
         if (candidates.empty()) {
             statusText = L"未找到相关歌曲，请尝试更换关键词。";
         } else {
-            statusText = targetIsNetease
+            statusText = targetIsQishui
+                ? L"找到 " + std::to_wstring(qishuiCount) + L" 条汽水音乐候选，点击选择以预览歌词。"
+                : targetIsNetease
                 ? L"找到 " + std::to_wstring(yrcCount) + L" 条网易云（YRC/LRC）候选，点击选择以预览歌词。"
                 : L"找到 " + std::to_wstring(krcCount) + L" 条酷狗逐字（KRC）、 " +
                          std::to_wstring(qrcCount) + L" 条 QQ 逐字（QRC）、 " +
@@ -1562,7 +1578,7 @@ struct ManualSearchDialog::Impl {
                 if (!PostMessageW(hwndCopy, kMsgPreviewLyricReady, generation,
                                   reinterpret_cast<LPARAM>(payload)))
                     delete payload;
-            });
+            }, targetDurationMs);
     }
 
     void handlePreviewLyricReady(int index, bool ok, const std::vector<LyricLine>& lines,
@@ -1598,7 +1614,7 @@ struct ManualSearchDialog::Impl {
             info.neteaseSongId = targetNeteaseSongId;
         if (provider) {
             provider->setManualOverride(targetTitle, targetArtist, targetDurationMs,
-                                         std::vector<LyricLine>(previewLines), info);
+                                         std::vector<LyricLine>(previewLines), info, targetIsQishui);
         }
         if (onApply)
             onApply(LyricResult{true, previewLines, std::move(info), false, true});
@@ -1949,7 +1965,7 @@ bool ManualSearchDialog::create(HINSTANCE inst, HWND parent, LyricProvider* prov
                                 const std::wstring& targetTitle,
                                 const std::wstring& targetArtist,
                                 int64_t targetDurationMs, bool targetIsNetease,
-                                const std::wstring& targetNeteaseSongId) {
+                                const std::wstring& targetNeteaseSongId, bool targetIsQishui) {
     impl_->notifyHwnd = parent; // 仅用于关闭通知
     impl_->provider = provider;
     impl_->targetTitle = targetTitle;
@@ -1957,6 +1973,7 @@ bool ManualSearchDialog::create(HINSTANCE inst, HWND parent, LyricProvider* prov
     impl_->targetDurationMs = targetDurationMs;
     impl_->targetNeteaseSongId = targetNeteaseSongId;
     impl_->targetIsNetease = targetIsNetease;
+    impl_->targetIsQishui = targetIsQishui;
 
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
@@ -2043,10 +2060,11 @@ void ManualSearchDialog::setPlaybackPosition(int64_t positionMs) {
 
 void ManualSearchDialog::setTargetSong(const std::wstring& title, const std::wstring& artist,
                                       int64_t durationMs, bool isNetease,
-                                      const std::wstring& neteaseSongId) {
+                                      const std::wstring& neteaseSongId, bool isQishui) {
     const bool changed = title != impl_->targetTitle || artist != impl_->targetArtist ||
                          neteaseSongId != impl_->targetNeteaseSongId ||
-                         isNetease != impl_->targetIsNetease;
+                         isNetease != impl_->targetIsNetease ||
+                         isQishui != impl_->targetIsQishui;
     impl_->targetDurationMs = durationMs;
     if (!changed)
         return;
@@ -2054,6 +2072,7 @@ void ManualSearchDialog::setTargetSong(const std::wstring& title, const std::wst
     impl_->targetArtist = artist;
     impl_->targetNeteaseSongId = neteaseSongId;
     impl_->targetIsNetease = isNetease;
+    impl_->targetIsQishui = isQishui;
     ++impl_->searchGeneration;
     ++impl_->previewGeneration;
     impl_->candidateItems.clear();

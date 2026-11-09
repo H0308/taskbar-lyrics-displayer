@@ -172,7 +172,8 @@ void App::onSmtcChanged() {
         manualSearchDialog->setTargetSong(
             snap.title, snap.artist, snap.timelineStale ? 0 : snap.durationMs,
             snap.player == SmtcPlayerType::NetEase,
-            snap.player == SmtcPlayerType::NetEase ? snap.neteaseSongId : L"");
+            snap.player == SmtcPlayerType::NetEase ? snap.neteaseSongId : L"",
+            snap.player == SmtcPlayerType::Qishui);
         manualSearchTrackKey = key;
     }
     const TrackChange change =

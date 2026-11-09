@@ -1034,7 +1034,12 @@ struct SongToast::Impl {
             } else if (wp == kEnterTimer) {
                 KillTimer(hwnd, kEnterTimer);
                 entering = false;
-                updateScrollTimer();
+                // 入场期间 setMedia 只标记失效；结束后必须补交最新内容，
+                // 不能依赖文字溢出才会启动的滚动定时器刷新迟到封面。
+                if (visible && !closing && (coverDirty || sourceIconDirty || textDirty))
+                    render();
+                else
+                    updateScrollTimer();
             } else if (wp == kAutoHideTimer) {
                 KillTimer(hwnd, kAutoHideTimer);
                 hideAnimated();

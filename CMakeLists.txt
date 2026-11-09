@@ -109,6 +109,7 @@ add_executable(QQMusicLyric
     src/media/smtc/smtc_common.cpp
     src/media/smtc/qq_music_smtc_adapter.cpp
     src/media/smtc/netease_smtc_adapter.cpp
+    src/media/smtc/soda_music_smtc_adapter.cpp
     src/media/audio_spectrum.cpp
     src/media/app_volume.cpp
     src/monitor/resource_monitor.cpp

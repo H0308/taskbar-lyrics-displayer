@@ -2,6 +2,7 @@
 
 #include "media/smtc/netease_smtc_adapter.h"
 #include "media/smtc/qq_music_smtc_adapter.h"
+#include "media/smtc/soda_music_smtc_adapter.h"
 #include "media/smtc/smtc_common.h"
 #include "logging/runtime_logger.h"
 
@@ -56,6 +57,8 @@ bool playerProcessAlive(SmtcPlayerType player) {
         return processAlive(L"QQMusic.exe");
     case SmtcPlayerType::NetEase:
         return processAlive(L"cloudmusic.exe");
+    case SmtcPlayerType::Qishui:
+        return processAlive(L"SodaMusic.exe");
     default:
         return false;
     }
@@ -67,6 +70,8 @@ const wchar_t* playerName(SmtcPlayerType player) noexcept {
         return L"QQMusic";
     case SmtcPlayerType::NetEase:
         return L"NetEase";
+    case SmtcPlayerType::Qishui:
+        return L"Soda Music";
     default:
         return L"Unknown";
     }
@@ -127,6 +132,7 @@ struct SmtcMonitor::Impl {
         bool stopping = false;
         bool requested = false;
         bool rebuildWatchers = false;
+        bool mediaPropertiesChanged = false;
     };
 
     struct ThumbnailRequest {
@@ -156,6 +162,7 @@ struct SmtcMonitor::Impl {
     GlobalSystemMediaTransportControlsSessionManager::CurrentSessionChanged_revoker
         currentSessionRevoker;
     Session::TimelinePropertiesChanged_revoker timelineRevoker;
+    Session::MediaPropertiesChanged_revoker selectedPropsRevoker;
 
     // 所有媒体会话都保留轻量监听，避免只监听当前选中会话导致切换丢失。
     std::vector<SessionWatcher> sessionWatchers;
@@ -189,6 +196,7 @@ struct SmtcMonitor::Impl {
     Impl() {
         adapters.emplace_back(std::make_unique<smtc::QqMusicSmtcAdapter>());
         adapters.emplace_back(std::make_unique<smtc::NeteaseSmtcAdapter>());
+        adapters.emplace_back(std::make_unique<smtc::SodaMusicSmtcAdapter>());
     }
 
     ~Impl() {
@@ -200,6 +208,7 @@ struct SmtcMonitor::Impl {
         if (pollThread.joinable())
             pollThread.join();
         timelineRevoker.revoke();
+        selectedPropsRevoker.revoke();
         currentSessionRevoker.revoke();
         sessionsRevoker.revoke();
         sessionWatchers.clear();
@@ -214,13 +223,15 @@ struct SmtcMonitor::Impl {
     }
 
     static void requestRefresh(const std::shared_ptr<RefreshSignal>& signal,
-                               bool rebuildWatchers = false) {
+                               bool rebuildWatchers = false,
+                               bool mediaPropertiesChanged = false) {
         {
             std::lock_guard<std::mutex> lk(signal->mtx);
             if (signal->stopping)
                 return;
             signal->requested = true;
             signal->rebuildWatchers = signal->rebuildWatchers || rebuildWatchers;
+            signal->mediaPropertiesChanged = signal->mediaPropertiesChanged || mediaPropertiesChanged;
         }
         signal->cv.notify_one();
     }
@@ -498,7 +509,7 @@ struct SmtcMonitor::Impl {
         }
     }
 
-    void refreshAll() {
+    void refreshAll(bool mediaPropertiesChanged) {
         Session currentSession{ nullptr };
         SmtcSnapshot previous;
         {
@@ -612,7 +623,9 @@ struct SmtcMonitor::Impl {
         {
             std::lock_guard<std::mutex> lk(mtx);
             const std::wstring key = thumbnailKey(next);
-            if (key != thumbCacheKey_) {
+            // 歌名可能先更新，封面稍后通过同曲目的属性事件补齐。
+            // 属性更新也必须开启新读取代次，不能因已缓存图片而永久跳过。
+            if (key != thumbCacheKey_ || mediaPropertiesChanged) {
                 thumbCacheKey_ = key;
                 thumbCache_.reset();
                 ++thumbnailGeneration;
@@ -682,6 +695,11 @@ struct SmtcMonitor::Impl {
             // 旧会话刚结束时撤销事件也可能返回 HRESULT；旧会话已经失效，
             // 不能让异常穿过 SMTC 事件回调。
         }
+        try {
+            selectedPropsRevoker.revoke();
+        } catch (...) {
+            // 媒体属性监听与时间线监听分别释放，避免单次撤销失败保留旧监听。
+        }
         {
             std::lock_guard<std::mutex> lk(mtx);
             session = selected;
@@ -710,6 +728,12 @@ struct SmtcMonitor::Impl {
         } catch (...) {
             // 会话可能在绑定监听前已经被播放器撤销；下一次系统事件或后台健康检查
             // 会重新尝试绑定。
+        }
+        try {
+            selectedPropsRevoker = selected.MediaPropertiesChanged(winrt::auto_revoke,
+                [signal = refreshSignal](auto&&, auto&&) { requestRefresh(signal, false, true); });
+        } catch (...) {
+            // 会话可能在绑定监听前已被撤销，属性读取仍由刷新线程完成。
         }
     }
 
@@ -901,6 +925,7 @@ struct SmtcMonitor::Impl {
             }
             for (;;) {
                 bool rebuildWatchers = false;
+                bool mediaPropertiesChanged = false;
                 {
                     std::unique_lock<std::mutex> lk(refreshSignal->mtx);
                     refreshSignal->cv.wait_for(lk, std::chrono::milliseconds(100), [this] {
@@ -909,12 +934,14 @@ struct SmtcMonitor::Impl {
                     if (refreshSignal->stopping)
                         break;
                     rebuildWatchers = refreshSignal->rebuildWatchers;
+                    mediaPropertiesChanged = refreshSignal->mediaPropertiesChanged;
                     refreshSignal->requested = false;
                     refreshSignal->rebuildWatchers = false;
+                    refreshSignal->mediaPropertiesChanged = false;
                 }
                 try {
                     updateSession(rebuildWatchers);
-                    refreshAll();
+                    refreshAll(mediaPropertiesChanged);
                 } catch (...) {
                 }
             }

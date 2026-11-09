@@ -53,6 +53,8 @@ std::vector<std::wstring> sourceProcessCandidates(const std::wstring& source) {
 
     if (_wcsicmp(source.c_str(), L"NeteaseBridge.exe") == 0)
         return {L"cloudmusic.exe", L"NeteaseBridge.exe"};
+    if (source == L"汽水音乐")
+        return {L"SodaMusic.exe"};
 
     const size_t slash = source.find_last_of(L"\\/");
     if (slash != std::wstring::npos && slash + 1 < source.size())

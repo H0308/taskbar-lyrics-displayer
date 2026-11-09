@@ -187,7 +187,8 @@ void App::showManualSearch(HINSTANCE inst) {
     if (!manualSearchDialog->create(
             inst, trayHwnd, &playback_.lyricProvider(), playback_.state().currentTitle,
             playback_.state().currentArtist, playback_.state().currentDurationMs,
-            manualTarget.player == SmtcPlayerType::NetEase, targetNeteaseSongId)) {
+            manualTarget.player == SmtcPlayerType::NetEase, targetNeteaseSongId,
+            manualTarget.player == SmtcPlayerType::Qishui)) {
         manualSearchDialog.reset();
         return;
     }

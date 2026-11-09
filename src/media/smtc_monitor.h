@@ -8,7 +8,7 @@
 
 enum class PlaybackStatus { Stopped, Playing, Paused, Other };
 
-enum class SmtcPlayerType { Unknown, QQMusic, NetEase };
+enum class SmtcPlayerType { Unknown, QQMusic, NetEase, Qishui };
 
 // SMTC 统一快照：锚点进度 + 本机时间，渲染侧据此插值
 struct SmtcSnapshot {
@@ -24,17 +24,17 @@ struct SmtcSnapshot {
     int64_t anchorUtcMs = 0;  // 锚点对应的本机系统时间
     // QQ 切歌窗口内时间线仍是旧歌残留：durationMs/positionMs 不可信，
     // 此时不应按它们发起歌词请求（时长过滤会把正确候选全部淘汰）。
-    // 仅 QQ 适配器会置位；网易云路径恒为 false。
+    // 仅 QQ 适配器会置位；网易云和汽水路径恒为 false。
     bool timelineStale = false;
     PlaybackStatus status = PlaybackStatus::Stopped;
-    bool sessionAlive = false; // 当前是否存在可消费的 QQ/网易云会话
+    bool sessionAlive = false; // 当前是否存在可消费的已适配播放器会话
     std::shared_ptr<const std::vector<uint8_t>> thumbnail; // 专辑封面图片字节（共享避免快照拷贝）
     bool canPrev = false;
     bool canPlayPause = false;
     bool canNext = false;
 };
 
-// 监听 Windows 系统媒体会话：保留 QQMusic.exe，并识别 Genres 中带 NCM-{ID} 的网易云增强会话。
+// 监听 QQ、汽水的系统媒体会话及 Genres 中带 NCM-{ID} 的网易云增强会话。
 class SmtcMonitor {
 public:
     using ChangeCallback = std::function<void()>; // 快照变化后触发（后台刷新/封面线程）
