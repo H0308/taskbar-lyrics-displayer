@@ -1,0 +1,36 @@
+name: 功能建议
+description: 描述希望解决的使用问题和期望增加的功能。
+title: "[建议] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先查看已有反馈，相同建议请在原 Issue 中补充。不同建议请分别提交。
+        请在标题中简要说明建议。反馈内容公开可见，截图请先遮挡个人信息。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 想解决的使用问题
+      description: 在什么使用场景下，遇到了什么不便？
+      placeholder: 我在……时，需要……，但目前……。
+    validations:
+      required: true
+  - type: textarea
+    id: current-workflow
+    attributes:
+      label: 目前如何操作
+      description: 现在是怎样完成这件事的？如果无法完成，请直接说明。
+    validations:
+      required: true
+  - type: textarea
+    id: desired-behavior
+    attributes:
+      label: 希望增加的功能或行为
+      description: 请描述希望如何操作，以及软件应当如何响应。
+    validations:
+      required: true
+  - type: textarea
+    id: examples
+    attributes:
+      label: 补充示例或参考图片
+      description: 可补充具体使用示例、参考链接或图片；没有可留空。

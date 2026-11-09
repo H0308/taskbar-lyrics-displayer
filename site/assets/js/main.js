@@ -3,16 +3,6 @@ const themeToggle = document.getElementById('themeToggle');
 const root = document.documentElement;
 const systemLight = matchMedia('(prefers-color-scheme: light)');
 
-// Utterances 评论框主题与站点主题联动
-function syncUtterancesTheme() {
-  const frame = document.querySelector('.utterances-frame');
-  if (!frame) return;
-  frame.contentWindow.postMessage(
-    { type: 'set-theme', theme: root.dataset.theme === 'light' ? 'github-light' : 'github-dark' },
-    'https://utteranc.es'
-  );
-}
-
 const themeLabels = { system: '跟随系统', light: '浅色', dark: '深色' };
 const themeOrder = ['system', 'light', 'dark'];
 
@@ -23,7 +13,6 @@ function applyThemeMode(mode) {
   if (mode === 'system') localStorage.removeItem('theme');
   else localStorage.setItem('theme', mode);
   themeToggle.title = themeToggle.ariaLabel = `主题：${themeLabels[mode]}（点击切换）`;
-  syncUtterancesTheme();
 }
 
 themeToggle.addEventListener('click', () => {
@@ -35,40 +24,9 @@ themeToggle.addEventListener('click', () => {
 systemLight.addEventListener('change', () => {
   if (root.dataset.themeMode === 'system')
     root.dataset.theme = systemLight.matches ? 'light' : 'dark';
-  syncUtterancesTheme();
 });
 
 applyThemeMode(root.dataset.themeMode || 'system');
-
-// 意见反馈页：按当前主题加载 Utterances
-const utterancesBox = document.getElementById('utterancesBox');
-if (utterancesBox) {
-  const s = document.createElement('script');
-  s.src = 'https://utteranc.es/client.js';
-  s.setAttribute('repo', 'H0308/taskbar-lyrics-displayer');
-  s.setAttribute('issue-term', '官网反馈与建议');
-  s.setAttribute('theme', root.dataset.theme === 'light' ? 'github-light' : 'github-dark');
-  s.setAttribute('crossorigin', 'anonymous');
-  s.async = true;
-  utterancesBox.appendChild(s);
-
-  // iframe 出现即视为加载成功：清掉加载提示并套用卡片样式
-  const loadCheck = setInterval(() => {
-    if (!utterancesBox.querySelector('.utterances-frame')) return;
-    clearInterval(loadCheck);
-    utterancesBox.querySelector('.feedback-loading')?.remove();
-    utterancesBox.classList.add('loaded');
-  }, 400);
-
-  // 超时未加载（本地预览 / 未安装 Utterances App / 网络问题）时给出兜底指引
-  setTimeout(() => {
-    clearInterval(loadCheck);
-    if (utterancesBox.classList.contains('loaded')) return;
-    utterancesBox.innerHTML =
-      '<p class="feedback-fallback">评论组件加载失败，可能是网络问题或组件服务暂时不可用。' +
-      '可以直接前往 <a href="https://github.com/H0308/taskbar-lyrics-displayer/issues" target="_blank" rel="noopener">GitHub Issues</a> 提交反馈。</p>';
-  }, 6000);
-}
 
 // 移动端导航：汉堡按钮开合下拉面板，点链接/点外部自动收起
 const navBurger = document.getElementById('navBurger');

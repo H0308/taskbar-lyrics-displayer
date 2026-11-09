@@ -1,0 +1,83 @@
+name: 问题反馈
+description: 报告任务栏歌词的异常，并提供排查所需的信息。
+title: "[问题] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先查看已有反馈，同一个问题请在原 Issue 中补充信息。不同问题请分别提交。
+        请在标题中简要说明问题，例如「暂停后歌词仍继续滚动」。反馈内容公开可见，截图和日志请先遮挡个人信息。
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题概述
+      description: 在什么情况下出现了什么问题？
+      placeholder: 例如：在播放器中暂停歌曲后，任务栏歌词仍继续向下滚动。
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: 任务栏歌词版本
+      description: 请填写具体版本号，不要只写「最新版」。
+      placeholder: 请填写当前使用的完整版本号。
+    validations:
+      required: true
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows 版本及系统版本号
+      description: 按 Win + R，输入 winver 后查看。
+      placeholder: 例如：Windows 11 24H2，操作系统版本 26100.x。
+    validations:
+      required: true
+  - type: input
+    id: player-version
+    attributes:
+      label: 音乐播放器及版本
+      description: 请填写播放器名称和具体版本；与播放器无关的问题可填「不涉及」。
+      placeholder: QQ 音乐或网易云音乐，以及完整版本号。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 按操作顺序说明。偶发问题尚无法稳定复现时，请明确说明，并描述发生前的操作。
+      placeholder: |
+        1. 打开……
+        2. 执行……
+        3. 出现……
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际表现及出现频率
+      description: 具体发生了什么？每次、偶尔，还是仅出现一次？重启后是否仍然存在？
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期表现
+      description: 你希望软件如何表现？
+    validations:
+      required: true
+  - type: textarea
+    id: display-settings
+    attributes:
+      label: 相关显示环境与设置
+      description: 显示、布局或任务栏相关问题请补充；其他问题可留空。
+      placeholder: |
+        显示器数量、问题所在屏幕及缩放比例：
+        任务栏方向、是否自动隐藏：
+        任务栏美化或修改工具名称（未使用请填「无」）：
+        与问题有关的任务栏歌词设置：
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 截图、录屏、日志或歌曲信息
+      description: |
+        可粘贴图片或拖入附件。显示问题请尽量提供包含完整任务栏的截图。
+        歌词问题请补充歌曲名称、歌手及出问题的播放时间点。提交前请遮挡个人信息。

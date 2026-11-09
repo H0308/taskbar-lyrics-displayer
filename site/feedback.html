@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>意见反馈 — QQ 音乐 / 网易云任务栏歌词</title>
-  <meta name="description" content="在这里反馈 QQ 音乐 / 网易云任务栏歌词的问题与建议，内容自动同步到 GitHub Issues。">
+  <meta name="description" content="通过 GitHub 表单反馈 QQ 音乐 / 网易云任务栏歌词的问题与建议，每条反馈独立跟进。">
   <link rel="icon" type="image/png" href="assets/img/logo.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -65,9 +65,14 @@
     <section class="feedback-page">
       <div class="container container-narrow">
         <h1 class="feedback-title">意见反馈</h1>
-        <p class="feedback-sub">想法、建议或遇到的问题，直接写在下面即可，会自动同步到 GitHub Issues（需登录 GitHub 账号）。</p>
-        <p class="feedback-alt">也可以直接到 <a href="https://github.com/H0308/taskbar-lyrics-displayer/issues" target="_blank" rel="noopener">GitHub Issues</a> 或 <a href="https://gitee.com/EPSDA/taskbar-lyrics-displayer/issues" target="_blank" rel="noopener">Gitee Issues</a> 提交。</p>
-        <div class="feedback-box" id="utterancesBox"><p class="feedback-loading">评论组件加载中…</p></div>
+        <p class="feedback-sub">遇到问题或有功能建议？请选择对应表单，填写后会创建一条独立的 GitHub Issue，方便查看回复和处理进展。</p>
+        <div class="feedback-actions" aria-label="反馈入口">
+          <a class="btn btn-primary" href="https://github.com/H0308/taskbar-lyrics-displayer/issues/new?template=bug_report.yml" target="_blank" rel="noopener">报告问题</a>
+          <a class="btn btn-ghost" href="https://github.com/H0308/taskbar-lyrics-displayer/issues/new?template=feature_request.yml" target="_blank" rel="noopener">功能建议</a>
+          <a class="btn btn-ghost" href="https://github.com/H0308/taskbar-lyrics-displayer/issues" target="_blank" rel="noopener">查看已有反馈</a>
+        </div>
+        <p class="feedback-alt">提交需要登录 GitHub 账号。请先查看已有反馈，相同问题可在原 Issue 中补充，不同问题请分别提交。</p>
+        <p class="feedback-alt">报告问题时，请准备软件版本、Windows 版本、播放器版本及复现步骤；显示问题请尽量附上完整任务栏截图，提交前注意遮挡个人信息。也可以前往 <a href="https://gitee.com/EPSDA/taskbar-lyrics-displayer/issues" target="_blank" rel="noopener">Gitee Issues</a> 提交。</p>
       </div>
     </section>
   </main>
