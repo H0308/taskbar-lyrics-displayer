@@ -311,6 +311,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const auto lifetime = shared_from_this();
         if (appearance_ && *appearance_ == value)
             return;
+        coverTip_.hide();
         const UpdateScope update(*this);
         applyTextAppearance(value);
         applyPopupAppearance(value);
@@ -492,6 +493,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     // 交互
     std::function<void()> tick;
     std::function<void(MediaControl)> onControl;
+    std::function<void(const std::wstring&)> onSourceOpen;
+    TaskbarCoverTip coverTip_;
+    std::wstring pressedCoverSource_;
     std::function<void()> onImmersiveExit;
     std::function<void(POINT)> onContextMenu;
     std::function<void(POINT)> onImmersiveMenu;
@@ -2478,6 +2482,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
              frame.trackKey != trackKey_))
             return;
 
+        if (frame.scene != scene_ || frame.media.sourceAppUserModelId != media.sourceAppUserModelId)
+            coverTip_.hide();
         const UpdateScope update(*this);
         const bool trackChanged = frame.trackKey != trackKey_;
         playbackAnchor_ = {frame.frameRevision, frame.requestGeneration, frame.actualPositionMs,
@@ -3446,6 +3452,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         stopProbe();
         dockBackdrop_.reset();
         hwnd = nullptr;
+        coverTip_.reset();
+        pressedCoverSource_.clear();
         resetImmersivePresence();
         attachment_.reset();
         // Explorer 强制退出时旧窗口可能没有走 WM_DESTROY，Shell 侧与本地的
@@ -4111,6 +4119,30 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
     float coverSlotWidth(float heightDip) const {
         return albumCoverVisible_ ? heightDip - kCoverPadding : 0.0f;
+    }
+
+    bool hitAlbumCover(float clientX, float clientY, RECT* bounds = nullptr) const {
+        if (!albumCoverVisible_ || !isSessionVisible() || isStoppedMode() || !onSourceOpen ||
+            media.sourceAppUserModelId.empty() || scene_ == DisplayScene::Idle ||
+            scene_ == DisplayScene::NoPlayback || drag_.dragging())
+            return false;
+        float x = kCoverPadding;
+        float y = kCoverPadding;
+        float size = coverSize();
+        if (isVerticalTaskbar()) {
+            const auto layout = verticalLayout();
+            x = layout.coverX;
+            y = layout.coverY;
+            size = layout.coverSize;
+        }
+        const RECT rect{static_cast<LONG>(std::ceil(x * scale())),
+                        static_cast<LONG>(std::ceil(y * scale())),
+                        static_cast<LONG>(std::floor((x + size) * scale())),
+                        static_cast<LONG>(std::floor((y + size) * scale()))};
+        if (bounds)
+            *bounds = rect;
+        return size > 0.0f && clientX >= rect.left && clientX < rect.right &&
+               clientY >= rect.top && clientY < rect.bottom;
     }
 
     float infoStartX() const {
@@ -7098,6 +7130,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             requestFrameAndFlush();
             return 0;
         case WM_SIZE:
+            coverTip_.hide();
             if (wp != SIZE_MINIMIZED) {
                 // SetWindowPos/Explorer/AppBar 都可能直接改变客户区；显式唤醒一帧，
                 // 避免 DXGI_SCALING_STRETCH 暂时拉伸旧帧直到下一句歌词出现。
@@ -7105,7 +7138,12 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 requestFrame();
             }
             return DefWindowProcW(hwnd, msg, wp, lp);
+        case WM_SHOWWINDOW:
+            if (!wp)
+                coverTip_.hide();
+            return DefWindowProcW(hwnd, msg, wp, lp);
         case WM_DPICHANGED:
+            coverTip_.hide();
             if (isAppBarView() && appBar_.registered()) {
                 dpi_ = HIWORD(wp) ? HIWORD(wp) : LOWORD(wp);
                 renderer.setDpi(dpi_);
@@ -7144,8 +7182,24 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 SetCursor(LoadCursorW(nullptr, IDC_SIZEALL));
                 return TRUE;
             }
+            if (LOWORD(lp) == HTCLIENT) {
+                POINT point{};
+                GetCursorPos(&point);
+                ScreenToClient(hwnd, &point);
+                if (hitAlbumCover(static_cast<float>(point.x), static_cast<float>(point.y))) {
+                    SetCursor(LoadCursorW(nullptr, IDC_HAND));
+                    return TRUE;
+                }
+            }
             return DefWindowProcW(hwnd, msg, wp, lp);
         case WM_MOUSEMOVE: {
+            RECT coverBounds{};
+            if (!drag_.pressed() && pressedCoverSource_.empty() &&
+                hitAlbumCover(static_cast<float>(GET_X_LPARAM(lp)),
+                              static_cast<float>(GET_Y_LPARAM(lp)), &coverBounds))
+                coverTip_.mouseMove(hwnd, coverBounds, wp, lp);
+            else
+                coverTip_.hide();
             POINT cursor{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
             ClientToScreen(hwnd, &cursor);
             if (drag_.pressed()) {
@@ -7198,6 +7252,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return 0;
         }
         case WM_MOUSELEAVE:
+            coverTip_.hide();
             if (drag_.pressed() || drag_.dragging())
                 return 0;
             cancelImmersiveYield();
@@ -7244,12 +7299,17 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return 0;
         }
         case WM_LBUTTONDOWN: {
+            coverTip_.hide();
+            pressedCoverSource_ =
+                hitAlbumCover(static_cast<float>(GET_X_LPARAM(lp)),
+                              static_cast<float>(GET_Y_LPARAM(lp)))
+                    ? media.sourceAppUserModelId : std::wstring{};
             // 点击与拖动从同一次按下并行识别：未越过系统拖动阈值仍按原按钮/卡片
             // 点击处理，越过阈值后才取消点击并进入位置拖拽。
             if (isExpandedView()) {
                 immersiveControlPressed_ = hitImmersiveControl(
                     static_cast<float>(GET_X_LPARAM(lp)), static_cast<float>(GET_Y_LPARAM(lp)));
-                if (immersiveControlPressed_ >= 0) {
+                if (immersiveControlPressed_ >= 0 || !pressedCoverSource_.empty()) {
                     if (viewMode_ == TaskbarViewMode::Immersive)
                         cancelImmersiveHide();
                     SetCapture(hwnd);
@@ -7266,6 +7326,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return 0;
         }
         case WM_LBUTTONUP: {
+            const auto pressedSource = std::exchange(pressedCoverSource_, std::wstring{});
             if (isExpandedView()) {
                 const int pressed = immersiveControlPressed_;
                 const int released = hitImmersiveControl(static_cast<float>(GET_X_LPARAM(lp)),
@@ -7275,7 +7336,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                     ReleaseCapture();
                 // 沉浸层可能在一次任务栏点击的按下与松开之间出现。只有本窗口
                 // 确实收到同一控件的按下事件，才把随后到达的松开解释为点击。
-                if (pressed >= 0 && pressed == released)
+                if (!pressedSource.empty() && pressedSource == media.sourceAppUserModelId &&
+                    hitAlbumCover(static_cast<float>(GET_X_LPARAM(lp)),
+                                  static_cast<float>(GET_Y_LPARAM(lp))))
+                    onSourceOpen(pressedSource);
+                else if (pressed >= 0 && pressed == released)
                     activateImmersiveControl(pressed);
                 requestFrameAndFlush();
                 return 0;
@@ -7297,6 +7362,14 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             }
             float mx = static_cast<float>(GET_X_LPARAM(lp));
             float my = static_cast<float>(GET_Y_LPARAM(lp));
+            if (!pressedSource.empty()) {
+                if (hadPress && pressedSource == media.sourceAppUserModelId && hitAlbumCover(mx, my))
+                    onSourceOpen(pressedSource);
+                return 0;
+            }
+            // 从封面外按下再移入，不把松开误认为封面点击或卡片点击。
+            if (hitAlbumCover(mx, my))
+                return 0;
             int btn = hitButton(mx, my);
             if (btn >= 0 && onControl)
                 onControl(static_cast<MediaControl>(btn));
@@ -7307,14 +7380,18 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return 0;
         }
         case WM_CAPTURECHANGED:
+            pressedCoverSource_.clear();
             immersiveControlPressed_ = -1;
             if (drag_.pressed() || drag_.dragging())
                 finishLyricDrag(false);
             return 0;
         case WM_CANCELMODE: {
+            coverTip_.hide();
+            const bool hadCoverPress = !pressedCoverSource_.empty();
+            pressedCoverSource_.clear();
             const bool hadImmersivePress = immersiveControlPressed_ >= 0;
             immersiveControlPressed_ = -1;
-            if (hadImmersivePress && GetCapture() == hwnd)
+            if ((hadImmersivePress || hadCoverPress) && GetCapture() == hwnd)
                 ReleaseCapture();
             if (drag_.pressed() || drag_.dragging())
                 finishLyricDrag(false);
@@ -7374,6 +7451,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 onClose_();
             return 0;
         case WM_DESTROY:
+            coverTip_.reset();
+            pressedCoverSource_.clear();
             runtime_log::writef(L"[taskbar] WM_DESTROY (visible=%d)", isWindowVisible() ? 1 : 0);
             resetImmersivePresence();
             dockBackdrop_.reset();
@@ -7569,6 +7648,7 @@ void TaskbarHost::setAppVolumeCallback(std::function<void(AppVolumeRequest)> cb)
 void TaskbarHost::setSourceOpenCallback(std::function<void(const std::wstring&)> cb) {
     cb = callbacks_->callback(std::move(cb));
     thread_->invoke([=, this]() mutable {
+        impl_->onSourceOpen = cb;
         impl_->mediaPopup.setSourceOpenCallback(std::move(cb));
     });
 }

@@ -67,7 +67,9 @@ void SettingsSections::createDisplayRows() {
     Row& songInfo =
         addToggle(0, kIdSongInfo, L"显示歌曲信息", vertical ? false : state.songInfoVisible);
     songInfo.enabled = !vertical;
-    addToggle(0, kIdAlbumCover, L"显示专辑封面", state.albumCoverVisible);
+    Row& albumCover = addRow(0, kIdAlbumCover, ControlKind::Toggle, L"显示专辑封面",
+                             L"点击专辑封面可以打开当前音乐播放器。", 40.0f, kRowTallH);
+    albumCover.checked = state.albumCoverVisible;
     Row& platformIcon = addToggle(0, kIdPlatformIcon, L"显示平台图标", state.platformIconVisible);
     platformIcon.enabled = state.albumCoverVisible;
     addRadio(0, kIdCoverEffect, L"专辑封面效果", nullptr, {L"默认", L"黑胶唱片"},

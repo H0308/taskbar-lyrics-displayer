@@ -3,6 +3,19 @@
 #include <algorithm>
 #include <cmath>
 
+// 原生提示的窗口与消息均属于任务栏 UI 线程。
+class TaskbarCoverTip {
+public:
+    void mouseMove(HWND owner, const RECT& rect, WPARAM keys, LPARAM point);
+    void hide();
+    void reset();
+
+private:
+    HWND hwnd_ = nullptr;
+    RECT rect_{};
+    bool active_ = false;
+};
+
 class TaskbarPresence {
 public:
     enum class Phase { Shown, Hiding, Hidden, Showing };
