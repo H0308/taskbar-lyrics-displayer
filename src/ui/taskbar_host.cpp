@@ -2634,7 +2634,12 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         }
 
         renderState_.setSessionVisible(frame.visible);
-        if (isSessionVisible() && placementStatus_ == TaskbarPlacementStatus::NoSpace)
+        // 无媒体且关闭空闲入口时会停止定位定时器；重新显示时也要恢复
+        // 首次探测和暂不可用状态的处理，否则显示抑制可能一直无法解除。
+        if (isSessionVisible() &&
+            (renderState_.visibilitySuppressed() ||
+             placementStatus_ == TaskbarPlacementStatus::NoSpace ||
+             placementStatus_ == TaskbarPlacementStatus::Unavailable))
             startPlacementTimer();
         else if (!isSessionVisible())
             stopPlacementTimer();

@@ -138,6 +138,7 @@ constexpr int kUpdatePromptAbout = 3;
 enum class TaskbarCreateResult {
     Created,
     NoSpace,
+    Pending, // 系统任务栏尚未就绪，已交给现有重建机制等待恢复。
     Failed,
 };
 

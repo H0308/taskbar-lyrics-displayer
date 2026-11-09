@@ -165,7 +165,7 @@ void App::rebuildTaskbarIfPending() {
     const TaskbarCreateResult result = createTaskbar(GetModuleHandleW(nullptr), allowOverlap);
     if (result == TaskbarCreateResult::Failed)
         scheduleTaskbarDisplayRebuildRetry(allowOverlap);
-    else
+    else if (result != TaskbarCreateResult::Pending)
         cancelTaskbarDisplayRebuildRetry();
     refreshSettingsDialog(true);
 }
@@ -286,6 +286,10 @@ void App::tryRestoreTaskbarAfterNoSpace() {
         // TaskbarCreated 广播重新触发一次恢复探测。
         cancelTaskbarAutoRestore();
         runtime_log::writef(L"[taskbar] auto-restore result=failed");
+    } else if (result == TaskbarCreateResult::Pending) {
+        // 系统任务栏未就绪时改由重建机制接管，不并行运行两套恢复定时器。
+        cancelTaskbarAutoRestore();
+        runtime_log::writef(L"[taskbar] auto-restore result=pending-taskbar");
     }
     // NoSpace 会保留宿主，由 TaskbarHost 的低频避让探测继续等待空间释放。
 }
@@ -372,12 +376,26 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
         return TaskbarCreateResult::Created;
     }
 
+    auto waitForTaskbar = [&] {
+        scheduleTaskbarDisplayRebuildRetry(allowOverlap);
+        updateTrayIcon();
+        runtime_log::writef(L"[taskbar] waiting for system taskbar");
+        return TaskbarCreateResult::Pending;
+    };
     const SmtcSnapshot snap = monitor.snapshot();
     const auto displays = desiredTaskbarDisplays(snap);
-    if (displays.empty()) {
-        runtime_log::writef(L"failed to create taskbar host");
-        return TaskbarCreateResult::Failed;
-    }
+    if (displays.empty())
+        return waitForTaskbar();
+    auto systemTaskbarReady = [&] {
+        if (settings_.taskbarViewMode_ == TaskbarViewMode::AppBar)
+            return true;
+        RECT taskbarRect{};
+        const HWND taskbar = displays.front().taskbarWindow;
+        return taskbar && IsWindow(taskbar) && GetWindowRect(taskbar, &taskbarRect) &&
+               taskbarRect.right > taskbarRect.left && taskbarRect.bottom > taskbarRect.top;
+    };
+    if (!systemTaskbarReady())
+        return waitForTaskbar();
     taskbarAllowOverlap_ = allowOverlap;
     activeTaskbarDisplayIds_.clear();
     for (const auto& display : displays)
@@ -407,6 +425,9 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
     if (!taskbarHost) {
         activeTaskbarDisplayIds_.clear();
         taskbarAllowOverlap_ = false;
+        // 创建跨 UI 线程执行，期间 Explorer 仍可能撤下刚枚举到的任务栏。
+        if (!systemTaskbarReady())
+            return waitForTaskbar();
         return TaskbarCreateResult::Failed;
     }
     for (size_t i = 1; i < displays.size(); ++i) {
@@ -457,7 +478,10 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
     if (placementStatus == TaskbarPlacementStatus::Unavailable) {
         runtime_log::writef(L"[taskbar] placement unavailable after creation");
         destroyTaskbar();
-        return TaskbarCreateResult::Failed;
+        // AppBar 的注册失败属于真正的创建失败，不作为 Explorer 未就绪处理。
+        return settings_.taskbarViewMode_ == TaskbarViewMode::AppBar
+                   ? TaskbarCreateResult::Failed
+                   : waitForTaskbar();
     }
     taskbarAutoClosedForNoSpace_ = false;
     cancelTaskbarAutoRestore();
@@ -554,6 +578,10 @@ void App::toggleTaskbar() {
         } else if (result == TaskbarCreateResult::Failed) {
             taskbarManualOpenPending_ = false;
             runtime_log::writef(L"[action][taskbar] toggle result=failed");
+        } else if (result == TaskbarCreateResult::Pending) {
+            taskbarManualOpenPending_ = false;
+            runtime_log::writef(L"[action][taskbar] toggle result=pending-taskbar");
+            return;
         }
     }
     runtime_log::writef(L"[action][taskbar] toggle result=%s",
@@ -644,6 +672,8 @@ void App::showTaskbarSpacePrompt() {
             runtime_log::writef(L"[action][taskbar] forced-open result=failed");
         else if (createResult == TaskbarCreateResult::NoSpace)
             runtime_log::writef(L"[action][taskbar] forced-open result=no-space");
+        else if (createResult == TaskbarCreateResult::Pending)
+            runtime_log::writef(L"[action][taskbar] forced-open result=pending-taskbar");
         return;
     }
 

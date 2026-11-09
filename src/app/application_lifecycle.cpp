@@ -209,6 +209,8 @@ bool App::initialize(HINSTANCE inst, bool wantTaskbar) {
         }
         if (result == TaskbarCreateResult::NoSpace)
             runtime_log::writef(L"[taskbar] started tray-only reason=no-space");
+        else if (result == TaskbarCreateResult::Pending)
+            runtime_log::writef(L"[taskbar] started tray-only reason=taskbar-not-ready");
     }
 
     monitor.start([this] { PostThreadMessageW(mainThread, kMsgSmtcChanged, 0, 0); });
