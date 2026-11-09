@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>文档中心 — QQ 音乐 / 网易云任务栏歌词</title>
-  <meta name="description" content="QQ 音乐 / 网易云任务栏歌词使用文档：安装、播放器配置、歌词特效、字号建议、小任务栏适配、资源监视分页、展示模式、播放控制与故障排查。">
+  <title>文档中心 — Windows 任务栏歌词</title>
+  <meta name="description" content="Windows 任务栏歌词使用文档：安装、播放器配置、歌词特效、字号建议、小任务栏适配、资源监视分页、展示模式、播放控制与故障排查。">
   <link rel="icon" type="image/png" href="assets/img/logo.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -31,7 +31,7 @@
     <div class="container header-inner">
       <a class="brand" href="index.html">
         <img src="assets/img/logo.png" alt="logo" width="28" height="28">
-        <span>任务栏歌词</span>
+        <span>Windows 任务栏歌词</span>
       </a>
       <nav class="nav" aria-label="网站导航">
         <a href="index.html">首页</a>
@@ -97,8 +97,8 @@
           <p>软件仅提供 64 位 Windows 版本。推荐使用 Windows 11；Windows 10 22H2 的核心功能基本可用，但任务栏防遮挡存在兼容性问题，沉浸模式与 Dock 模式尚未在该版本实机验证。音频频谱要求 Windows 10 2004 或更高版本。</p>
           <ol class="doc-steps">
             <li><strong>下载安装。</strong>从 <a href="https://github.com/H0308/taskbar-lyrics-displayer/releases/latest" target="_blank" rel="noopener">GitHub Releases</a> 或 <a href="https://gitee.com/EPSDA/taskbar-lyrics-displayer/releases" target="_blank" rel="noopener">Gitee Releases</a> 下载安装包。国内网络可优先选择 Gitee。安装后运行 <code>QQMusicLyric.exe</code>。</li>
-            <li><strong>配置播放器。</strong>QQ 音乐需要开启 SMTC；网易云音乐需要安装 BetterNCM 和 InfLink-rs，具体步骤见下一章。</li>
-            <li><strong>播放音乐。</strong>打开已配置的桌面播放器并播放歌曲，封面、歌曲信息和歌词会自动显示在任务栏。两个平台同时运行时，软件会根据当前媒体会话和播放状态自动选择来源。</li>
+            <li><strong>配置播放器。</strong>支持 QQ 音乐、网易云音乐和汽水音乐。QQ 音乐需要开启 SMTC，网易云音乐需要安装 BetterNCM 和 InfLink-rs，汽水音乐使用客户端原生 SMTC，具体说明见下一章。</li>
+            <li><strong>播放音乐。</strong>打开已配置的桌面播放器并播放歌曲，封面、歌曲信息和歌词会自动显示在任务栏。多个播放器同时运行时，软件会根据当前媒体会话和播放状态自动选择来源。</li>
             <li><strong>调整显示。</strong>右键托盘图标进入「设置…」，选择展示模式、字体、歌词颜色和其他功能。需要登录 Windows 后自动运行时，在托盘菜单勾选「开机自启动」，无需管理员权限。</li>
           </ol>
           <div class="doc-callout"><strong>先确认软件仍在运行</strong><p>关闭歌词显示不会退出软件。需要完全退出时，使用托盘菜单中的「退出」；误选「完全停止」性能模式也会隐藏任务栏歌词。</p></div>
@@ -108,6 +108,9 @@
           <h2>配置音乐播放器</h2>
           <h3>QQ 音乐桌面版</h3>
           <p>在 QQ 音乐自身设置中开启「显示系统媒体传输控件（SMTC）」，然后播放歌曲。如果软件已经运行但仍未识别，重启 QQ 音乐和 <code>QQMusicLyric.exe</code> 后重试。已测试 QQ 音乐 2252～2280 版本。</p>
+          <h3>汽水音乐桌面版</h3>
+          <p>打开汽水音乐桌面客户端并播放歌曲，软件通过客户端原生 SMTC 获取歌曲信息、封面、播放状态和进度，无需安装 BetterNCM 或 InfLink-rs。歌词从汽水曲库匹配并获取原生逐字歌词或 LRC；试听歌曲会按片段起点对齐歌词。手动搜索仅提供汽水原生歌词候选，不使用 QQ 音乐本地 QRC 或本地／在线版本选择。</p>
+          <p>已测试汽水音乐 3.7.0，歌词同步、播放控制、应用唤起、频谱与独立音量均正常。</p>
           <h3>网易云音乐桌面版</h3>
           <p>网易云音乐官方 SMTC 信息没有可靠的播放进度，需要 InfLink-rs 补充歌曲 ID 和时间轴。适配可用性受 BetterNCM、InfLink-rs 与网易云客户端版本影响。</p>
           <ol>
@@ -138,7 +141,7 @@
             <div><dt>通用字体</dt><dd>点击「选择字体…」，搜索本机字体，设置字号，并选择常规、加粗、斜体或粗斜体。可实时预览，字号列表提供<a href="#font-size-guide">推荐值与建议最大值标记</a>。字体及样式影响任务栏歌词、每日一言、歌曲信息、沉浸模式时间／日期，以及 Dock 和内嵌模式的资源监视，不影响设置窗口等界面字体；字号主要调整歌词，其他区域使用各自的排版尺寸，矮任务栏下会自动适配。</dd></div>
             <div><dt>显示歌曲信息</dt><dd>控制歌名、歌手等歌曲信息；侧边任务栏的竖向模式下固定关闭。</dd></div>
             <div><dt>显示专辑封面</dt><dd>控制封面是否显示。关闭封面后，平台图标和封面效果也无法设置。</dd></div>
-            <div><dt>显示平台图标</dt><dd>在专辑封面右下角显示 QQ 音乐或网易云音乐图标，便于识别当前播放平台。</dd></div>
+            <div><dt>显示平台图标</dt><dd>在专辑封面右下角显示 QQ 音乐、网易云音乐或汽水音乐图标，便于识别当前播放平台。</dd></div>
             <div><dt>专辑封面效果</dt><dd>可选「默认」或「黑胶唱片」。黑胶封面播放时旋转，暂停时停在当前角度；极简模式下固定为默认效果。</dd></div>
           </dl>
           <h4>菜单交互</h4>
@@ -238,7 +241,7 @@
           <p>媒体卡片、每日一言和快捷启动卡片共用这里的展开方式、背景与文字颜色。卡片在内嵌模式使用；沉浸和 Dock 使用横栏上的固定控件，极简模式不展开卡片。</p>
           <p>需要先保留空闲入口，或在「媒体控件」中开启播放控件并选择「媒体卡片」，相关卡片设置才可用。背景颜色、专辑色跟随和动态文字颜色仅在磨砂玻璃背景下可调。</p>
           <dl class="doc-settings">
-            <div><dt>悬浮卡片展开方式</dt><dd>「悬浮展开」需要鼠标在歌词区域停留片刻；「点击展开」可点击歌词区域任意位置立即打开。极简模式下不可用。</dd></div>
+            <div><dt>悬浮卡片展开方式</dt><dd>「悬浮展开」需要鼠标在歌词区域停留片刻；「点击展开」可点击歌词区域打开卡片，专辑封面与播放控件分别执行各自操作。极简模式下不可用。</dd></div>
             <div><dt>悬浮卡片背景</dt><dd>可选「纯色」或「磨砂玻璃」，三类卡片统一使用。</dd></div>
             <div><dt>悬浮卡片背景颜色</dt><dd>点击颜色值打开取色器。磨砂背景未使用有效专辑色时，三类卡片共用该颜色；仅磨砂玻璃模式可设置。</dd></div>
             <div><dt>磨砂玻璃颜色跟随专辑</dt><dd>播放且成功提取专辑主色时，磨砂卡片使用专辑色；没有播放时回退到自定义背景颜色。</dd></div>
@@ -254,13 +257,14 @@
             <div><dt>控件样式</dt><dd>「内嵌控件」在鼠标悬浮时显示，提供播放操作；「媒体卡片」还显示歌曲进度，其展开方式由「悬浮卡片」页决定。点击卡片中的应用图标或名称可打开播放器。只有显示播放控件且非极简模式时可选择。</dd></div>
           </dl>
           <h4>播放操作与媒体卡片</h4>
+          <p>点击任务栏中当前歌曲的专辑封面，可直接打开对应的音乐应用，无需先展开媒体卡片。封面需要处于显示状态；拖动任务栏歌词不会触发打开操作。媒体卡片顶部的播放器图标或名称也可用于打开播放器。</p>
           <p>内嵌控件和媒体卡片都支持上一首、播放／暂停和下一首。媒体卡片额外显示封面、当前进度和总时长。音量按钮可展开应用音量滑块，支持拖动、滚轮和静音；音量只作用于当前音乐应用，不改变系统主音量。</p>
           <p>沉浸与 Dock 模式使用自身固定的控制区，不需要另行开启这里的播放控件。切歌提示的时长、位置和全屏应用行为可在「切歌弹窗」中设置。</p>
         </section>
 
         <section class="doc-section doc-subsection" id="settings-spectrum">
           <h3 class="doc-section-title">频谱</h3>
-          <p>对应「设置 → 频谱」，控制当前 QQ 音乐或网易云音乐进程的音频频谱。侧边任务栏和极简模式下不可用，低渲染与完全停止模式会暂停捕获。</p>
+          <p>对应「设置 → 频谱」，控制当前音乐播放器进程的音频频谱。侧边任务栏和极简模式下不可用，低渲染与完全停止模式会暂停捕获。</p>
           <h4>开关与配色</h4>
           <dl class="doc-settings">
             <div><dt>频谱</dt><dd>频谱总开关，开启后才能设置配色、样式与特效。</dd></div>
@@ -292,7 +296,7 @@
             <div><dt>背景波浪不透明度</dt><dd>范围为 0～100%，仅在背景波浪实际开启时可调。</dd></div>
           </dl>
           <p>背景波浪不额外增加内嵌窗口宽度；暂停播放后仍保留波浪流动，音频电平则逐渐回落。</p>
-          <p>频谱只捕获当前 QQ 音乐或网易云音乐进程的音频，不受其他软件发声影响。播放器更换输出设备或重启后，软件会重新绑定音频会话。</p>
+          <p>频谱只捕获当前音乐播放器进程的音频，不受其他软件发声影响。播放器更换输出设备或重启后，软件会重新绑定音频会话。</p>
         </section>
 
         <section class="doc-section doc-subsection" id="settings-lyrics">
@@ -318,7 +322,7 @@
             <div><dt>QQ 音乐本地歌词目录</dt><dd>点击「选择文件夹…」指定目录，程序会递归索引其中的歌词文件。只有启用本地歌词后可设置。</dd></div>
           </dl>
           <h4>手动搜索与进度微调</h4>
-          <p>自动匹配错误时，打开托盘菜单的「手动搜索歌词」。歌名和歌手会按当前歌曲自动填充，也可自行修改后搜索 QQ 音乐、网易云音乐或酷狗歌词候选。窗口打开期间切歌会更新目标歌曲，并清空旧候选和预览，需要重新搜索。</p>
+          <p>自动匹配错误时，打开托盘菜单的「手动搜索歌词」。歌名和歌手会按当前歌曲自动填充，也可自行修改后搜索歌词。当前播放源为汽水音乐时，只提供汽水原生歌词候选；其他播放源可搜索 QQ 音乐、网易云音乐或酷狗歌词候选。窗口打开期间切歌会更新目标歌曲，并清空旧候选和预览，需要重新搜索。</p>
           <p>选择候选可预览逐字或逐行歌词；候选包含翻译或罗马音时，可在预览面板中独立切换显示。确认选择后，结果会按平台和歌曲标识保存，下次自动使用。对手动选择的歌词，可每次提前或延迟 0.5 秒，调整结果会持久化。</p>
           <h4>本地歌词的获取顺序</h4>
           <p>手动选词优先于自动匹配。启用本地歌词后，默认先找本地 QRC，未命中再获取在线歌词；有对应文件时合并翻译和罗马音。版本切换入口要求当前为 QQ 音乐、已配置本地目录、歌词已加载且不是手动选词结果。</p>
@@ -435,7 +439,7 @@
 
   <footer class="site-footer">
     <div class="container footer-inner">
-      <p>QQ 音乐 / 网易云任务栏歌词 · Apache-2.0</p>
+      <p>Windows 任务栏歌词 · Apache-2.0</p>
       <p class="footer-links">
         <a href="https://github.com/H0308/taskbar-lyrics-displayer" target="_blank" rel="noopener">GitHub</a>
         <a href="https://gitee.com/EPSDA/taskbar-lyrics-displayer" target="_blank" rel="noopener">Gitee</a>

@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>QQ 音乐 / 网易云任务栏歌词 — 把歌词嵌入 Windows 任务栏</title>
-  <meta name="description" content="把 QQ 音乐和网易云音乐的歌词嵌入 Windows 10/11 任务栏：逐字高亮与歌词特效、播放控制、音频频谱、资源监视、每日一言，支持字号建议与小任务栏自动适配。C++ 原生实现，无 Electron、WebView 和 .NET/WPF 运行时，秉持工具软件应尽可能少占内存的原则。">
-  <meta property="og:title" content="QQ 音乐 / 网易云任务栏歌词">
+  <title>Windows 任务栏歌词 — 把歌词嵌入 Windows 任务栏</title>
+  <meta name="description" content="把 QQ 音乐、网易云音乐和汽水音乐的歌词嵌入 Windows 10/11 任务栏：逐字高亮与歌词特效、播放控制、音频频谱、资源监视、每日一言，支持字号建议与小任务栏自动适配。C++ 原生实现，无 Electron、WebView 和 .NET/WPF 运行时，秉持工具软件应尽可能少占内存的原则。">
+  <meta property="og:title" content="Windows 任务栏歌词">
   <meta property="og:description" content="把歌词嵌入 Windows 任务栏：逐字跟唱、流星粒子拖尾、音频频谱、资源监视与小任务栏自动适配。C++ 原生实现，无 Electron、WebView 和 .NET/WPF 运行时，秉持工具软件应尽可能少占内存的原则。">
   <meta property="og:type" content="website">
   <meta property="og:image" content="assets/img/social-preview.png">
@@ -34,7 +34,7 @@
     <div class="container header-inner">
       <a class="brand" href="#top">
         <img src="assets/img/logo.png" alt="logo" width="28" height="28">
-        <span>任务栏歌词</span>
+        <span>Windows 任务栏歌词</span>
       </a>
       <nav class="nav">
         <a href="#features">功能</a>
@@ -75,7 +75,7 @@
       <div class="container">
         <h1>把歌词嵌入<br><span class="accent">Windows 任务栏</span></h1>
         <p class="hero-sub">
-          QQ 音乐、网易云音乐双平台自动识别，滚动歌词、逐字高亮、播放控制、音频频谱、每日一言<br>
+          支持 QQ 音乐、网易云音乐和汽水音乐，滚动歌词、逐字高亮、播放控制、音频频谱、每日一言<br>
           C++ 原生实现，无 Electron、WebView 和 .NET/WPF 运行时
         </p>
         <div class="hero-actions">
@@ -100,9 +100,9 @@
     <section class="highlights">
       <div class="container highlights-grid">
         <div class="hl reveal"><strong>C++ 原生</strong><span>无 Electron、WebView 和 .NET/WPF 运行时，日常使用占用内存20~80MB</span></div>
-        <div class="hl reveal"><strong>双平台</strong><span>QQ 音乐 / 网易云自动识别切换</span></div>
+        <div class="hl reveal"><strong>多播放器支持</strong><span>QQ 音乐、网易云音乐、汽水音乐，自动识别当前播放来源</span></div>
         <div class="hl reveal"><strong>逐字高亮</strong><span>逐字时间轴按像素进度平滑填充</span></div>
-        <div class="hl reveal"><strong>音频频谱</strong><span>进程级回环捕获，跟随QQ/网易云音乐播放器跳动，不会识别其他媒体软件</span></div>
+        <div class="hl reveal"><strong>音频频谱</strong><span>只捕获当前播放器的音频，不受其他软件发声影响</span></div>
       </div>
     </section>
 
@@ -115,6 +115,7 @@
           <div class="feature-text">
             <h2>任务栏内嵌歌词</h2>
             <p>窗口作为任务栏的子窗口，外观贴近 Windows 11 原生媒体卡片：左侧圆角封面 + 歌名/歌手，右侧当前行歌词，超长自动滚动。支持任务栏上、下、左、右四边布局，左右侧自动切换竖排歌词；双锚定位并自动避开小组件、搜索框与其他任务栏插件。</p>
+            <p>点击任务栏中的专辑封面，即可打开当前歌曲对应的音乐应用，无需先展开媒体卡片。</p>
           </div>
           <figure class="shot" data-shot="feature-lyrics.png">
             <img src="assets/img/feature-lyrics.png" alt="任务栏内嵌歌词：封面、歌曲信息与滚动歌词显示在 Windows 11 任务栏上" width="2172" height="724">
@@ -135,7 +136,7 @@
         <div class="feature-row reveal">
           <div class="feature-text">
             <h2>音频频谱</h2>
-            <p>只跟随当前 QQ 音乐或网易云音乐播放器跳动，不受其他软件发声影响。默认、柱状图、梦幻波浪、分段电平和底缘频谱带五种样式可选，支持跟随歌词色、专辑主题色或自定义颜色，以及连续的柱状渐变。</p>
+            <p>跟随当前音乐播放器的音频跳动，不受其他软件发声影响。默认、柱状图、梦幻波浪、分段电平和底缘频谱带五种样式可选，支持跟随歌词色、专辑主题色或自定义颜色，以及连续的柱状渐变。</p>
             <p>柔光辉晕、衰减残影、峰值散粒和流动光泽四项特效可独立开关、组合使用。选择梦幻波浪后，还能将波面铺在歌曲信息和歌词后方，并调整背景不透明度。</p>
           </div>
           <figure class="shot" data-shot="feature-spectrum.png">
@@ -183,7 +184,7 @@
         <div class="explore-grid">
           <div class="explore-item reveal">
             <h3>手动搜索歌词</h3>
-            <p>自动匹配不准时手动选词，QQ 音乐 / 网易云 / 酷狗候选，还支持进度微调。</p>
+            <p>自动匹配不准时，可预览并选择歌词、微调进度。汽水音乐使用原生歌词候选，其他播放源可搜索 QQ 音乐、网易云音乐和酷狗歌词。</p>
           </div>
           <div class="explore-item reveal">
             <h3>QQ 音乐本地歌词</h3>
@@ -256,7 +257,7 @@
           <div class="step reveal">
             <span class="step-num">2</span>
             <h3>打开音乐</h3>
-            <p>播放 QQ 音乐或网易云音乐，歌词自动出现在任务栏。QQ 音乐需在设置中开启「显示系统媒体传输控件（SMTC）」。</p>
+            <p>打开 QQ 音乐、网易云音乐或汽水音乐并播放歌曲，歌词自动出现在任务栏。多个播放器同时运行时，自动识别当前播放来源。</p>
           </div>
           <div class="step-connector" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
           <div class="step reveal">
@@ -265,7 +266,7 @@
             <p>右键托盘图标进入设置：主题、字体、频谱、悬浮卡片、切歌弹窗、每日一言，都可以自由定制。</p>
           </div>
         </div>
-        <p class="quickstart-note reveal">网易云音乐需额外安装 <a href="https://github.com/std-microblock/BetterNCM-Installer/releases/latest" target="_blank" rel="noopener">BetterNCM</a> 与 <a href="https://github.com/apoint123/inflink-rs/releases/latest" target="_blank" rel="noopener">InfLink-rs</a> 插件，详见 <a href="docs.html#players">播放器配置文档</a>。</p>
+        <p class="quickstart-note reveal">QQ 音乐需开启「显示系统媒体传输控件（SMTC）」；汽水音乐使用客户端原生 SMTC；网易云音乐需额外安装 <a href="https://github.com/std-microblock/BetterNCM-Installer/releases/latest" target="_blank" rel="noopener">BetterNCM</a> 与 <a href="https://github.com/apoint123/inflink-rs/releases/latest" target="_blank" rel="noopener">InfLink-rs</a> 插件，详见 <a href="docs.html#players">播放器配置文档</a>。</p>
         <p class="quickstart-note reveal"><a href="docs.html">打开文档中心，查看完整使用指南 →</a></p>
       </div>
     </section>
@@ -294,7 +295,7 @@
 
   <footer class="site-footer">
     <div class="container footer-inner">
-      <p>QQ 音乐 / 网易云任务栏歌词 · Apache-2.0</p>
+      <p>Windows 任务栏歌词 · Apache-2.0</p>
       <p class="footer-links">
         <a href="https://github.com/H0308/taskbar-lyrics-displayer" target="_blank" rel="noopener">GitHub</a>
         <a href="https://gitee.com/EPSDA/taskbar-lyrics-displayer" target="_blank" rel="noopener">Gitee</a>
