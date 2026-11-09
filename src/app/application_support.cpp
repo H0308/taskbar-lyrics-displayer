@@ -1,4 +1,5 @@
 #include "app/application_internal.h"
+#include "media/player_source.h"
 namespace lyrics_app {
 const wchar_t* trayCommandName(int command) {
     switch (command) {
@@ -229,29 +230,16 @@ bool setAutoStart(bool enable) {
 }
 
 const wchar_t* spectrumProcessName(SmtcPlayerType player) {
-    switch (player) {
-    case SmtcPlayerType::QQMusic:
-        return L"QQMusic.exe";
-    case SmtcPlayerType::NetEase:
-        return L"cloudmusic.exe";
-    case SmtcPlayerType::Qishui:
-        return L"SodaMusic.exe";
-    default:
-        return L"";
-    }
+    const auto* source = player_source::find(player);
+    return source && !source->processNames.empty() ? source->processNames.front() : L"";
 }
 
 std::vector<std::wstring> volumeProcessNames(SmtcPlayerType player) {
-    switch (player) {
-    case SmtcPlayerType::QQMusic:
-        return {L"QQMusic.exe"};
-    case SmtcPlayerType::NetEase:
-        return {L"cloudmusic.exe", L"NeteaseBridge.exe"};
-    case SmtcPlayerType::Qishui:
-        return {L"SodaMusic.exe"};
-    default:
+    const auto* source = player_source::find(player);
+    if (!source)
         return {};
-    }
+    const auto names = source->processNames;
+    return {names.begin(), names.end()};
 }
 
 fluent::NativeMenuIcon ownMenuIcon(HICON icon) {

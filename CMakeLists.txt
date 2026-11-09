@@ -106,6 +106,7 @@ add_executable(QQMusicLyric
     src/settings/settings_store.cpp
     src/logging/runtime_logger.cpp
     src/media/smtc_monitor.cpp
+    src/media/player_source.cpp
     src/media/smtc/smtc_common.cpp
     src/media/smtc/qq_music_smtc_adapter.cpp
     src/media/smtc/netease_smtc_adapter.cpp

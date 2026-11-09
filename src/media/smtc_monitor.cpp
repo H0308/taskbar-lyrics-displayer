@@ -1,4 +1,5 @@
 #include "media/smtc_monitor.h"
+#include "media/player_source.h"
 
 #include "media/smtc/netease_smtc_adapter.h"
 #include "media/smtc/qq_music_smtc_adapter.h"
@@ -52,16 +53,9 @@ bool processAlive(const wchar_t* executableName) {
 }
 
 bool playerProcessAlive(SmtcPlayerType player) {
-    switch (player) {
-    case SmtcPlayerType::QQMusic:
-        return processAlive(L"QQMusic.exe");
-    case SmtcPlayerType::NetEase:
-        return processAlive(L"cloudmusic.exe");
-    case SmtcPlayerType::Qishui:
-        return processAlive(L"SodaMusic.exe");
-    default:
-        return false;
-    }
+    const auto* source = player_source::find(player);
+    return source && !source->processNames.empty() &&
+           processAlive(source->processNames.front());
 }
 
 const wchar_t* playerName(SmtcPlayerType player) noexcept {

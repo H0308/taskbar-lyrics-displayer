@@ -1,4 +1,5 @@
 #include "media/smtc/soda_music_smtc_adapter.h"
+#include "media/player_source.h"
 
 namespace smtc {
 
@@ -12,7 +13,8 @@ SmtcSessionIdentity SodaMusicSmtcAdapter::identifySession(const Session& session
         return identity;
     try {
         identity.sourceAppUserModelId = session.SourceAppUserModelId().c_str();
-        if (identity.sourceAppUserModelId == L"汽水音乐")
+        const auto* source = player_source::find(identity.sourceAppUserModelId);
+        if (source && source->player == playerType())
             identity.player = SmtcPlayerType::Qishui;
     } catch (...) {
     }

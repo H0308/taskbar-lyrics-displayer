@@ -1,4 +1,5 @@
 #include "platform_icon.h"
+#include "media/player_source.h"
 
 #include <objbase.h>
 #include <gdiplus.h>
@@ -51,10 +52,13 @@ std::vector<std::wstring> sourceProcessCandidates(const std::wstring& source) {
     if (source.empty())
         return {};
 
-    if (_wcsicmp(source.c_str(), L"NeteaseBridge.exe") == 0)
-        return {L"cloudmusic.exe", L"NeteaseBridge.exe"};
-    if (source == L"汽水音乐")
-        return {L"SodaMusic.exe"};
+    if (const auto* definition = player_source::find(source)) {
+        const auto names = definition->processNames;
+        // 原生进程会话直接取自身；桥接器及非进程标识按播放器进程顺序解析。
+        if (!names.empty() && _wcsicmp(source.c_str(), names.front()) == 0)
+            return {names.front()};
+        return {names.begin(), names.end()};
+    }
 
     const size_t slash = source.find_last_of(L"\\/");
     if (slash != std::wstring::npos && slash + 1 < source.size())

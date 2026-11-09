@@ -1,4 +1,5 @@
 #include "media/smtc/qq_music_smtc_adapter.h"
+#include "media/player_source.h"
 
 #include "media/smtc/smtc_common.h"
 
@@ -8,8 +9,6 @@
 namespace smtc {
 
 namespace {
-
-constexpr wchar_t kQqMusicAppId[] = L"QQMusic.exe";
 
 // 残留时间线窗口：切歌后 3 秒内、与残留位置相差 2 秒内的时间线视为旧歌残留
 constexpr int64_t kResidualWindowMs = 3000;
@@ -38,7 +37,8 @@ SmtcSessionIdentity QqMusicSmtcAdapter::identifySession(const Session& session) 
         return identity;
     try {
         identity.sourceAppUserModelId = session.SourceAppUserModelId().c_str();
-        if (identity.sourceAppUserModelId == kQqMusicAppId)
+        const auto* source = player_source::find(identity.sourceAppUserModelId);
+        if (source && source->player == playerType())
             identity.player = SmtcPlayerType::QQMusic;
     } catch (...) {
     }

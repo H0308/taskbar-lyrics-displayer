@@ -1,4 +1,5 @@
 #include "media/smtc/netease_smtc_adapter.h"
+#include "media/player_source.h"
 
 #include "media/smtc/smtc_common.h"
 
@@ -14,16 +15,9 @@ namespace smtc {
 namespace {
 
 constexpr wchar_t kGenrePrefix[] = L"NCM-";
-constexpr wchar_t kCloudMusicAppId[] = L"cloudmusic.exe";
-constexpr wchar_t kNeteaseBridgeAppId[] = L"NeteaseBridge.exe";
 constexpr int64_t kTimelinePositionToleranceMs = 250;
 constexpr int64_t kRecentStatusChangeWindowMs = 2000;
 constexpr int64_t kMaxStatusTransitionTimelineLagMs = 2000;
-
-bool isNeteaseSource(const std::wstring& sourceAppUserModelId) {
-    return _wcsicmp(sourceAppUserModelId.c_str(), kCloudMusicAppId) == 0 ||
-           _wcsicmp(sourceAppUserModelId.c_str(), kNeteaseBridgeAppId) == 0;
-}
 
 bool isStalePositionRegression(int64_t positionMs, int64_t anchorUtcMs,
                                const SmtcSnapshot& snapshot) {
@@ -72,7 +66,8 @@ SmtcSessionIdentity NeteaseSmtcAdapter::identifySession(const Session& session) 
         // 只对网易云自身/桥接器会话读取 Genres。对所有 SMTC 会话都调用
         // TryGetMediaPropertiesAsync() 会触发 QQ、浏览器或已失效会话的
         // HRESULT，尤其是在当前没有播放歌曲时更容易出现。
-        if (!isNeteaseSource(identity.sourceAppUserModelId))
+        const auto* source = player_source::find(identity.sourceAppUserModelId);
+        if (!source || source->player != playerType())
             return identity;
         auto info = session.GetPlaybackInfo();
         if (!info)

@@ -1,4 +1,5 @@
 #include "ui/media_popup/page_painter.h"
+#include "media/player_source.h"
 #include "ui/fluent_theme.h"
 #include "util/com_release.h"
 #include <algorithm>
@@ -6,15 +7,8 @@
 
 namespace media_popup_paint {
 std::wstring sourceLabel(const std::wstring& source) {
-    if (source == L"汽水音乐")
-        return L"汽水音乐";
-    if (source.find(L"QQMusic") != std::wstring::npos ||
-        source.find(L"qqmusic") != std::wstring::npos)
-        return L"QQ音乐";
-    if (source.find(L"cloudmusic") != std::wstring::npos ||
-        source.find(L"Netease") != std::wstring::npos ||
-        source.find(L"netease") != std::wstring::npos)
-        return L"网易云音乐";
+    if (const auto* definition = player_source::find(source))
+        return definition->displayName;
     return L"音乐播放器";
 }
 
