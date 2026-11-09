@@ -3,6 +3,10 @@
 ; 如果该文件不存在，脚本仍可编译，但生成的安装包要求目标系统已有
 ; Visual C++ x64 Redistributable；正式发布前应补齐该前置依赖。
 
+#if Ver < 0x06060000
+#error "Inno Setup 6.6.0 or later is required for system light/dark mode support."
+#endif
+
 #ifndef AppVersion
 #define AppVersion "2.13.1"
 #endif
