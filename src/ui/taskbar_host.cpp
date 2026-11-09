@@ -1,5 +1,6 @@
 #include "taskbar_host.h"
 #include "lyric/lyric_provider.h"
+#include "media/player_source.h"
 #include "ui/taskbar/vinyl_animation.h"
 #include "ui/taskbar/lyric_transition.h"
 #include "ui/taskbar/scene_transition.h"
@@ -3822,6 +3823,10 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return -1;
         if (currentLine >= 0 && (size_t)currentLine < lines.size())
             return currentLine;
+        // 汽水歌词可能省略作词、作曲等前奏行；首句未开始时使用歌曲信息文案。
+        const auto* source = player_source::find(media.sourceAppUserModelId);
+        if (source && source->player == SmtcPlayerType::Soda)
+            return -1;
         return lines.empty() ? -1 : 0;
     }
 

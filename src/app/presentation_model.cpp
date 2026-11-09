@@ -4,6 +4,14 @@
 
 namespace {
 constexpr int64_t kLyricTransitionLeadMs = 100;
+
+int64_t lyricSelectionPosition(const SmtcSnapshot& snap, const std::vector<LyricLine>& lines) {
+    // 汽水首句前显示歌曲信息，到真实行起点才交接；后续行继续使用既有提前量。
+    if (snap.player == SmtcPlayerType::Soda && !lines.empty() && snap.positionMs < lines.front().ms)
+        return snap.positionMs;
+    return snap.positionMs + kLyricTransitionLeadMs;
+}
+
 const wchar_t* notRunningStatus(const PlaybackState& playback) {
     if (playback.lastPlayer_ == SmtcPlayerType::Soda)
         return L"汽水音乐未运行";
@@ -69,7 +77,7 @@ void fillPresentationFrame(PresentationFrame& frame, const SmtcSnapshot& snap,
     if (copyLyrics)
         frame.lyrics = playback.currentLyrics_;
     frame.actualPositionMs = snap.positionMs;
-    frame.lineSelectionPositionMs = snap.positionMs + kLyricTransitionLeadMs;
+    frame.lineSelectionPositionMs = lyricSelectionPosition(snap, frame.lyrics);
     frame.currentLine = LyricProvider::findLine(frame.lyrics, frame.lineSelectionPositionMs);
     frame.visible = snap.sessionAlive || (settings.idleEntryEnabled_ && !snap.sessionAlive);
     frame.animateTransition = animateTransition;
@@ -92,7 +100,13 @@ void fillPresentationFrame(PresentationFrame& frame, const SmtcSnapshot& snap,
         frame.statusText = L"歌词加载中…";
     else if (playback.currentLyrics_.empty())
         frame.statusText = playback.currentKey.empty() ? L"等待播放…" : L"暂无歌词";
-    else
+    else if (snap.player == SmtcPlayerType::Soda) {
+        // 独立保留前奏展示文案，不向歌词插入伪造行，也不混入专辑字段。
+        frame.statusText = snap.title.empty() ? playback.currentTitle : snap.title;
+        const auto& artist = snap.artist.empty() ? playback.currentArtist : snap.artist;
+        if (!artist.empty())
+            frame.statusText += L" - " + artist;
+    } else
         frame.statusText.clear();
 }
 } // namespace
@@ -111,7 +125,7 @@ const PresentationFrame& PresentationModel::update(const SmtcSnapshot& snap,
 
 PlaybackPatch PresentationModel::updatePlayback(const SmtcSnapshot& snap) {
     frame_.actualPositionMs = snap.positionMs;
-    frame_.lineSelectionPositionMs = snap.positionMs + kLyricTransitionLeadMs;
+    frame_.lineSelectionPositionMs = lyricSelectionPosition(snap, frame_.lyrics);
     frame_.currentLine = LyricProvider::findLine(frame_.lyrics, frame_.lineSelectionPositionMs);
     frame_.media.playing = snap.status == PlaybackStatus::Playing;
     PlaybackPatch playback;
