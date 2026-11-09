@@ -78,12 +78,13 @@ TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap,
     state_.lastPlayer_ = snap.player;
     const std::wstring key = makeTrackKey(snap);
     const bool trackChanged = key != state_.currentKey && !snap.title.empty();
-    // QQ 的时间线可能晚于媒体属性到达：同一首歌先以未知时长（0）进入，
-    // 随后补上真实时长会让包含时长的 trackKey 变化。这个补齐不是换歌，
-    // 不能因此清掉当前封面/专辑色；歌词仍按新时长重新建立匹配键。
+    // QQ 会从未知时长补齐；Soda 还可能先携带上一首的有效时长，再修正。
+    // 同一播放器、来源和歌曲文案下的这些时长更新不是换歌，不能清掉封面和
+    // 专辑色；歌词仍按新时长重新建立匹配键。其他播放器保留未知时长补齐规则。
     const bool durationOnlyTrackUpdate =
         trackChanged && snap.player == previousPlayer && !snap.timelineStale &&
-        state_.currentDurationMs <= 0 && snap.durationMs > 0 && snap.title == state_.currentTitle &&
+        (state_.currentDurationMs <= 0 || snap.player == SmtcPlayerType::Soda) &&
+        snap.durationMs > 0 && snap.title == state_.currentTitle &&
         snap.artist == state_.currentArtist && snap.sourceAppUserModelId == previousSourceAppId;
     // QQ 的曲目键包含时长，切歌后时间线更新会让 trackChanged 再触发一次；
     // 切歌弹窗只认标题/艺术家身份变化，避免同一首歌弹两次。
@@ -98,8 +99,7 @@ TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap,
         state_.lastStatus = snap.status;
     }
     if (trackChanged) {
-        // 时长补齐仍需重建歌词请求，但媒体卡片继续沿用当前封面和专辑色，
-        // 避免 0 → 有效时长的那一帧出现空卡片或背景闪回。
+        // 时长补齐或修正仍需重建歌词请求，但媒体卡片保留当前封面和专辑色。
         releaseCurrentLyrics();
         if (!durationOnlyTrackUpdate)
             releaseCurrentCover();
