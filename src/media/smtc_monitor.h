@@ -8,7 +8,7 @@
 
 enum class PlaybackStatus { Stopped, Playing, Paused, Other };
 
-enum class SmtcPlayerType { Unknown, QQMusic, NetEase, Qishui };
+enum class SmtcPlayerType { Unknown, QQMusic, NetEase, Soda };
 
 // SMTC 统一快照：锚点进度 + 本机时间，渲染侧据此插值
 struct SmtcSnapshot {

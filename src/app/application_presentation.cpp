@@ -173,7 +173,7 @@ void App::onSmtcChanged() {
             snap.title, snap.artist, snap.timelineStale ? 0 : snap.durationMs,
             snap.player == SmtcPlayerType::NetEase,
             snap.player == SmtcPlayerType::NetEase ? snap.neteaseSongId : L"",
-            snap.player == SmtcPlayerType::Qishui);
+            snap.player == SmtcPlayerType::Soda);
         manualSearchTrackKey = key;
     }
     const TrackChange change =

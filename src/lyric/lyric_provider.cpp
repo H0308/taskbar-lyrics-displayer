@@ -1,5 +1,6 @@
 #include "lyric_provider.h"
 #include "lyric/lrc_parser.h"
+#include "lyric/soda_lyric_timing.h"
 #include "qrc_decoder.h"
 
 #include "util/base64.h"
@@ -112,7 +113,7 @@ struct NeteaseSong {
     int64_t durationMs = 0;
 };
 
-struct QishuiSong {
+struct SodaSong {
     std::string id;
     std::wstring title;
     std::wstring artist;
@@ -1798,54 +1799,9 @@ bool parseKrc(std::string content, std::vector<LyricLine>& out) {
     return true;
 }
 
-// SMTC 对试听片段从零计时，汽水歌词仍使用完整歌曲时间轴。
-// 只有播放时长与接口明确提供的试听长度相符时，才采用试听起点。
-int64_t qishuiLyricOffset(const QishuiSong& song, int64_t playbackDurationMs) {
-    constexpr int64_t kDurationToleranceMs = 1000;
-    if (playbackDurationMs <= 0 || song.previewStartMs <= 0 || song.previewDurationMs <= 0 ||
-        song.durationMs <= 0 || song.previewStartMs >= song.durationMs ||
-        song.previewDurationMs > song.durationMs - song.previewStartMs + kDurationToleranceMs)
-        return 0;
-    if (std::llabs(song.durationMs - playbackDurationMs) <= kDurationToleranceMs)
-        return 0;
-    return std::llabs(song.previewDurationMs - playbackDurationMs) <= kDurationToleranceMs
-               ? song.previewStartMs : 0;
-}
 
-void alignQishuiPreview(std::vector<LyricLine>& lines, int64_t offsetMs,
-                        int64_t playbackDurationMs, int64_t fullDurationMs) {
-    if (offsetMs <= 0)
-        return;
-    std::vector<LyricLine> aligned;
-    const int64_t endMs = offsetMs + playbackDurationMs;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        auto& line = lines[i];
-        const int64_t lineEndMs = line.chars.empty()
-                                     ? (i + 1 < lines.size() ? lines[i + 1].ms : fullDurationMs)
-                                     : line.chars.back().endMs;
-        if (lineEndMs <= offsetMs || line.ms >= endMs)
-            continue;
-        if (!line.chars.empty()) {
-            std::erase_if(line.chars, [offsetMs, endMs](const LyricChar& word) {
-                return word.endMs <= offsetMs || word.startMs >= endMs;
-            });
-            if (line.chars.empty())
-                continue;
-            line.text.clear();
-            for (auto& word : line.chars) {
-                word.startMs = std::max<int64_t>(0, word.startMs - offsetMs);
-                word.endMs = std::min(playbackDurationMs, word.endMs - offsetMs);
-                line.text += word.text;
-            }
-        }
-        line.ms = std::max<int64_t>(0, line.ms - offsetMs);
-        aligned.push_back(std::move(line));
-    }
-    lines = std::move(aligned);
-}
-
-bool searchQishuiSongs(CURL* curl, const std::wstring& title, const std::wstring& artist,
-                       std::vector<QishuiSong>& out) {
+bool searchSodaSongs(CURL* curl, const std::wstring& title, const std::wstring& artist,
+                       std::vector<SodaSong>& out) {
     out.clear();
     if (!curl || g_shutdown.load())
         return false;
@@ -1876,7 +1832,7 @@ bool searchQishuiSongs(CURL* curl, const std::wstring& title, const std::wstring
                 if (!entity.contains("track") || !entity["track"].is_object())
                     continue;
                 const auto& track = entity["track"];
-                QishuiSong song;
+                SodaSong song;
                 if (track.contains("id"))
                     song.id = jsonString(track["id"]);
                 if (song.id.empty() || song.id.find_first_not_of("0123456789") != std::string::npos)
@@ -1907,7 +1863,7 @@ bool searchQishuiSongs(CURL* curl, const std::wstring& title, const std::wstring
     return false;
 }
 
-bool downloadQishuiLyrics(CURL* curl, const QishuiSong& song, int64_t playbackDurationMs,
+bool downloadSodaLyrics(CURL* curl, const SodaSong& song, int64_t playbackDurationMs,
                           std::vector<LyricLine>& out) {
     out.clear();
     if (song.id.empty() || song.id.find_first_not_of("0123456789") != std::string::npos ||
@@ -1942,8 +1898,9 @@ bool downloadQishuiLyrics(CURL* curl, const QishuiSong& song, int64_t playbackDu
             const std::string translation = lyric["translations"].value("cn", std::string());
             attachSecondary(lines, parseLrcText(translation), true);
         }
-        const int64_t offsetMs = qishuiLyricOffset(song, playbackDurationMs);
-        alignQishuiPreview(lines, offsetMs, playbackDurationMs, song.durationMs);
+        const int64_t offsetMs = soda_lyrics::previewOffset(
+            song.durationMs, song.previewStartMs, song.previewDurationMs, playbackDurationMs);
+        soda_lyrics::alignPreview(lines, offsetMs, playbackDurationMs, song.durationMs);
         if (lines.empty())
             return false;
         runtime_log::writef(L"[lyric][Soda Music] native id=%S type=%S offset=%lldms lines=%zu",
@@ -1957,18 +1914,20 @@ bool downloadQishuiLyrics(CURL* curl, const QishuiSong& song, int64_t playbackDu
     }
 }
 
-bool fetchQishuiLyrics(const std::wstring& title, const std::wstring& artist,
+bool fetchSodaLyrics(const std::wstring& title, const std::wstring& artist,
                        int64_t durationMs, std::vector<LyricLine>& out) {
     out.clear();
     std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl(curl_easy_init(), &curl_easy_cleanup);
-    std::vector<QishuiSong> songs;
-    if (!curl || !searchQishuiSongs(curl.get(), title, artist, songs))
+    std::vector<SodaSong> songs;
+    if (!curl || !searchSodaSongs(curl.get(), title, artist, songs))
         return false;
     const MatchQuery query{title, artist, durationMs, extractVersionTags(title)};
-    std::vector<std::pair<int, const QishuiSong*>> ranked;
+    std::vector<std::pair<int, const SodaSong*>> ranked;
     for (const auto& song : songs) {
-        const int64_t matchedDurationMs = qishuiLyricOffset(song, durationMs) > 0
-                                             ? song.previewDurationMs : song.durationMs;
+        const int64_t matchedDurationMs =
+            soda_lyrics::previewOffset(song.durationMs, song.previewStartMs,
+                                         song.previewDurationMs, durationMs) > 0
+                ? song.previewDurationMs : song.durationMs;
         const int score = scoreCandidate(query, song.title, song.artist, matchedDurationMs);
         if (score >= kScoreThreshold)
             ranked.emplace_back(score, &song);
@@ -1976,7 +1935,7 @@ bool fetchQishuiLyrics(const std::wstring& title, const std::wstring& artist,
     std::stable_sort(ranked.begin(), ranked.end(),
                      [](const auto& a, const auto& b) { return a.first > b.first; });
     for (size_t i = 0; i < std::min<size_t>(ranked.size(), 3) && !g_shutdown.load(); ++i) {
-        if (downloadQishuiLyrics(curl.get(), *ranked[i].second, durationMs, out))
+        if (downloadSodaLyrics(curl.get(), *ranked[i].second, durationMs, out))
             return true;
     }
     return false;
@@ -2144,11 +2103,11 @@ uint64_t fnv1a64(const std::string& s) {
 // 手动歌词文件名：平台前缀 + 可读部分 + 来源键哈希，
 // 如 "qq-歌名 - 歌手-a1b2c3d4e5f60708.json"。
 std::wstring manualFileName(const std::wstring& title, const std::wstring& artist,
-                            const std::wstring& key, bool netease, bool qishui) {
+                            const std::wstring& key, bool netease, bool soda) {
     std::wstring readable = sanitizeFileName(title + L" - " + artist);
     wchar_t hex[17];
     std::swprintf(hex, 17, L"%016llx", (unsigned long long)fnv1a64(toUtf8(key)));
-    const wchar_t* prefix = qishui ? L"qishui-" : netease ? L"netease-" : L"qq-";
+    const wchar_t* prefix = soda ? L"soda-" : netease ? L"netease-" : L"qq-";
     return std::wstring(prefix) + readable + L"-" + hex + L".json";
 }
 
@@ -2355,12 +2314,12 @@ struct LyricProvider::Impl {
     // 某首歌对应的手动歌词文件路径；overrideDir 为空时返回空
     std::wstring overrideFilePath(const std::wstring& key, const std::wstring& title,
                                   const std::wstring& artist, bool netease,
-                                  bool legacy, bool qishui = false) const {
+                                  bool legacy, bool soda = false) const {
         if (overrideDir.empty())
             return {};
         const std::wstring fileName = legacy
                                           ? legacyManualFileName(title, artist, key)
-                                          : manualFileName(title, artist, key, netease, qishui);
+                                          : manualFileName(title, artist, key, netease, soda);
         return overrideDir + L"\\" + fileName;
     }
 
@@ -2436,19 +2395,19 @@ struct LyricProvider::Impl {
     // 调用方需已持有 mtx
     bool manualOverrideGet(const std::wstring& key, const std::wstring& title,
                            const std::wstring& artist, bool netease, CacheEntry& out,
-                           bool qishui = false) {
+                           bool soda = false) {
         auto it = manualOverrides.find(key);
         if (it != manualOverrides.end()) {
             out = it->second;
             return true;
         }
-        std::wstring path = overrideFilePath(key, title, artist, netease, false, qishui);
+        std::wstring path = overrideFilePath(key, title, artist, netease, false, soda);
         if (path.empty())
             return false;
         CacheEntry entry;
         if (!loadOverrideFile(path, entry)) {
             // 汽水没有旧版文件，不读取其他平台的历史手动覆盖。
-            if (qishui)
+            if (soda)
                 return false;
             // 兼容改名前已经存在的无前缀文件；新保存的文件只使用带前缀路径。
             const std::wstring legacyPath = overrideFilePath(key, title, artist, netease, true);
@@ -2790,26 +2749,26 @@ int LyricProvider::findLine(const std::vector<LyricLine>& lines, int64_t positio
 }
 
 void LyricProvider::searchCandidatesAsync(const std::wstring& title, const std::wstring& artist,
-                                           SearchCallback cb, bool qishuiOnly) {
+                                           SearchCallback cb, bool sodaOnly) {
     runtime_log::writef(L"[action][manual-search] request title=\"%ls\" artist=\"%ls\"",
                         title.c_str(), artist.c_str());
     Impl* impl = impl_.get();
     Impl::Worker worker;
     auto done = worker.done;
-    worker.thread = std::thread([impl, title, artist, cb = std::move(cb), done, qishuiOnly]() mutable {
+    worker.thread = std::thread([impl, title, artist, cb = std::move(cb), done, sodaOnly]() mutable {
         DoneFlag flag{done};
         CURL* curl = curl_easy_init();
         std::vector<SearchCandidate> result;
-        if (curl && qishuiOnly) {
-            std::vector<QishuiSong> songs;
-            if (searchQishuiSongs(curl, title, artist, songs)) {
+        if (curl && sodaOnly) {
+            std::vector<SodaSong> songs;
+            if (searchSodaSongs(curl, title, artist, songs)) {
                 for (const auto& song : songs) {
                     SearchCandidate candidate;
                     candidate.name = song.title;
                     candidate.singer = song.artist;
                     candidate.durationMs = song.durationMs;
-                    candidate.source = LyricSource::Qishui;
-                    candidate.qishuiSongId = toWide(song.id);
+                    candidate.source = LyricSource::Soda;
+                    candidate.sodaSongId = toWide(song.id);
                     candidate.previewStartMs = song.previewStartMs;
                     candidate.previewDurationMs = song.previewDurationMs;
                     result.push_back(std::move(candidate));
@@ -2916,10 +2875,10 @@ void LyricProvider::fetchLyricAsync(const SearchCandidate& cand, FetchCallback c
         std::vector<LyricLine> lines;
         bool ok = false;
         if (curl) {
-            if (cand.source == LyricSource::Qishui) {
-                const QishuiSong song{toUtf8(cand.qishuiSongId), cand.name, cand.singer,
+            if (cand.source == LyricSource::Soda) {
+                const SodaSong song{toUtf8(cand.sodaSongId), cand.name, cand.singer,
                                       cand.durationMs, cand.previewStartMs, cand.previewDurationMs};
-                ok = downloadQishuiLyrics(curl, song, playbackDurationMs, lines);
+                ok = downloadSodaLyrics(curl, song, playbackDurationMs, lines);
             } else if (cand.source == LyricSource::Qrc)
                 ok = downloadQrc(curl, toUtf8(cand.songid), lines);
             else if (cand.source == LyricSource::Krc)
@@ -2945,9 +2904,9 @@ void LyricProvider::fetchLyricAsync(const SearchCandidate& cand, FetchCallback c
     impl_->workers.push_back(std::move(worker));
 }
 
-void LyricProvider::requestQishuiAsync(const std::wstring& title, const std::wstring& artist,
+void LyricProvider::requestSodaAsync(const std::wstring& title, const std::wstring& artist,
                                       int64_t durationMs, ReadyCallback cb) {
-    const std::wstring key = L"qishui|" + makeKey(title, artist, durationMs);
+    const std::wstring key = L"soda|" + makeKey(title, artist, durationMs);
     const uint64_t gen = ++impl_->generation;
     Impl* impl = impl_.get();
     Impl::Worker worker;
@@ -2969,7 +2928,7 @@ void LyricProvider::requestQishuiAsync(const std::wstring& title, const std::wst
                 ready = {true, std::move(entry.lines), std::move(entry.info)};
         }
         if (!ready.ok) {
-            ready.ok = fetchQishuiLyrics(title, artist, durationMs, ready.lines);
+            ready.ok = fetchSodaLyrics(title, artist, durationMs, ready.lines);
             std::lock_guard<std::mutex> lock(impl->mtx);
             if (impl->generation != gen)
                 return;
@@ -2989,22 +2948,22 @@ void LyricProvider::requestQishuiAsync(const std::wstring& title, const std::wst
 
 void LyricProvider::setManualOverride(const std::wstring& title, const std::wstring& artist,
                                       int64_t durationMs, std::vector<LyricLine> lines,
-                                      SongInfo info, bool qishui) {
+                                      SongInfo info, bool soda) {
     std::lock_guard<std::mutex> lk(impl_->mtx);
-    const bool netease = !qishui && !info.neteaseSongId.empty();
-    const std::wstring key = qishui ? L"qishui|" + makeKey(title, artist, durationMs)
+    const bool netease = !soda && !info.neteaseSongId.empty();
+    const std::wstring key = soda ? L"soda|" + makeKey(title, artist, durationMs)
                             : netease ? L"netease|" + info.neteaseSongId
                                       : makeKey(title, artist, durationMs);
     auto& stored = impl_->manualOverrides[key]; // 同一首歌重复手动选择时覆盖旧记录
     stored = CacheEntry{std::move(lines), std::move(info)};
     // 写入这首歌自己的文件
-    std::wstring path = impl_->overrideFilePath(key, title, artist, netease, false, qishui);
+    std::wstring path = impl_->overrideFilePath(key, title, artist, netease, false, soda);
     if (!path.empty())
         impl_->saveOverrideFile(path, title, artist, durationMs, stored);
     runtime_log::writef(L"[action][manual-search] applied title=\"%ls\" artist=\"%ls\" "
                         L"duration=%lldms lines=%zu source=%s path=\"%ls\"",
                         title.c_str(), artist.c_str(), static_cast<long long>(durationMs),
-                        stored.lines.size(), qishui ? L"Soda Music" : netease ? L"Netease" : L"QQ",
+                        stored.lines.size(), soda ? L"Soda Music" : netease ? L"Netease" : L"QQ",
                         path.c_str());
 }
 

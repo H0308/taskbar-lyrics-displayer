@@ -29,7 +29,7 @@ enum class LyricSource {
     Krc, // 酷狗逐字歌词
     Lrc, // QQ 音乐整行歌词
     Yrc, // 网易云音乐逐字歌词
-    Qishui // 汽水原生歌词（逐字或 LRC，由歌词接口确定）
+    Soda // 汽水原生歌词（逐字或 LRC，由歌词接口确定）
 };
 
 // 手动搜索返回的候选歌曲
@@ -43,7 +43,7 @@ struct SearchCandidate {
     int64_t durationMs = 0;
     LyricSource source = LyricSource::Lrc;
     std::wstring neteaseSongId; // 网易云歌曲 ID（YRC 候选使用）
-    std::wstring qishuiSongId;
+    std::wstring sodaSongId;
     int64_t previewStartMs = 0;
     int64_t previewDurationMs = 0;
 };
@@ -80,7 +80,7 @@ public:
 
     // 汽水按元数据搜索歌曲 ID 并取原生逐字/LRC；试听片段映射到本地时间轴。
     // 手动覆盖独立保存，不读取 QQ 本地 QRC。
-    void requestQishuiAsync(const std::wstring& title, const std::wstring& artist,
+    void requestSodaAsync(const std::wstring& title, const std::wstring& artist,
                             int64_t durationMs, ReadyCallback cb);
 
     // 仅按当前元数据查询 QQ songmid/albummid，不读取或替换当前歌词。
@@ -89,7 +89,7 @@ public:
 
     // 手动搜索候选；汽水目标仅搜索汽水曲库，其他目标保留既有来源。
     void searchCandidatesAsync(const std::wstring& title, const std::wstring& artist,
-                               SearchCallback cb, bool qishuiOnly = false);
+                               SearchCallback cb, bool sodaOnly = false);
 
     // 按候选歌曲异步取歌词，不修改当前播放内容。
     void fetchLyricAsync(const SearchCandidate& cand, FetchCallback cb,
@@ -98,7 +98,7 @@ public:
     // 保存手动选择；QQ、汽水分别按标题/歌手/时长复用，网易云按歌曲 ID 复用。
     void setManualOverride(const std::wstring& title, const std::wstring& artist,
                            int64_t durationMs, std::vector<LyricLine> lines, SongInfo info,
-                           bool qishui = false);
+                           bool soda = false);
 
     // 设置手动歌词的持久化目录；每首歌保存为独立文件，请求歌词时按 key 查找对应文件
     void setManualOverrideDir(const std::wstring& dir);

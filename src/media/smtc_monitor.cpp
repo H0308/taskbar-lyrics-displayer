@@ -64,7 +64,7 @@ const wchar_t* playerName(SmtcPlayerType player) noexcept {
         return L"QQMusic";
     case SmtcPlayerType::NetEase:
         return L"NetEase";
-    case SmtcPlayerType::Qishui:
+    case SmtcPlayerType::Soda:
         return L"Soda Music";
     default:
         return L"Unknown";

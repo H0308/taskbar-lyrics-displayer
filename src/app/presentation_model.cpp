@@ -5,7 +5,7 @@
 namespace {
 constexpr int64_t kLyricTransitionLeadMs = 100;
 const wchar_t* notRunningStatus(const PlaybackState& playback) {
-    if (playback.lastPlayer_ == SmtcPlayerType::Qishui)
+    if (playback.lastPlayer_ == SmtcPlayerType::Soda)
         return L"汽水音乐未运行";
     return playback.lastPlayer_ == SmtcPlayerType::NetEase ? L"网易云音乐未运行" : L"QQ 音乐未运行";
 }

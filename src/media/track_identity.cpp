@@ -7,7 +7,7 @@ std::wstring makeTrackKey(const SmtcSnapshot& snap) {
     // QQ 切歌窗口可能把上一首的时间线残留带进当前快照；它对展示和歌词匹配
     // 都是不可信的，不能让这段时长参与曲目身份，否则真实时长到达时会被误判为换歌。
     const int64_t durationMs = snap.timelineStale ? 0 : snap.durationMs;
-    const wchar_t* prefix = snap.player == SmtcPlayerType::Qishui ? L"qishui|" : L"qq|";
+    const wchar_t* prefix = snap.player == SmtcPlayerType::Soda ? L"soda|" : L"qq|";
     return prefix + LyricProvider::makeKey(snap.title, snap.artist, durationMs);
 }
 

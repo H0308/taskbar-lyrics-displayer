@@ -15,7 +15,7 @@ constexpr const wchar_t* kSodaProcesses[] = {L"SodaMusic.exe"};
 constexpr Definition kDefinitions[] = {
     {SmtcPlayerType::QQMusic, L"QQ音乐", kQqSessionIds, false, kQqProcesses},
     {SmtcPlayerType::NetEase, L"网易云音乐", kNeteaseSessionIds, true, kNeteaseProcesses},
-    {SmtcPlayerType::Qishui, L"汽水音乐", kSodaSessionIds, false, kSodaProcesses},
+    {SmtcPlayerType::Soda, L"汽水音乐", kSodaSessionIds, false, kSodaProcesses},
 };
 
 } // namespace

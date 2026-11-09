@@ -25,7 +25,7 @@ public:
     bool create(HINSTANCE inst, HWND parent, LyricProvider* provider,
                 const std::wstring& targetTitle, const std::wstring& targetArtist,
                 int64_t targetDurationMs, bool targetIsNetease,
-                const std::wstring& targetNeteaseSongId = {}, bool targetIsQishui = false);
+                const std::wstring& targetNeteaseSongId = {}, bool targetIsSoda = false);
     void show();
     void destroy();
     bool isOpen() const;
@@ -42,7 +42,7 @@ public:
     // 切歌时更新搜索目标；同曲目的进度、时长更新不覆盖手动输入。
     void setTargetSong(const std::wstring& title, const std::wstring& artist,
                        int64_t durationMs, bool isNetease, const std::wstring& neteaseSongId,
-                       bool isQishui = false);
+                       bool isSoda = false);
 
     void setApplyCallback(ApplyCallback cb);
 

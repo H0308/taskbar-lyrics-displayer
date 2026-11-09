@@ -29,7 +29,7 @@ const wchar_t* playerName(SmtcPlayerType player) {
         return L"QQ Music";
     case SmtcPlayerType::NetEase:
         return L"NetEase Music";
-    case SmtcPlayerType::Qishui:
+    case SmtcPlayerType::Soda:
         return L"Soda Music";
     default:
         return L"Unknown";
@@ -130,7 +130,7 @@ TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap,
             startLyricRequest(snap);
             if (!snap.thumbnail || snap.thumbnail->empty())
                 requestNeteaseCoverFallback(snap.neteaseSongId);
-        } else if (snap.player == SmtcPlayerType::Qishui) {
+        } else if (snap.player == SmtcPlayerType::Soda) {
             cancelLyricDebounce();
             startLyricRequest(snap);
         } else if (timerWindow_) {
@@ -329,8 +329,8 @@ void PlaybackController::startLyricRequest(const SmtcSnapshot& snap, bool forceO
     if (snap.player == SmtcPlayerType::NetEase) {
         provider.requestNeteaseAsync(snap.neteaseSongId, snap.title, snap.artist, durationMs,
                                      postLyricResult);
-    } else if (snap.player == SmtcPlayerType::Qishui) {
-        provider.requestQishuiAsync(snap.title, snap.artist, durationMs, postLyricResult);
+    } else if (snap.player == SmtcPlayerType::Soda) {
+        provider.requestSodaAsync(snap.title, snap.artist, durationMs, postLyricResult);
     } else {
         provider.requestAsync(snap.title, snap.artist, durationMs, postLyricResult, forceOnline,
                               forceLocal, persistOrder);
