@@ -205,6 +205,7 @@ if(BUILD_TESTING)
         tests/transition_and_state_tests.cpp
         tests/layout_and_sections_tests.cpp
         tests/playback_and_presentation_tests.cpp
+        tests/soda_logic_tests.cpp
         src/app/presentation_model.cpp
         src/graphics/gdiplus_runtime.cpp
         src/graphics/pixel_luminance.cpp
@@ -215,6 +216,7 @@ if(BUILD_TESTING)
         src/lyric/qrc_decoder.cpp
         src/lyric/qrc_des.cpp
         src/media/playback_controller.cpp
+        src/media/player_source.cpp
         src/media/track_identity.cpp
         src/settings/app_settings.cpp
         src/settings/display_rules.cpp

@@ -61,6 +61,98 @@ TEST_CASE("track_identity.qq_stale_timeline_and_netease_song_id") {
     EXPECT_EQ(makeTrackKey(neteaseSnap), std::wstring(L"netease|1974443814"));
 }
 
+TEST_CASE("track_identity.soda_and_qq_same_metadata_remain_isolated") {
+    SmtcSnapshot qq;
+    qq.sessionAlive = true;
+    qq.player = SmtcPlayerType::QQMusic;
+    qq.title = L"同名歌曲";
+    qq.artist = L"同一歌手";
+    qq.durationMs = 180000;
+    SmtcSnapshot soda = qq;
+    soda.player = SmtcPlayerType::Soda;
+    const auto qqKey = makeTrackKey(qq);
+    const auto sodaKey = makeTrackKey(soda);
+    EXPECT_EQ(sodaKey, std::wstring(L"soda|同名歌曲|同一歌手|36"));
+    EXPECT_NE(qqKey, sodaKey);
+    EXPECT_TRUE(snapshotMatchesTrackKey(soda, sodaKey));
+    EXPECT_FALSE(snapshotMatchesTrackKey(soda, qqKey));
+    EXPECT_FALSE(snapshotMatchesTrackKey(qq, sodaKey));
+    soda.sessionAlive = false;
+    EXPECT_FALSE(snapshotMatchesTrackKey(soda, sodaKey));
+}
+
+TEST_CASE("playback_controller.platform_switch_rejects_inflight_qq_results_before_state_update") {
+    MessageOnlyTimerWindow timerWindow;
+    EXPECT_TRUE(timerWindow.hwnd() != nullptr);
+    SmtcSnapshot current;
+    current.sessionAlive = true;
+    current.player = SmtcPlayerType::QQMusic;
+    current.sourceAppUserModelId = L"QQMusic.exe";
+    current.title = L"同名歌曲";
+    current.artist = L"同一歌手";
+    current.durationMs = 180000;
+    current.thumbnail = std::make_shared<const std::vector<uint8_t>>(std::vector<uint8_t>{1});
+    int publishes = 0;
+    int covers = 0;
+    PlaybackController controller(
+        [&] { return current; },
+        [&](const SmtcSnapshot&, PresentationUpdate) { ++publishes; },
+        [](const SmtcSnapshot&) {}, [&] { ++covers; });
+    controller.setTimerWindow(timerWindow.hwnd());
+    controller.updateTrack(current, current.sourceAppUserModelId);
+    controller.cancelLyricDebounce(); // 不触发网络请求，仅验证已有在途结果的接收规则。
+    controller.releaseCurrentCover(); // 不让 SMTC 封面优先规则掩盖跨平台结果校验。
+    const auto key = controller.state().currentKey;
+    const auto generation = controller.state().requestGeneration_;
+    const auto previousCover = controller.state().lastCover_;
+    const int beforePublishes = publishes;
+
+    // 会话已切换，但主线程尚未更新曲目状态；标题、歌手和时长完全相同。
+    current.player = SmtcPlayerType::Soda;
+    current.sourceAppUserModelId = L"汽水音乐";
+    auto lyric = std::make_unique<LyricPayload>();
+    lyric->key = key;
+    lyric->requestGeneration = generation;
+    lyric->result.ok = true;
+    lyric->result.lines = {{1000, L"旧播放器歌词"}};
+    controller.onLyricReady(std::move(lyric));
+    EXPECT_TRUE(controller.state().currentLyrics_.empty());
+    EXPECT_EQ(publishes, beforePublishes);
+
+    auto cover = std::make_unique<CoverPayload>();
+    cover->key = key;
+    cover->requestGeneration = generation;
+    cover->cover = std::make_shared<const std::vector<uint8_t>>(std::vector<uint8_t>{2});
+    controller.onCoverReady(std::move(cover));
+    EXPECT_EQ(controller.state().lastCover_, previousCover);
+    EXPECT_EQ(covers, 0);
+    EXPECT_EQ(publishes, beforePublishes);
+
+    // 对照：同一代次、同一播放器的有效封面和歌词仍正常接收。
+    current.player = SmtcPlayerType::QQMusic;
+    current.sourceAppUserModelId = L"QQMusic.exe";
+    cover = std::make_unique<CoverPayload>();
+    cover->key = key;
+    cover->requestGeneration = generation;
+    cover->source = CoverSource::QqApi;
+    const auto validCover =
+        std::make_shared<const std::vector<uint8_t>>(std::vector<uint8_t>{3});
+    cover->cover = validCover;
+    controller.onCoverReady(std::move(cover));
+    EXPECT_EQ(controller.state().lastCover_, validCover);
+    EXPECT_EQ(covers, 1);
+    EXPECT_EQ(publishes, beforePublishes + 1);
+    lyric = std::make_unique<LyricPayload>();
+    lyric->key = key;
+    lyric->requestGeneration = generation;
+    lyric->result.ok = true;
+    lyric->result.lines = {{1000, L"有效歌词"}};
+    controller.onLyricReady(std::move(lyric));
+    EXPECT_EQ(controller.state().currentLyrics_.size(), 1u);
+    EXPECT_EQ(controller.state().currentLyrics_[0].text, std::wstring(L"有效歌词"));
+    EXPECT_EQ(publishes, beforePublishes + 2);
+}
+
 TEST_CASE("presentation_model.scene_resolution_lead_time_and_transition_retention") {
     PresentationModel model;
     AppSettings settings;
