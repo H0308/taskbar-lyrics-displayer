@@ -216,6 +216,12 @@ jobs:
             throw 'Inno Setup compiler was not found on the runner.'
           }
 
+          $compilerInfo = (Get-Item $iscc).VersionInfo
+          $compilerVersion = [version]::new($compilerInfo.FileMajorPart, $compilerInfo.FileMinorPart, $compilerInfo.FileBuildPart)
+          if ($compilerVersion -lt [version]'6.6.0') {
+            throw "Inno Setup 6.6.0 or later is required for system light/dark mode support; found $compilerVersion."
+          }
+
           $languageFile = 'installer/ChineseSimplified.isl'
           $translationUrl = 'https://raw.githubusercontent.com/jrsoftware/issrc/6ef32198ef1f7b7b375cd4b6b90896c2a58eb4c2/Files/Languages/ChineseSimplified.isl'
           $expectedTranslationHash = 'e0b0b350e2245f3c5e65586dfe43d574f6e7f06f2261149aba284954b3fc9a8d'
