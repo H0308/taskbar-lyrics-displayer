@@ -208,7 +208,9 @@ void SettingsSections::updateIdleQuoteSourceRow() {
 }
 
 int SettingsSections::idleTextMode() const {
-    return state.idleQuoteEnabled ? 0 : state.idleWelcomeEnabled ? 1 : 2;
+    if (state.idleQuoteEnabled)
+        return 0;
+    return state.idleWelcomeEnabled || !embeddedResourceOnlyAvailable() ? 1 : 2;
 }
 
 bool SettingsSections::embeddedResourceOnlyAvailable() const {
@@ -221,7 +223,7 @@ void SettingsSections::updateIdleRowsEnabled() {
         row->selected = idleTextMode();
         row->optionEnabled.assign(row->options.size(), true);
         if (row->optionEnabled.size() > 2)
-            row->optionEnabled[2] = embeddedResourceOnlyAvailable() || row->selected == 2;
+            row->optionEnabled[2] = embeddedResourceOnlyAvailable();
     }
     if (auto* row = findRow(kIdIdleQuoteSource))
         row->enabled = quoteEnabled;
@@ -230,7 +232,7 @@ void SettingsSections::updateIdleRowsEnabled() {
     if (auto* row = findRow(kIdIdleQuoteAlignment))
         row->enabled = quoteEnabled && !state.verticalTaskbar;
     if (auto* row = findRow(kIdIdleCustomWelcome))
-        row->enabled = state.idleWelcomeEnabled;
+        row->enabled = idleTextMode() == 1;
     if (auto* row = findRow(kIdIdleQuoteBackground))
         row->enabled = !minimalModeActive();
     if (auto* row = findRow(kIdIdleQuoteBackgroundScope))
