@@ -5,6 +5,7 @@ import {clamp, ease, Footer, Header, RecordingNotice, Scene, Strip, Surface} fro
 import {Spectrum} from './Spectrum';
 import {CameraFrame, DesktopFocus} from './camera';
 import {OpeningConfiguration} from './OpeningConfiguration';
+import {productIntroduction, productName} from './product';
 
 export const OpeningLyrics = () => {
   const frame = useCurrentFrame();
@@ -53,7 +54,7 @@ export const OpeningLyrics = () => {
       opacity: interpolate(frame, [6 * fps, 7 * fps, 8.8 * fps, 9.6 * fps], [0, 1, 1, 0], clamp),
     }}>
       <CanvasImage src={staticFile('logo-light.png')} style={{width: 48, height: 48}} />
-      <Interactive.Div name="产品名称" style={{fontSize: 29}}>QQ 音乐 / 网易云任务栏歌词</Interactive.Div>
+      <Interactive.Div name="产品名称" style={{fontSize: 29}}>{productName}</Interactive.Div>
     </div>
     <Sequence name="当前行说明" from={9.6 * fps} durationInFrames={4.4 * fps} layout="none">
       <div style={{position: 'absolute', top: 815, left: 120, right: 120, textAlign: 'center', fontSize: 30, color: '#6b8190'}}>
@@ -254,12 +255,12 @@ export const Closing = () => {
     <div style={{position: 'absolute', top: 95, left: 0, right: 0, textAlign: 'center'}}>
       <CanvasImage src={staticFile('logo-light.png')} style={{width: 82, height: 82}} />
       <Interactive.Div name="片尾标题" style={{fontSize: 68, fontWeight: 500, marginTop: 24, letterSpacing: -2}}>把喜欢的音乐，留在任务栏。</Interactive.Div>
-      <Interactive.Div name="片尾产品名称" style={{fontSize: 30, color: '#657e90', marginTop: 20}}>QQ 音乐 / 网易云任务栏歌词</Interactive.Div>
+      <Interactive.Div name="片尾产品名称" style={{fontSize: 30, color: '#657e90', marginTop: 20}}>{productName}</Interactive.Div>
     </div>
     <div style={{position: 'absolute', left: 235, right: 235, top: 440, fontSize: 30, lineHeight: 1.85, color: '#516c7e',
       opacity: interpolate(frame, [0.5 * fps, 1.3 * fps], [0, 1], clamp),
     }}>
-      <Interactive.Div name="项目介绍">把 QQ 音乐和网易云音乐的歌词嵌入 Windows 10/11 任务栏——滚动歌词、每日一言、逐字高亮、播放控制、音频频谱，支持 Windows 11 任务栏上、下、左、右四边布局，程序本体为 C++ 原生实现，无 Electron、WebView 和 .NET/WPF 运行时，秉持工具软件应尽可能少占内存的原则。</Interactive.Div>
+      <Interactive.Div name="项目介绍">{productIntroduction}</Interactive.Div>
     </div>
     <div style={{position: 'absolute', top: 870, width: '100%', textAlign: 'center'}}>
       <Interactive.Div name="下载地址" style={{fontSize: 39, color: '#287fa9', fontWeight: 600}}>www.taskbar-lyrics.top</Interactive.Div>

@@ -42,7 +42,7 @@ export const Promo = () => {
       <Sequence name="媒体卡片 · 完整录屏" from={106 * fps + auxiliaryExtraFrames} durationInFrames={18 * fps}><MediaCard /></Sequence>
       <Sequence name="空闲 · 一言与工具" from={124 * fps + auxiliaryExtraFrames} durationInFrames={10 * fps}><Idle /></Sequence>
       <Sequence name="设置 · 七组完整界面" from={134 * fps + auxiliaryExtraFrames} durationInFrames={19 * fps}><SettingsShowcase /></Sequence>
-      <Sequence name="关于 · 完整窗口" from={153 * fps + auxiliaryExtraFrames} durationInFrames={6 * fps}><About /></Sequence>
+      <Sequence name="关于 · 多播放器支持与更新" from={153 * fps + auxiliaryExtraFrames} durationInFrames={6 * fps}><About /></Sequence>
       <Sequence name="更多内容 · 官网功能卡片" from={159 * fps + auxiliaryExtraFrames} durationInFrames={20 * fps}><Explore /></Sequence>
       <Sequence name="片尾 · 项目介绍与下载入口" from={179 * fps + auxiliaryExtraFrames} durationInFrames={16 * fps}><Closing /></Sequence>
     </Track>

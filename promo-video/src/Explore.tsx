@@ -33,7 +33,7 @@ export const Explore = () => {
     <Header chapter="继续发现" title="更多内容，等待探索。" detail="还有一些细节，留给日常慢慢发现。" />
     <Sequence name="更多 · 本地歌词与任务栏适配" durationInFrames={5.4 * fps}>
       <ExplorePair label="歌词与桌面" duration={5.4}
-        leftTitle="QQ 音乐本地歌词" leftDetail="索引本地 QRC 缓存，离线也能匹配；本地与在线歌词随时切换。"
+        leftTitle="本地歌词匹配" leftDetail="QQ 音乐可索引本地 QRC 缓存，本地与在线歌词随时切换。"
         rightTitle="竖向与小任务栏适配" rightDetail="竖向任务栏自动切换竖排歌词；小任务栏自动调整显示，恢复正常大小后还原偏好。" />
     </Sequence>
     <Sequence name="更多 · 性能与自启动" from={5 * fps} durationInFrames={5.4 * fps}>

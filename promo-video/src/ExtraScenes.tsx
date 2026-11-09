@@ -1,8 +1,9 @@
 import {Video} from '@remotion/media';
-import {AbsoluteFill, CanvasImage, Easing, interpolate, Sequence, useCurrentFrame, useVideoConfig} from 'remotion';
+import {AbsoluteFill, CanvasImage, Easing, Interactive, interpolate, Sequence, staticFile, useCurrentFrame, useVideoConfig} from 'remotion';
 import {recording, screenshot} from './assets';
 import {clamp, Footer, Header, RecordingNotice, Scene, Surface} from './design';
 import {CameraFrame} from './camera';
+import {productName, supportedPlayers} from './product';
 
 export const ManualSearch = () => {
   const {fps} = useVideoConfig();
@@ -54,9 +55,15 @@ export const SettingsShowcase = () => {
 };
 
 export const About = () => <Scene duration={6}>
-  <Header chapter="关于与更新" title="每一次更新，都看得见。" />
-  <Surface style={{position: 'absolute', left: 720, top: 305, width: 480, borderRadius: 14}}>
-    <div style={{margin: -3}}><CanvasImage src={screenshot('关于窗口')} style={{width: '100%', height: 'auto', display: 'block'}} /></div>
+  <Header chapter="关于与更新" title="熟悉的任务栏，连接不同的音乐。" />
+  <Surface style={{position: 'absolute', left: 340, top: 340, width: 1240, boxSizing: 'border-box', padding: '55px 64px', borderRadius: 28, background: '#ffffffd9'}}>
+    <div style={{display: 'flex', alignItems: 'center', gap: 24}}>
+      <CanvasImage src={staticFile('logo-light.png')} style={{width: 64, height: 64}} />
+      <Interactive.Div name="关于产品名称" style={{fontSize: 48}}>{productName}</Interactive.Div>
+    </div>
+    <div style={{fontSize: 24, color: '#4384aa', marginTop: 36}}>当前支持的播放器</div>
+    <Interactive.Div name="当前支持的播放器" style={{fontSize: 32, color: '#516c7e', marginTop: 16}}>{supportedPlayers.join(' · ')}</Interactive.Div>
+    <div style={{fontSize: 27, color: '#647e8f', lineHeight: 1.8, marginTop: 28}}>自动识别播放来源，随播放状态切换。<br />在关于窗口查看版本与更新日志，选择 GitHub 或 Gitee 更新源。</div>
   </Surface>
-  <Footer text="版本信息 / 更新日志 / 更新来源" />
+  <Footer text="最新支持列表与使用说明 · www.taskbar-lyrics.top" />
 </Scene>;
