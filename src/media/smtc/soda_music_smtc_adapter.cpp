@@ -14,8 +14,14 @@ SmtcSessionIdentity SodaMusicSmtcAdapter::identifySession(const Session& session
     try {
         identity.sourceAppUserModelId = session.SourceAppUserModelId().c_str();
         const auto* source = player_source::find(identity.sourceAppUserModelId);
-        if (source && source->player == playerType())
-            identity.player = SmtcPlayerType::Soda;
+        if (source && source->player == playerType()) {
+            // 系统可能暂留已关闭的来源标识，不能将其重新绑定为有效汽水会话。
+            using Status =
+                winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus;
+            auto info = session.GetPlaybackInfo();
+            if (info && info.PlaybackStatus() != Status::Closed)
+                identity.player = SmtcPlayerType::Soda;
+        }
     } catch (...) {
     }
     return identity;

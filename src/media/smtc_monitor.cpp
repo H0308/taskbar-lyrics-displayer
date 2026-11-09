@@ -881,7 +881,9 @@ struct SmtcMonitor::Impl {
         }
 
         if (!found && selectedSessionAlive && selectedSession) {
-            if (playerProcessAlive(selectedPlayer)) {
+            // Soda 退出后主进程可能继续驻留；会话消失时不能仅凭进程存在保留歌词。
+            // 仍经过下面的稳定窗口，短暂的会话重建不会立即清空展示。
+            if (selectedPlayer != SmtcPlayerType::Soda && playerProcessAlive(selectedPlayer)) {
                 sessionLossCandidateSince = {};
                 return;
             }
