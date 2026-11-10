@@ -3896,9 +3896,15 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     void onLyricLineTargetChanged(int newLine, int64_t actualPositionMs, uint64_t revision,
                                   bool allowAnimate) {
         const int previous = currentLine;
+        const auto* source = previous == -1 && newLine == 0
+                                 ? player_source::find(media.sourceAppUserModelId) : nullptr;
+        const bool fromPrelude = source && source->player == SmtcPlayerType::Soda &&
+                                 scene_ == DisplayScene::Lyrics && media.playing &&
+                                 !statusText.empty() && lastLyric_ == statusText &&
+                                 typesetter_.resources().lyricLayout_.Get();
         currentLine = newLine;
         const auto decision = transition_.request(previous, newLine, actualPositionMs, revision,
-                                                  allowAnimate && clientAnimations_);
+                                                  allowAnimate && clientAnimations_, fromPrelude);
         if (decision == LyricTransition::Decision::Reset)
             resetLyricTransition();
         if (decision != LyricTransition::Decision::Queued)

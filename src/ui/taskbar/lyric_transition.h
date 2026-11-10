@@ -20,8 +20,12 @@ class LyricTransition {
 public:
     enum class Phase { Idle, Pending, Running };
     enum class Decision { Reset, Queued, Rebuild };
-    Decision request(int previous, int next, int64_t position, uint64_t revision, bool animate) {
-        if (!animate || previous < 0 || next < 0 || static_cast<int64_t>(next) - previous > 1 ||
+    Decision request(int previous, int next, int64_t position, uint64_t revision, bool animate,
+                     bool fromPrelude = false) {
+        // 前奏文案不是歌词行，但已具有可离场的布局；只接受显式声明的 -1 → 0。
+        const bool preludeToFirstLine = fromPrelude && previous == -1 && next == 0;
+        if (!animate || (previous < 0 && !preludeToFirstLine) || next < 0 ||
+            static_cast<int64_t>(next) - previous > 1 ||
             static_cast<int64_t>(previous) - next > 1)
             return Decision::Reset;
         LyricTransitionTarget target{next, position, next > previous ? 1 : -1, revision};
