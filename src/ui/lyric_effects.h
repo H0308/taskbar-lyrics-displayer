@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-enum class LyricEffect { Stardust, FollowLight, Underline, Ripple, WordWave };
-constexpr int kLyricEffectCount = 5;
+enum class LyricEffect { Stardust, FollowLight, Underline, Ripple, WordWave, EasterEggs };
+constexpr int kLyricEffectCount = 6;
 constexpr uint32_t kLyricEffectsMask = (1u << kLyricEffectCount) - 1u;
 constexpr uint32_t lyricEffectBit(LyricEffect effect) {
     return 1u << static_cast<unsigned>(effect);

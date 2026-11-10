@@ -5916,6 +5916,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 const float spectrumW = spectrumContentWForScene(scene_, w);
                 drawSpectrum(w - embeddedResourceExtra() - spectrumW - kTextPadding, h, spectrumW);
             }
+            lyricEffectsRenderer_.setContext(lyricEffectsContext(drawTarget()));
+            lyricEffectsRenderer_.drawEasterEggs(
+                D2D1::RectF(lyricAreaX, 0.0f, lyricAreaX + lyricAreaW, h));
             if (transition_.kind() == LyricTransitionKind::Scene && isLyricTransitionActive() &&
                 typesetter_.resources().outgoingLyricLayout_.Get()) {
                 drawSceneTransition(w, lyricAreaX, lyricAreaW, h, lyricBlockH);
@@ -6541,6 +6544,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                     drawSpectrum(w - embeddedResourceExtra() - spectrumW - kTextPadding, h,
                                  spectrumW);
                 }
+                lyricEffectsRenderer_.setContext(lyricEffectsContext(drawTarget()));
+                lyricEffectsRenderer_.drawEasterEggs(
+                    D2D1::RectF(lyricAreaX, 0.0f, lyricAreaX + lyricAreaW, h));
                 if (transition_.kind() == LyricTransitionKind::Scene && isLyricTransitionActive() &&
                     typesetter_.resources().outgoingLyricLayout_.Get()) {
                     drawSceneTransition(w, lyricAreaX, lyricAreaW, h, lyricBlockH);

@@ -51,10 +51,18 @@ void LyricEffectsRenderer::syncLyricEffectClock(int64_t position, bool playing, 
     const int64_t elapsed =
         lyricFxLastClockMs_ == 0 ? 0 : static_cast<int64_t>(now - lyricFxLastClockMs_);
     const int64_t expected = lyricFxPlaying_ ? elapsed : 0;
-    if (reset || lyricFxLastPositionMs_ < 0 ||
+    const bool discontinuity = reset || lyricFxLastPositionMs_ < 0 ||
         std::llabs(position - lyricFxLastPositionMs_ - expected) > 350 ||
-        (!playing && !lyricFxPlaying_ && position != lyricFxLastPositionMs_) ||
-        (playing && !lyricFxPlaying_)) {
+        (!playing && !lyricFxPlaying_ && position != lyricFxLastPositionMs_);
+    // 歌曲位置只控制触发；已触发彩蛋由自己的单调时钟推进。
+    if (discontinuity) {
+        lyricEggEmitFromMs_ = position;
+        if (reset)
+            easterEggs_.resetPlayback(position);
+        else
+            easterEggs_.resetTriggerPosition(position);
+    }
+    if (discontinuity || (playing && !lyricFxPlaying_)) {
         lyricFxEmitFromMs_ = position;
         if (context_.effects != 0)
             requestFrame();
@@ -70,9 +78,15 @@ void LyricEffectsRenderer::syncLyricEffectClock(int64_t position, bool playing, 
 
 bool LyricEffectsRenderer::lyricEffectsAnimating() const {
     if (context_.effects == 0 || !context_.lines || !context_.animations || context_.minimal || context_.stopped ||
-        context_.scene != DisplayScene::Lyrics || context_.currentLine < 0)
+        context_.scene != DisplayScene::Lyrics || context_.currentLine < 0 ||
+        static_cast<size_t>(context_.currentLine) >= context_.lines->size())
         return false;
-    const auto otherEffects = context_.effects & ~lyricEffectBit(LyricEffect::WordWave);
+    if (!context_.vertical && context_.compactHeight <= 0.0f &&
+        lyricEffectEnabled(LyricEffect::EasterEggs) &&
+        easterEggs_.active())
+        return true;
+    const auto otherEffects = context_.effects &
+        ~(lyricEffectBit(LyricEffect::WordWave) | lyricEffectBit(LyricEffect::EasterEggs));
     const bool wave = wordWaveEnabled(context_.currentLine);
     if (otherEffects == 0) {
         return context_.playing && wave &&
@@ -99,6 +113,7 @@ bool LyricEffectsRenderer::lyricEffectsAnimating() const {
 
 void LyricEffectsRenderer::clearLyricEffectGeometry() {
     wordWave_.clear();
+    easterEggs_.clear();
     lyricFxGeometry_.clear();
     for (auto& source : lyricFxSources_)
         source = {};
@@ -270,13 +285,30 @@ void LyricEffectsRenderer::ensureLyricGlyphMask(IDWriteTextLayout* layout,
         target->Release();
 }
 
+void LyricEffectsRenderer::drawEasterEggs(D2D1_RECT_F viewport) {
+    auto* rt = drawTarget();
+    if (!rt || !brushLyricFx_ || !context_.lines || !context_.animations ||
+        context_.minimal || context_.stopped || context_.vertical || context_.compactHeight > 0 ||
+        context_.scene != DisplayScene::Lyrics || !lyricEffectEnabled(LyricEffect::EasterEggs) ||
+        context_.currentLine < 0 || static_cast<size_t>(context_.currentLine) >= context_.lines->size() ||
+        viewport.right <= viewport.left || viewport.bottom <= viewport.top)
+        return;
+    // 独立背景层每帧只画一次，不借用歌词行入场的透明度、位移或缩放。
+    rt->PushAxisAlignedClip(viewport, D2D1_ANTIALIAS_MODE_ALIASED);
+    easterEggs_.draw(rt, brushLyricFx_.Get(), (*context_.lines)[context_.currentLine],
+                    context_.currentLine, viewport, context_.positionMs, lyricEggEmitFromMs_,
+                    context_.playing);
+    rt->PopAxisAlignedClip();
+}
+
 void LyricEffectsRenderer::drawLyricOverlay(IDWriteTextLayout* layout, int lineIndex, float x,
                                             float y, float width, float height, bool vertical,
                                             float opacity, float progress, bool foreground,
                                             float rangeStart, float rangeSize) {
     auto* rt = drawTarget();
-    if (!foreground || !rt || !layout || !brushLyricFx_.Get() ||
-        (context_.effects & ~lyricEffectBit(LyricEffect::WordWave)) == 0 ||
+    if (!foreground || !rt || !layout || !brushLyricFx_.Get() || !context_.lines ||
+        (context_.effects & ~(lyricEffectBit(LyricEffect::WordWave) |
+                              lyricEffectBit(LyricEffect::EasterEggs))) == 0 ||
         !context_.animations || context_.minimal || context_.stopped ||
         context_.scene != DisplayScene::Lyrics || lineIndex < 0 ||
         static_cast<size_t>(lineIndex) >= (*context_.lines).size() || width <= 0 || height <= 0 ||

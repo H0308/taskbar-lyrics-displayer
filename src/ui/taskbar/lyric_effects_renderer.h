@@ -4,6 +4,7 @@
 #include "ui/lyric_effects.h"
 #include "ui/lyric_star.h"
 #include "ui/taskbar/animation_clock.h"
+#include "ui/taskbar/lyric_easter_eggs.h"
 #include "ui/taskbar/word_wave_renderer.h"
 #include <d2d1_1.h>
 #include <dwrite.h>
@@ -88,6 +89,7 @@ public:
     bool wordWaveEnabled(int lineIndex) const;
     bool prepareWordWave(IDWriteTextLayout* layout, int lineIndex);
     void drawWordWaveText(D2D1_POINT_2F origin, ID2D1Brush* brush) const;
+    void drawEasterEggs(D2D1_RECT_F viewport);
     const std::vector<LyricFxToken>& lyricEffectTokens(int lineIndex);
     float lyricEffectProgress(int lineIndex);
     LyricFxGeometry& lyricEffectGeometry(IDWriteTextLayout* layout, int lineIndex, float width,
@@ -106,6 +108,7 @@ private:
     static ULONGLONG monotonicNowMs() { return taskbar_detail::monotonicNowMs(); }
     ID2D1DeviceContext* drawTarget() const { return context_.target; }
     int64_t lyricFxEmitFromMs_ = 0;
+    int64_t lyricEggEmitFromMs_ = 0;
     int64_t lyricFxLastPositionMs_ = -1;
     ULONGLONG lyricFxLastClockMs_ = 0;
     ULONGLONG lyricFxPauseMs_ = 0;
@@ -114,6 +117,7 @@ private:
     std::unordered_map<const IDWriteTextLayout*, std::unique_ptr<LyricFxGeometry>> lyricFxGeometry_;
     LyricStarShape lyricStar_;
     WordWaveRenderer wordWave_;
+    LyricEasterEggs easterEggs_;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushLyricFx_;
     Microsoft::WRL::ComPtr<ID2D1LinearGradientBrush> brushLyricFollow_;
 };

@@ -185,18 +185,6 @@ void LyricTextRenderer::drawScrollingText(const LyricTextDrawContext& context,
     const float wavePad = wave ? 2.0f : 0.0f;
     D2D1_RECT_F clip{x, y - effectTopPad - wavePad,
                     x + areaW + (rightFade ? rightExtend : 0.0f), y + textH + wavePad};
-    if (rightFade) {
-        rt->PushLayer(D2D1::LayerParameters1(clip, nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
-                                             D2D1::Matrix3x2F::Identity(), 1.0f, rightFade),
-                      lyricRightFadeLayer_.Get());
-    }
-    if (fadeBrush) {
-        rt->PushLayer(D2D1::LayerParameters1(clip, nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
-                                             D2D1::Matrix3x2F::Identity(), 1.0f, fadeBrush),
-                      lyricEdgeFadeLayer_.Get());
-    } else {
-        rt->PushAxisAlignedClip(clip, D2D1_ANTIALIAS_MODE_ALIASED);
-    }
     static constexpr float kDirs[8][2] = {
         {1.0f, 0.0f},  {0.7071f, 0.7071f},   {0.0f, 1.0f},  {-0.7071f, 0.7071f},
         {-1.0f, 0.0f}, {-0.7071f, -0.7071f}, {0.0f, -1.0f}, {0.7071f, -0.7071f}};
@@ -237,7 +225,18 @@ void LyricTextRenderer::drawScrollingText(const LyricTextDrawContext& context,
             context.effects.drawLyricOverlay(layout, effectLine, bases[i], y, textW, textH, false,
                                              opacity, effectProgress, foreground);
     };
-    drawOverlay(false);
+    if (rightFade) {
+        rt->PushLayer(D2D1::LayerParameters1(clip, nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                                             D2D1::Matrix3x2F::Identity(), 1.0f, rightFade),
+                      lyricRightFadeLayer_.Get());
+    }
+    if (fadeBrush) {
+        rt->PushLayer(D2D1::LayerParameters1(clip, nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                                             D2D1::Matrix3x2F::Identity(), 1.0f, fadeBrush),
+                      lyricEdgeFadeLayer_.Get());
+    } else {
+        rt->PushAxisAlignedClip(clip, D2D1_ANTIALIAS_MODE_ALIASED);
+    }
     auto drawText = [&](D2D1_POINT_2F origin, ID2D1Brush* drawBrush) {
         if (wave)
             context.effects.drawWordWaveText(origin, drawBrush);

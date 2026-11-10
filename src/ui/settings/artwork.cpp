@@ -313,6 +313,21 @@ void SettingsArtwork::drawLyricEffectArtwork(fluent::FluentDialogSurface::Painte
             rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 12, 12), brush, 1.0f);
         }
     }
+    if (effect == LyricEffect::EasterEggs) {
+        if (auto* brush = painter.brush(tone(D2D1::ColorF(0.78f, 0.87f, 0.98f), 0.85f))) {
+            rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx - 20, cy - 7), 7, 4), brush);
+            rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx - 16, cy - 10), 5, 5), brush);
+            rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx - 11, cy - 7), 6, 4), brush);
+        }
+        if (auto* brush = painter.brush(tone(D2D1::ColorF(0.95f, 0.58f, 0.72f), 0.9f))) {
+            for (int i = 0; i < 5; ++i) {
+                const float angle = i * 6.2831853f / 5;
+                rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx + 23 + std::cos(angle) * 3,
+                                                                        cy + std::sin(angle) * 3),
+                                             2.4f, 2.4f), brush);
+            }
+        }
+    }
     if (effect == LyricEffect::WordWave) {
         const wchar_t* letters[] = {L"听", L"见", L"音", L"乐"};
         const float offsets[] = {0.2f, 1.0f, 1.5f, 0.5f};
@@ -323,7 +338,8 @@ void SettingsArtwork::drawLyricEffectArtwork(fluent::FluentDialogSurface::Painte
                             textRect.bottom + offsets[i]), tone(p.accent, 0.82f));
         }
     } else {
-        painter.drawText(L"听见音乐", format, textRect, tone(p.accent, 0.82f));
+        painter.drawText(effect == LyricEffect::EasterEggs ? L"歌词彩蛋" : L"听见音乐",
+                         format, textRect, tone(p.accent, 0.82f));
     }
     if (effect == LyricEffect::FollowLight) {
         rt->PushAxisAlignedClip(D2D1::RectF(cx - 8, panel.top, cx + 8, panel.bottom),
