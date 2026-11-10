@@ -187,6 +187,7 @@ int App::messageLoop() {
 
 bool App::initialize(HINSTANCE inst, bool wantTaskbar) {
     loadSettings();
+    applyUiFont();
     idle_.prepareIdleApps();
     initializeRuntimeLogger();
     // 无命令行参数时始终开启任务栏歌词（沿用原"所有宿主都关闭则强制任务栏"的行为，

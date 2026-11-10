@@ -423,6 +423,12 @@ void SettingsSections::syncSongToastRows(const SettingsState& s) {
 }
 
 void SettingsSections::syncThemeFontRows(const SettingsState& s) {
+    if (auto* row = findRow(kIdUiFontSource))
+        row->selected = static_cast<int>(s.uiFontSource);
+    if (auto* row = findRow(kIdPickUiFont)) {
+        row->valueText = s.uiFontDesc;
+        row->enabled = s.uiFontSource == UiFontSource::Independent;
+    }
     if (auto* row = findRow(kIdTaskbarTheme))
         row->selected = themeModeIndex(s.taskbarThemeMode);
     if (auto* row = findRow(kIdWindowTheme))

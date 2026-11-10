@@ -230,6 +230,7 @@ private:
     std::unique_ptr<ManualSearchDialog> manualSearchDialog;
     std::wstring manualSearchTrackKey;
     std::unique_ptr<FontPickerDialog> fontPickerDialog;
+    std::unique_ptr<FontPickerDialog> uiFontPickerDialog;
     std::unique_ptr<FontColorDialog> fontColorDialog;
     std::unique_ptr<IdleAppNameDialog> idleAppNameDialog;
     std::unique_ptr<IdleAppNameDialog> idleWelcomeDialog;
@@ -568,6 +569,8 @@ private:
     SettingsState currentSettingsState() const;
     SettingsActions buildSettingsActions();
     void pickFont();
+    void pickUiFont();
+    void applyUiFont();
     void showFontColorDialog();
     void showAbout(bool downloadUpdate = false);
     void showUpdatePrompt(const std::wstring& latestVersion);

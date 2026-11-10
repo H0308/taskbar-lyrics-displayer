@@ -2619,6 +2619,7 @@ struct SettingsDialog::Impl {
             backdrop = fluent::restyleDialogWindow(hwnd, backdrop, false);
             surface.setBackdrop(backdrop);
             search_.refreshTheme();
+            layout();
             surface.invalidate();
             return 0;
         case WM_PAINT: {

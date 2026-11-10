@@ -6,6 +6,7 @@
 #include <dwrite.h>
 
 #include <string>
+#include <cstdint>
 
 // Win11 Fluent 风格主题支持：
 // 系统深/浅色检测、DWM 圆角/深色标题栏、统一调色板与字体。
@@ -94,8 +95,13 @@ COLORREF fallbackBgColor();
 void paintDialogBackground(HWND hwnd, HDC hdc, bool backdrop);
 
 // ---- 字体 ----
-// DWrite 渲染用的 UI 字体族名
+// DWrite 渲染用的 UI 字体族名；返回值借用至当前线程下一次调用。
 const wchar_t* uiFontFamily();
+// 只发布解析后的界面字体；持久偏好及跟随关系由 App 管理。
+void setUiFont(const std::wstring& family, LyricFontStyle style);
+uint64_t uiFontRevision();
+HRESULT createUiTextFormat(IDWriteFactory* factory, float dipSize, int weight,
+                           IDWriteTextFormat** out);
 // 为缺失字形设置 UI 专用字体回退链；调用方继续负责释放文本格式。
 void applyUiFontFallback(IDWriteTextFormat* format);
 // GDI 真控件（EDIT）用字体；调用方负责 DeleteObject

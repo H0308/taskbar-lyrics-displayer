@@ -189,7 +189,12 @@ void enforceDialogMinimumAspectRatio(HWND hwnd, WPARAM sizingEdge, RECT* propose
 
 FluentDialogSurface::Painter::Painter(ID2D1RenderTarget* target, IDWriteFactory* dwrite,
                                        TextCache* textCache)
-    : target_(target), dwrite_(dwrite), colors_(fluent::palette()), textCache_(textCache) {}
+    : target_(target), dwrite_(dwrite), colors_(fluent::palette()), textCache_(textCache) {
+    if (textCache_ && textCache_->fontRevision != uiFontRevision()) {
+        textCache_->clear();
+        textCache_->fontRevision = uiFontRevision();
+    }
+}
 
 FluentDialogSurface::Painter::~Painter() {
     for (auto* layout : layouts_) {
@@ -233,15 +238,17 @@ IDWriteTextFormat* FluentDialogSurface::Painter::textFormat(float dipSize, int w
 
     IDWriteTextFormat* format = nullptr;
     const wchar_t* familyName = family ? family : uiFontFamily();
-    const TextCache::FormatKey key{dipSize, weight, center, noWrap, familyName};
+    const TextCache::FormatKey key{dipSize, weight, center, noWrap, familyName, family == nullptr};
     if (textCache_) {
         const auto found = textCache_->formats.find(key);
         if (found != textCache_->formats.end())
             return found->second.Get();
     }
-    HRESULT hr = dwrite_->CreateTextFormat(
-        familyName, nullptr, static_cast<DWRITE_FONT_WEIGHT>(weight), DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL, dipSize, L"zh-cn", &format);
+    HRESULT hr = family
+        ? dwrite_->CreateTextFormat(familyName, nullptr, static_cast<DWRITE_FONT_WEIGHT>(weight),
+                                     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                                     dipSize, L"zh-cn", &format)
+        : createUiTextFormat(dwrite_, dipSize, weight, &format);
     if (FAILED(hr) || !format)
         return nullptr;
 

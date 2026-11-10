@@ -439,6 +439,14 @@ void SettingsSections::onCommand(int id, int option) {
         if (actions.onPickFont)
             actions.onPickFont();
         break;
+    case kIdUiFontSource:
+        if (actions.onUiFontSource)
+            actions.onUiFontSource(static_cast<UiFontSource>(row->selected));
+        break;
+    case kIdPickUiFont:
+        if (actions.onPickUiFont)
+            actions.onPickUiFont();
+        break;
     }
 }
 

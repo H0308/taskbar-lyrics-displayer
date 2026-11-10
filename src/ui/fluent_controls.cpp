@@ -189,7 +189,9 @@ IDWriteFactory* LayeredChild::dwrite() {
 }
 
 IDWriteTextFormat* LayeredChild::textFormat(float dipSize, int weight, bool center) {
-    if (fmt_ && fmtSize_ == dipSize && fmtWeight_ == weight && fmtCenter_ == center)
+    const auto revision = uiFontRevision();
+    if (fmt_ && fmtSize_ == dipSize && fmtWeight_ == weight && fmtCenter_ == center &&
+        fmtRevision_ == revision)
         return fmt_;
     if (fmt_) {
         fmt_->Release();
@@ -198,10 +200,7 @@ IDWriteTextFormat* LayeredChild::textFormat(float dipSize, int weight, bool cent
     IDWriteFactory* dw = renderer_.dwrite();
     if (!dw)
         return nullptr;
-    HRESULT hr = dw->CreateTextFormat(uiFontFamily(), nullptr,
-                                      static_cast<DWRITE_FONT_WEIGHT>(weight),
-                                      DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-                                      dipSize, L"zh-cn", &fmt_);
+    HRESULT hr = createUiTextFormat(dw, dipSize, weight, &fmt_);
     if (FAILED(hr) || !fmt_)
         return nullptr;
     applyUiFontFallback(fmt_);
@@ -211,6 +210,7 @@ IDWriteTextFormat* LayeredChild::textFormat(float dipSize, int weight, bool cent
     fmtSize_ = dipSize;
     fmtWeight_ = weight;
     fmtCenter_ = center;
+    fmtRevision_ = revision;
     return fmt_;
 }
 
@@ -576,6 +576,8 @@ void FluentEdit::focus() {
 }
 
 void FluentEdit::refreshTheme() {
+    editFontDpi_ = 0;
+    layoutEdit();
     renderNow();
     repaintEdit();
 }

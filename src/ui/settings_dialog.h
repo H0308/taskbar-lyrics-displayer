@@ -92,6 +92,8 @@ struct SettingsState {
     bool qqLocalLyricsPersistOrder = false;
     std::wstring qqLocalLyricsPath;
     std::wstring fontDesc;         // 字体设置提示文字（如 "Microsoft YaHei UI, 16px, 常规"）
+    UiFontSource uiFontSource = UiFontSource::Independent;
+    std::wstring uiFontDesc;
 };
 
 // 设置变更回调：用户操作即时生效（与右键菜单语义一致）
@@ -163,6 +165,8 @@ struct SettingsActions {
     std::function<void(fluent::ThemeMode)> onTaskbarTheme;
     std::function<void(fluent::ThemeMode)> onWindowTheme;
     std::function<void()> onPickFont;
+    std::function<void(UiFontSource)> onUiFontSource;
+    std::function<void()> onPickUiFont;
     std::function<void()> onFontColorEffect;
     std::function<void(bool)> onFollowAlbum;
     std::function<void(bool)> onDoubleLineLyrics;

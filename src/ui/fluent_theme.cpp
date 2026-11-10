@@ -1,4 +1,5 @@
 #include "fluent_theme.h"
+#include "ui/font_style.h"
 
 #include <dwmapi.h>
 #include <dwrite_2.h>
@@ -7,6 +8,7 @@
 #include <cmath>
 #include <algorithm>
 #include <atomic>
+#include <mutex>
 
 #pragma comment(lib, "dwmapi.lib")
 
@@ -40,6 +42,10 @@ constexpr int kDwmsbtTransientWindow = 3; // Windows 11 Desktop Acrylic
 std::atomic<ThemeMode> gTaskbarThemeMode{ThemeMode::FollowSystem};
 std::atomic<ThemeMode> gWindowThemeMode{ThemeMode::FollowApp};
 thread_local winrt::Windows::UI::ViewManagement::UISettings gThreadUiSettings{nullptr};
+std::mutex gUiFontMutex;
+std::wstring gUiFontFamily = kDefaultUiFontFamily;
+LyricFontStyle gUiFontStyle = LyricFontStyle::Normal;
+std::atomic<uint64_t> gUiFontRevision{0};
 
 IDWriteFontFallback* createUiFontFallback() {
     IDWriteFactory* factory = nullptr;
@@ -72,7 +78,7 @@ IDWriteFontFallback* createUiFontFallback() {
         // 应用字体优先，系统字体补齐列表中未覆盖的字符。
         builder->AddMapping(ranges, static_cast<UINT32>(_countof(ranges)), targetFamilies,
                             static_cast<UINT32>(_countof(targetFamilies)), nullptr, L"zh-cn",
-                            uiFontFamily(), 1.0f);
+                            kDefaultUiFontFamily, 1.0f);
         if (SUCCEEDED(factory2->GetSystemFontFallback(&systemFallback)) && systemFallback)
             builder->AddMappings(systemFallback);
         builder->CreateFontFallback(&result);
@@ -391,7 +397,45 @@ void paintDialogBackground(HWND hwnd, HDC hdc, bool backdrop) {
     DeleteObject(brush);
 }
 
-const wchar_t* uiFontFamily() { return kDefaultUiFontFamily; }
+const wchar_t* uiFontFamily() {
+    thread_local std::wstring family;
+    std::lock_guard lock(gUiFontMutex);
+    family = gUiFontFamily;
+    return family.c_str();
+}
+
+void setUiFont(const std::wstring& family, LyricFontStyle style) {
+    std::lock_guard lock(gUiFontMutex);
+    const std::wstring resolvedFamily = family.empty() ? kDefaultUiFontFamily : family;
+    if (gUiFontFamily == resolvedFamily && gUiFontStyle == style)
+        return;
+    gUiFontFamily = resolvedFamily;
+    gUiFontStyle = style;
+    ++gUiFontRevision;
+}
+
+uint64_t uiFontRevision() { return gUiFontRevision.load(); }
+
+HRESULT createUiTextFormat(IDWriteFactory* factory, float dipSize, int weight,
+                           IDWriteTextFormat** out) {
+    if (!out)
+        return E_POINTER;
+    *out = nullptr;
+    if (!factory)
+        return E_POINTER;
+    std::wstring family;
+    LyricFontStyle style;
+    {
+        std::lock_guard lock(gUiFontMutex);
+        family = gUiFontFamily;
+        style = gUiFontStyle;
+    }
+    const int effectiveWeight = isBoldFontStyle(style) ? std::max(weight, FW_BOLD) : weight;
+    return factory->CreateTextFormat(family.c_str(), nullptr,
+                                     static_cast<DWRITE_FONT_WEIGHT>(effectiveWeight),
+                                     dwriteStyleOf(style), DWRITE_FONT_STRETCH_NORMAL,
+                                     dipSize, L"zh-cn", out);
+}
 
 void applyUiFontFallback(IDWriteTextFormat* format) {
     if (!format)
@@ -410,11 +454,21 @@ void applyUiFontFallback(IDWriteTextFormat* format) {
 }
 
 HFONT createUiFont(UINT dpi, float dipSize, int weight) {
+    std::wstring family;
+    LyricFontStyle style;
+    {
+        std::lock_guard lock(gUiFontMutex);
+        family = gUiFontFamily;
+        style = gUiFontStyle;
+    }
+    if (isBoldFontStyle(style))
+        weight = std::max(weight, FW_BOLD);
     // DIP -> 像素：px = dip * dpi / 96（之前误按磅换算除以 72，字体偏大约 33%）
     int px = -MulDiv(static_cast<int>(std::lround(dipSize)), static_cast<int>(dpi), 96);
-    HFONT font = CreateFontW(px, 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+    HFONT font = CreateFontW(px, 0, 0, 0, weight, dwriteStyleOf(style) == DWRITE_FONT_STYLE_ITALIC,
+                             FALSE, FALSE, DEFAULT_CHARSET,
                              OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                             DEFAULT_PITCH | FF_DONTCARE, uiFontFamily());
+                             DEFAULT_PITCH | FF_DONTCARE, family.c_str());
     return font;
 }
 

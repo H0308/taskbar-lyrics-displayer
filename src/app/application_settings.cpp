@@ -528,11 +528,17 @@ void App::refreshThemeWindows() {
     refresh(aboutDialog ? aboutDialog->hwnd() : nullptr);
     refresh(manualSearchDialog ? manualSearchDialog->hwnd() : nullptr);
     refresh(fontPickerDialog ? fontPickerDialog->hwnd() : nullptr);
+    refresh(uiFontPickerDialog ? uiFontPickerDialog->hwnd() : nullptr);
     if (fontColorDialog) {
         fontColorDialog->refreshTheme();
     }
     refresh(runtimeLogDialog ? runtimeLogDialog->hwnd() : nullptr);
+    refresh(idleAppNameDialog ? idleAppNameDialog->hwnd() : nullptr);
+    refresh(idleWelcomeDialog ? idleWelcomeDialog->hwnd() : nullptr);
+    refresh(tickTickApiTokenDialog ? tickTickApiTokenDialog->hwnd() : nullptr);
     refresh(updatePromptHwnd_);
+    if (songToast_)
+        songToast_->refreshTheme();
 }
 
 void App::refreshTheme() {
@@ -953,6 +959,21 @@ void App::applyFontColors() { publishTaskbarAppearance(); }
 
 void App::applyFontAppearance() { publishTaskbarAppearance(); }
 
+void App::applyUiFont() {
+    const auto revision = fluent::uiFontRevision();
+    const bool useDefault = settings_.uiFontSource_ == UiFontSource::Default;
+    const AppSettings defaults;
+    const auto& family = useDefault ? defaults.uiFontFamily_
+        : settings_.uiFontSource_ == UiFontSource::FollowGeneral ? settings_.fontFamily_
+                                                                : settings_.uiFontFamily_;
+    fluent::setUiFont(family, useDefault ? defaults.uiFontStyle_ : settings_.uiFontStyle_);
+    if (revision == fluent::uiFontRevision())
+        return;
+    refreshThemeWindows();
+    // 各显示线程自行重建其拥有的字体与布局资源。
+    forEachHost([](TaskbarHost* host) { host->refreshTheme(); });
+}
+
 void App::setAutoCheckOnStartup(bool enabled) {
     if (settings_.autoCheckOnStartup_ == enabled)
         return;
@@ -1061,6 +1082,14 @@ SettingsState App::currentSettingsState() const {
     st.fontDesc = settings_.fontFamily_ + L", " +
                   std::to_wstring(static_cast<int>(std::lround(settings_.fontSize_))) + L"px, " +
                   fontStyleLabel(settings_.fontStyle_);
+    st.uiFontSource = settings_.uiFontSource_;
+    const bool useDefault = settings_.uiFontSource_ == UiFontSource::Default;
+    const AppSettings defaults;
+    const auto& uiFamily = useDefault ? defaults.uiFontFamily_
+        : settings_.uiFontSource_ == UiFontSource::FollowGeneral ? settings_.fontFamily_
+                                                                : settings_.uiFontFamily_;
+    const auto uiStyle = useDefault ? defaults.uiFontStyle_ : settings_.uiFontStyle_;
+    st.uiFontDesc = uiFamily + L", " + fontStyleLabel(uiStyle);
     return st;
 }
 
@@ -1145,6 +1174,15 @@ SettingsActions App::buildSettingsActions() {
     act.onTaskbarTheme = [this](fluent::ThemeMode mode) { applyTaskbarTheme(mode); };
     act.onWindowTheme = [this](fluent::ThemeMode mode) { applyWindowTheme(mode); };
     act.onPickFont = [this] { pickFont(); };
+    act.onUiFontSource = [this](UiFontSource source) {
+        settings_.uiFontSource_ = source;
+        if (source != UiFontSource::Independent && uiFontPickerDialog && uiFontPickerDialog->isOpen())
+            uiFontPickerDialog->destroy();
+        applyUiFont();
+        logSettingInt(L"ui-font-source", static_cast<int>(source));
+        saveSettings();
+    };
+    act.onPickUiFont = [this] { pickUiFont(); };
     act.onFontColorEffect = [this] { showFontColorDialog(); };
     act.onFollowAlbum = [this](bool on) { applyFollowAlbum(on); };
     act.onDoubleLineLyrics = [this](bool on) { applyDoubleLineLyrics(on); };

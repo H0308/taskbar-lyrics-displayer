@@ -59,6 +59,7 @@ private:
     float fmtSize_ = 0;
     int fmtWeight_ = 0;
     bool fmtCenter_ = false;
+    uint64_t fmtRevision_ = 0;
 };
 
 // 圆角按钮（可强调色变体），点击向父窗口发送 WM_COMMAND/BN_CLICKED

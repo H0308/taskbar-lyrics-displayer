@@ -396,7 +396,7 @@ struct FontColorDialog::Impl {
             return;
 
         const wchar_t* family =
-            state.fontFamily.empty() ? fluent::uiFontFamily() : state.fontFamily.c_str();
+            state.fontFamily.empty() ? kDefaultUiFontFamily : state.fontFamily.c_str();
         IDWriteTextFormat* format = nullptr;
         if (FAILED(
                 dwrite->CreateTextFormat(family, nullptr, dwriteWeightOf(state.fontStyle),

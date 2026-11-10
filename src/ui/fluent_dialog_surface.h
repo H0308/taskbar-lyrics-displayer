@@ -53,7 +53,8 @@ void enforceDialogMinimumAspectRatio(HWND hwnd, WPARAM sizingEdge, RECT* propose
 class FluentDialogSurface {
 public:
     struct TextCache {
-        using FormatKey = std::tuple<float, int, bool, bool, std::wstring>;
+        uint64_t fontRevision = 0;
+        using FormatKey = std::tuple<float, int, bool, bool, std::wstring, bool>;
         using LayoutKey = std::tuple<std::wstring, std::uintptr_t, float, float>;
         std::map<FormatKey, Microsoft::WRL::ComPtr<IDWriteTextFormat>> formats;
         std::map<LayoutKey, Microsoft::WRL::ComPtr<IDWriteTextLayout>> layouts;

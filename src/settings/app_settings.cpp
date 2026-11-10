@@ -226,6 +226,11 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
         fontFamily_ = fam;
     fontSize_ = (float)j.value("fontSize", 16.0);
     fontStyle_ = fontStyleOf(j.value("fontStyle", std::string("normal")));
+    uiFontSource_ = static_cast<UiFontSource>(std::clamp(j.value("uiFontSource", 0), 0, 2));
+    const auto uiFamily = wideOf(j.value("uiFontFamily", std::string()));
+    if (!uiFamily.empty())
+        uiFontFamily_ = uiFamily;
+    uiFontStyle_ = fontStyleOf(j.value("uiFontStyle", std::string("normal")));
     LyricAppearance legacyAppearance;
     legacyAppearance.played = (COLORREF)j.value("lyricColor", (unsigned)legacyAppearance.played);
     // 未播放色默认跟随已播放色：旧配置进入双主题后视觉保持一致。
@@ -457,6 +462,9 @@ nlohmann::json AppSettings::toJson() const {
     j["fontFamily"] = utf8Of(fontFamily_);
     j["fontSize"] = fontSize_;
     j["fontStyle"] = fontStyleName(fontStyle_);
+    j["uiFontSource"] = static_cast<int>(uiFontSource_);
+    j["uiFontFamily"] = utf8Of(uiFontFamily_);
+    j["uiFontStyle"] = fontStyleName(uiFontStyle_);
     auto saveAppearance = [&j](const char* suffix, const LyricAppearance& appearance) {
         const std::string suffixValue = suffix;
         j["lyricColor" + suffixValue] = static_cast<unsigned>(appearance.played);

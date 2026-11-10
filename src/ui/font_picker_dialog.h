@@ -23,7 +23,7 @@ public:
     FontPickerDialog& operator=(const FontPickerDialog&) = delete;
 
     bool create(HINSTANCE inst, HWND parent, const std::wstring& family, float sizePt,
-                LyricFontStyle style);
+                LyricFontStyle style, bool interfaceFont = false);
     void show();
     void destroy();
     bool isOpen() const;

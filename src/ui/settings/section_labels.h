@@ -63,14 +63,17 @@ inline const wchar_t* backgroundAdjustmentLabel(bool immersive, int mode) {
 }
 
 inline constexpr const wchar_t* kFontSettingNotice =
-    L"字体修改不会影响到界面字体，只会影响到任务栏歌词、每日一言、歌曲信息、沉浸模式时间/日期和 Dock、内嵌模式资源监视";
+    L"用于任务栏歌词、每日一言、歌曲信息、沉浸模式时间/日期和 Dock、内嵌模式资源监视；界面可选择仅跟随此字体的名称。";
 inline settings_icon::Kind iconForRow(int id) {
     switch (id) {
     case kIdTaskbarTheme:
     case kIdWindowTheme:
         return settings_icon::Kind::Theme;
     case kIdPickFont:
+    case kIdPickUiFont:
         return settings_icon::Kind::Font;
+    case kIdUiFontSource:
+        return settings_icon::Kind::Follow;
     case kIdSongInfo:
         return settings_icon::Kind::SongInfo;
     case kIdAlbumCover:

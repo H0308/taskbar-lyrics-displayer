@@ -479,10 +479,10 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     uint64_t requestGeneration_ = 0;
     uint64_t frameRevision_ = 0;
 
-    // 字体：默认字体族与软件普通窗口一致（fluent::uiFontFamily）
+    // 任务栏默认字体独立于用户选择的界面字体。
     float fontSize_ = kBaseFontSize;
     float compactTaskbarHeight_ = 0.0f;
-    std::wstring fontFamily_ = fluent::uiFontFamily();
+    std::wstring fontFamily_ = kDefaultUiFontFamily;
     LyricFontStyle fontStyle_ = LyricFontStyle::Normal;
 
     // 媒体信息

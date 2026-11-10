@@ -39,9 +39,8 @@ float measureMessageHeightDip(const std::wstring& message, float widthDip) {
     }
 
     IDWriteTextFormat* format = nullptr;
-    const HRESULT formatResult = factory->CreateTextFormat(
-        fluent::uiFontFamily(), nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL, kMessageFontSizeDip, L"zh-cn", &format);
+    const HRESULT formatResult = fluent::createUiTextFormat(
+        factory, kMessageFontSizeDip, DWRITE_FONT_WEIGHT_NORMAL, &format);
     if (FAILED(formatResult) || !format) {
         factory->Release();
         return kMinimumMessageHeightDip;

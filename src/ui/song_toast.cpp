@@ -112,6 +112,7 @@ struct SongToast::Impl {
 
     IDWriteTextFormat* fmtTitle = nullptr;
     IDWriteTextFormat* fmtArtist = nullptr;
+    uint64_t fontRevision = 0;
     IDWriteTextLayout* titleLayout = nullptr;
     IDWriteTextLayout* artistLayout = nullptr;
     float titleWidth = 0.0f;
@@ -230,15 +231,18 @@ struct SongToast::Impl {
     }
 
     bool createTextFormats() {
-        if (fmtTitle && fmtArtist)
+        const auto revision = fluent::uiFontRevision();
+        if (fmtTitle && fmtArtist && fontRevision == revision)
             return true;
+        releaseVisualResources();
+        releaseCom(fmtTitle);
+        releaseCom(fmtArtist);
+        themeDirty = true;
         auto* dw = renderer.dwrite();
         if (!dw)
             return false;
         auto create = [&](float size, DWRITE_FONT_WEIGHT weight, IDWriteTextFormat** out) {
-            if (FAILED(dw->CreateTextFormat(fluent::uiFontFamily(), nullptr, weight,
-                                            DWRITE_FONT_STYLE_NORMAL,
-                                            DWRITE_FONT_STRETCH_NORMAL, size, L"", out)) ||
+            if (FAILED(fluent::createUiTextFormat(dw, size, weight, out)) ||
                 !*out)
                 return false;
             (*out)->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
@@ -247,8 +251,11 @@ struct SongToast::Impl {
             fluent::applyUiFontFallback(*out);
             return true;
         };
-        return create(kTitleFontSize, DWRITE_FONT_WEIGHT_SEMI_BOLD, &fmtTitle) &&
-               create(kArtistFontSize, DWRITE_FONT_WEIGHT_NORMAL, &fmtArtist);
+        if (!create(kTitleFontSize, DWRITE_FONT_WEIGHT_SEMI_BOLD, &fmtTitle) ||
+            !create(kArtistFontSize, DWRITE_FONT_WEIGHT_NORMAL, &fmtArtist))
+            return false;
+        fontRevision = revision;
+        return true;
     }
 
     void releaseVisualResources() {
@@ -310,6 +317,8 @@ struct SongToast::Impl {
     }
 
     bool createResources() {
+        if (!createTextFormats())
+            return false;
         if (!themeDirty && brushBackground)
             return true;
         releaseVisualResources();
@@ -544,6 +553,8 @@ struct SongToast::Impl {
 
     bool layoutAndPosition() {
         if (!hwnd)
+            return false;
+        if (!createTextFormats())
             return false;
         if (!targetMonitor)
             targetMonitor = selectedMonitor();
@@ -1196,4 +1207,9 @@ void SongToast::setMedia(const OverlayMediaInfo& info) {
 
 void SongToast::hideImmediate() {
     impl_->hideImmediate();
+}
+
+void SongToast::refreshTheme() {
+    if (impl_->hwnd)
+        SendMessageW(impl_->hwnd, WM_THEMECHANGED, 0, 0);
 }

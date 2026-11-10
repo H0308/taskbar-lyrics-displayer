@@ -59,6 +59,7 @@ struct VolumePopup::Impl {
     ID2D1SolidColorBrush* brushAccent = nullptr;
     ID2D1SolidColorBrush* brushKnob = nullptr;
     IDWriteTextFormat* fmtValue = nullptr;
+    uint64_t fontRevision = 0;
 
     float scale() const { return static_cast<float>(dpi) / 96.0f; }
     float dip(int px) const { return static_cast<float>(px) / scale(); }
@@ -79,7 +80,8 @@ struct VolumePopup::Impl {
     }
 
     bool ensureResources() {
-        if (resourceGeneration == renderer.deviceGeneration() && fmtValue)
+        const auto revision = fluent::uiFontRevision();
+        if (resourceGeneration == renderer.deviceGeneration() && fmtValue && fontRevision == revision)
             return true;
         releaseDrawingResources();
         auto* rt = renderer.renderTarget();
@@ -92,15 +94,14 @@ struct VolumePopup::Impl {
             FAILED(rt->CreateSolidColorBrush(p.accent, &brushAccent)) ||
             FAILED(rt->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), &brushKnob)))
             return false;
-        if (FAILED(renderer.dwrite()->CreateTextFormat(
-                fluent::uiFontFamily(), nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-                DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 14.0f, L"",
-                &fmtValue)))
+        if (FAILED(fluent::createUiTextFormat(renderer.dwrite(), 14.0f,
+                                              DWRITE_FONT_WEIGHT_NORMAL, &fmtValue)))
             return false;
         fmtValue->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
         fmtValue->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         fluent::applyUiFontFallback(fmtValue);
         resourceGeneration = renderer.deviceGeneration();
+        fontRevision = revision;
         return true;
     }
 

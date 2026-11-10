@@ -36,9 +36,8 @@ float measureSubtitleHeightDip(const std::wstring& text, float widthDip) {
         return kSubtitleLineHeightDip;
 
     IDWriteTextFormat* format = nullptr;
-    const HRESULT formatResult = factory->CreateTextFormat(
-        fluent::uiFontFamily(), nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13.0f, L"zh-cn", &format);
+    const HRESULT formatResult = fluent::createUiTextFormat(
+        factory, 13.0f, DWRITE_FONT_WEIGHT_NORMAL, &format);
     if (FAILED(formatResult) || !format) {
         factory->Release();
         return kSubtitleLineHeightDip;

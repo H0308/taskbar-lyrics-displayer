@@ -31,6 +31,7 @@ public:
     // 可见期间异步补齐媒体字段（封面等）；空标题视为无播放，立即收起
     void setMedia(const OverlayMediaInfo& info);
     void hideImmediate();
+    void refreshTheme();
 
 private:
     struct Impl;

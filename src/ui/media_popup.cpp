@@ -734,9 +734,7 @@ struct MediaPopup::Impl {
         if (!out || !renderer.dwrite())
             return false;
         *out = nullptr;
-        HRESULT hr = renderer.dwrite()->CreateTextFormat(
-            fluent::uiFontFamily(), nullptr, weight, DWRITE_FONT_STYLE_NORMAL,
-            DWRITE_FONT_STRETCH_NORMAL, size, L"", out);
+        HRESULT hr = fluent::createUiTextFormat(renderer.dwrite(), size, weight, out);
         if (FAILED(hr) || !*out)
             return false;
         (*out)->SetWordWrapping(wrap ? DWRITE_WORD_WRAPPING_WRAP

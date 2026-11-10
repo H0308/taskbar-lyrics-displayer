@@ -63,6 +63,15 @@ void SettingsSections::createDisplayRows() {
     addHeader(0, L"字体");
     Row& font = addButton(0, kIdPickFont, L"通用字体", kFontSettingNotice, L"选择字体…", kRowTallH);
     font.valueText = state.fontDesc;
+    addRadio(0, kIdUiFontSource, L"界面字体来源",
+             L"独立选择时可设置字体、粗细和斜体；跟随时仅使用通用字体名称；默认使用软件预设字体和样式。",
+             {L"独立选择", L"跟随通用字体", L"默认"}, static_cast<int>(state.uiFontSource),
+             true, kRowTallH);
+    Row& uiFont = addButton(0, kIdPickUiFont, L"界面字体",
+                            L"设置普通窗口与悬浮窗的字体、粗细和斜体，字号保持界面原有大小。",
+                            L"设置字体…", kRowTallH);
+    uiFont.valueText = state.uiFontDesc;
+    uiFont.enabled = state.uiFontSource == UiFontSource::Independent;
     addHeader(0, L"歌曲信息与封面");
     Row& songInfo =
         addToggle(0, kIdSongInfo, L"显示歌曲信息", vertical ? false : state.songInfoVisible);

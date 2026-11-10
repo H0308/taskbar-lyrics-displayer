@@ -95,6 +95,7 @@ struct FontPickerDialog::Impl {
     std::wstring initFamily;
     float initSize = 16.0f;
     LyricFontStyle initStyle = LyricFontStyle::Normal;
+    bool interfaceFont = false;
 
     TextField filterEdit;
     TextField sizeEdit;
@@ -480,8 +481,11 @@ struct FontPickerDialog::Impl {
     }
 
     float currentSize() const {
+        if (interfaceFont)
+            return initSize;
         try {
-            return std::clamp(std::stof(sizeEdit.text), 4.0f, 96.0f);
+            const float size = std::stof(sizeEdit.text);
+            return std::isfinite(size) ? std::clamp(size, 4.0f, 96.0f) : initSize;
         } catch (...) {
             return initSize;
         }
@@ -755,7 +759,7 @@ struct FontPickerDialog::Impl {
             const wchar_t* sizeLabel = nullptr;
             D2D1_COLOR_F ratingFill{};
             D2D1_COLOR_F ratingText = p.textSecondary;
-            if (!family) {
+            if (!family && !interfaceFont) {
                 const int size = kSizePresets[i];
                 const bool dark = fluent::isDarkMode();
                 if (size < supportedMinSize || size > supportedMaxSize ||
@@ -897,7 +901,8 @@ struct FontPickerDialog::Impl {
                 DWRITE_FONT_STRETCH_NORMAL, currentSize(), L"zh-cn", &format)) &&
             format) {
             fluent::applyUiFontFallback(format);
-            updateSizeAdvice(painter, format);
+            if (!interfaceFont)
+                updateSizeAdvice(painter, format);
             format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
             format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
             painter.drawText(L"AaBb 永字八法 0123", format,
@@ -935,8 +940,10 @@ struct FontPickerDialog::Impl {
 
     void paint(fluent::FluentDialogSurface::Painter& painter, float, float) {
         const auto& p = fluent::palette();
-        painter.drawText(L"选择字体", painter.textFormat(20.0f, 600), titleRect, p.text);
-        painter.drawText(L"搜索字体、字号和样式并实时预览", painter.textFormat(13.0f, 400),
+        painter.drawText(interfaceFont ? L"界面字体" : L"选择字体",
+                         painter.textFormat(20.0f, 600), titleRect, p.text);
+        painter.drawText(interfaceFont ? L"选择字体、粗细和斜体并实时预览"
+                                      : L"搜索字体、字号和样式并实时预览", painter.textFormat(13.0f, 400),
                          subtitleRect, p.textSecondary);
         drawTextField(painter, filterRect, filterEdit, kIdFilterEdit);
         painter.drawText(L"样式", painter.textFormat(13.0f, 400, false, true), styleLabelRect,
@@ -950,8 +957,10 @@ struct FontPickerDialog::Impl {
         sizeAdviceChanged = previousRecommended != recommendedSize || previousMaximum != suggestedMaxSize ||
                             previousMin != supportedMinSize || previousMax != supportedMaxSize;
         drawList(painter, true);
-        drawTextField(painter, sizeEditRect, sizeEdit, kIdSizeEdit);
-        drawList(painter, false);
+        if (!interfaceFont) {
+            drawTextField(painter, sizeEditRect, sizeEdit, kIdSizeEdit);
+            drawList(painter, false);
+        }
         drawButton(painter, okRect, L"确定", true, kIdOk);
         drawButton(painter, cancelRect, L"取消", false, kIdCancel);
     }
@@ -973,9 +982,9 @@ struct FontPickerDialog::Impl {
                 *option = styleOptionAt(x, y);
             return kIdStyleGroup;
         }
-        if (contains(sizeEditRect, x, y))
+        if (!interfaceFont && contains(sizeEditRect, x, y))
             return kIdSizeEdit;
-        if (contains(sizeListRect, x, y)) {
+        if (!interfaceFont && contains(sizeListRect, x, y)) {
             if (row)
                 *row = rowAt(false, x, y);
             return kIdSizeList;
@@ -988,6 +997,8 @@ struct FontPickerDialog::Impl {
     }
 
     std::vector<int> focusOrder() const {
+        if (interfaceFont)
+            return {kIdFilterEdit, kIdFamilyList, kIdStyleGroup, kIdOk, kIdCancel};
         return {kIdFilterEdit, kIdFamilyList, kIdStyleGroup, kIdSizeEdit,
                 kIdSizeList, kIdOk, kIdCancel};
     }
@@ -1088,10 +1099,10 @@ struct FontPickerDialog::Impl {
                     familyScroll = position;
                     invalidateListScroll(true, redraw);
                 }) ||
-                !sizeScrollView.create(hwnd, 0x6202, [this](float position, bool redraw) {
+                (!interfaceFont && !sizeScrollView.create(hwnd, 0x6202, [this](float position, bool redraw) {
                     sizeScroll = position;
                     invalidateListScroll(false, redraw);
-                }))
+                })))
                 return -1;
             enumerateFonts();
             createControls();
@@ -1272,7 +1283,7 @@ struct FontPickerDialog::Impl {
             const float y = point.y / s;
             if (contains(familyListRect, x, y))
                 scrollBy(true, GET_WHEEL_DELTA_WPARAM(wp));
-            else if (contains(sizeListRect, x, y))
+            else if (!interfaceFont && contains(sizeListRect, x, y))
                 scrollBy(false, GET_WHEEL_DELTA_WPARAM(wp));
             return 0;
         }
@@ -1434,7 +1445,8 @@ struct FontPickerDialog::Impl {
         const float listTop = styleY + fluent::metrics::controlHeight + gap;
         const float listHeight = std::max(0.0f, previewRect.top - gap - listTop);
         const float listWidth = std::max(0.0f, w - pad * 2.0f - gap);
-        const float familyWidth = listWidth * 0.58f;
+        const float familyWidth = interfaceFont ? std::max(0.0f, w - pad * 2.0f)
+                                               : listWidth * 0.58f;
         familyListRect = D2D1::RectF(pad, listTop, pad + familyWidth, listTop + listHeight);
 
         const float rightX = familyListRect.right + gap;
@@ -1444,6 +1456,10 @@ struct FontPickerDialog::Impl {
         sizeListRect = D2D1::RectF(
             rightX, sizeEditRect.bottom + fluent::metrics::compactGap, rightX + rightWidth,
             listTop + listHeight);
+        if (interfaceFont) {
+            sizeEditRect = {};
+            sizeListRect = {};
+        }
 
         const float cancelW = 88.0f;
         const float okW = 96.0f;
@@ -1474,11 +1490,12 @@ FontPickerDialog::~FontPickerDialog() {
 }
 
 bool FontPickerDialog::create(HINSTANCE inst, HWND parent, const std::wstring& family,
-                              float sizePt, LyricFontStyle style) {
+                              float sizePt, LyricFontStyle style, bool interfaceFont) {
     impl_->notifyHwnd = parent; // 仅用于关闭通知；托盘窗口是消息窗口，不能作为所有者
     impl_->initFamily = family;
     impl_->initSize = sizePt;
     impl_->initStyle = style;
+    impl_->interfaceFont = interfaceFont;
 
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
@@ -1502,7 +1519,8 @@ bool FontPickerDialog::create(HINSTANCE inst, HWND parent, const std::wstring& f
     int x = work.left + ((work.right - work.left) - w) / 2;
     int y = work.top + ((work.bottom - work.top) - h) / 2;
 
-    impl_->hwnd = CreateWindowExW(kDialogExStyle, L"QQMusicLyricFontPicker", L"选择字体",
+    impl_->hwnd = CreateWindowExW(kDialogExStyle, L"QQMusicLyricFontPicker",
+                                  interfaceFont ? L"界面字体" : L"选择字体",
                                   kDialogStyle, x, y, w, h, nullptr, nullptr, inst, impl_.get());
     if (impl_->hwnd) {
         fluent::ensureDialogMinimumSize(impl_->hwnd, kDialogStyle, kDialogExStyle,

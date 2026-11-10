@@ -562,6 +562,9 @@ void App::pickFont() {
         settings_.fontSize_ = std::clamp(size, 4.0f, 96.0f);
         settings_.fontStyle_ = style;
         settings_.hasUserFont_ = true;
+        if (settings_.uiFontSource_ == UiFontSource::FollowGeneral) {
+            applyUiFont();
+        }
         runtime_log::writef(L"[action][font] applied family=%s size=%.1f style=%s",
                             settings_.fontFamily_.c_str(), static_cast<double>(settings_.fontSize_),
                             fontStyleLabel(settings_.fontStyle_));
@@ -573,6 +576,29 @@ void App::pickFont() {
             settingsDialog->updateFontDescription(currentSettingsState().fontDesc);
     });
     fontPickerDialog->show();
+}
+
+void App::pickUiFont() {
+    if (settings_.uiFontSource_ != UiFontSource::Independent)
+        return;
+    if (uiFontPickerDialog && uiFontPickerDialog->isOpen()) {
+        SetForegroundWindow(uiFontPickerDialog->hwnd());
+        return;
+    }
+    auto dialog = std::make_unique<FontPickerDialog>();
+    if (!dialog->create(GetModuleHandleW(nullptr), trayHwnd, settings_.uiFontFamily_,
+                         14.0f, settings_.uiFontStyle_, true))
+        return;
+    dialog->setApplyCallback([this](const std::wstring& family, float, LyricFontStyle style) {
+        settings_.uiFontFamily_ = family;
+        settings_.uiFontStyle_ = style;
+        applyUiFont();
+        runtime_log::writef(L"[action][ui-font] applied family=%s style=%s",
+                            fluent::uiFontFamily(), fontStyleLabel(style));
+        saveSettings();
+    });
+    uiFontPickerDialog = std::move(dialog);
+    uiFontPickerDialog->show();
 }
 
 void App::showFontColorDialog() {
@@ -656,6 +682,7 @@ void App::onDialogClosed(DialogKind kind) {
         break;
     case DialogKind::FontPicker:
         resetIfClosed(fontPickerDialog);
+        resetIfClosed(uiFontPickerDialog);
         break;
     case DialogKind::FontColor:
         resetIfClosed(fontColorDialog);
