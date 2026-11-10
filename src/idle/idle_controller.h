@@ -57,8 +57,7 @@ struct IdleRuntimeState {
 class IdleController {
 public:
     IdleController(AppSettings& settings, std::function<void()> save, std::function<void()> publish,
-                   std::function<void()> refreshSettings, std::function<bool()> mediaAlive,
-                   std::function<bool()> vertical);
+                   std::function<void()> refreshSettings, std::function<bool()> mediaAlive);
     const IdleRuntimeState& state() const { return state_; }
     bool hasTickTickToken() const { return !state_.tickTickApiToken_.empty(); }
     void setTimerWindow(HWND window) { timerWindow_ = window; }
@@ -79,7 +78,8 @@ public:
     void refreshIdleQuote(bool force);
     void onIdleQuoteReady(std::unique_ptr<IdleQuotePayload> payload);
     void applyIdleTextMode(int mode);
-    void applyIdleEntryEnabled(bool enabled);
+    void applyIdleTextEnabled(bool enabled);
+    void applyQuickStartEnabled(bool enabled);
     void applyIdleQuoteSource(int source);
     void applyIdleQuoteRefreshInterval(int interval);
     void applyTickTickEnabled(bool enabled);
@@ -102,7 +102,6 @@ private:
     std::function<void()> publish_;
     std::function<void()> refreshSettings_;
     std::function<bool()> mediaAlive_;
-    std::function<bool()> vertical_;
     DWORD mainThread_ = GetCurrentThreadId();
     HWND timerWindow_ = nullptr;
     // Providers 最后声明，析构时先等待工作线程；回调引用的状态和通知仍然有效。

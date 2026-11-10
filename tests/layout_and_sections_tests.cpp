@@ -128,19 +128,19 @@ TEST_CASE("media_popup_layout.idle_and_media_geometry_and_scroll_bounds") {
     EXPECT_TRUE(media.track.right > media.track.left);
 }
 
-TEST_CASE("settings_sections.resource_monitor_toggle_refreshes_idle_text_options") {
+TEST_CASE("settings_sections.resource_monitor_toggle_preserves_idle_text_preferences") {
     SettingsSections sections;
     sections.state.taskbarViewMode = 0;
     sections.state.verticalTaskbar = false;
     sections.state.embeddedResourceMonitor = true;
-    sections.state.idleQuoteEnabled = false;
-    sections.state.idleWelcomeEnabled = false;
+    sections.state.idleTextEnabled = false;
+    sections.state.idleTextMode = 1;
     sections.create();
     auto* text = sections.findRow(settings_ui::kIdIdleQuote);
     EXPECT_TRUE(text != nullptr);
-    EXPECT_EQ(text->optionEnabled.size(), 3u);
-    EXPECT_EQ(text->selected, 2);
-    EXPECT_TRUE(text->optionEnabled[2]);
+    EXPECT_EQ(text->options.size(), 2u);
+    EXPECT_EQ(text->selected, 1);
+    EXPECT_FALSE(text->enabled);
     int requests = 0;
     bool requested = true;
     sections.actions.onEmbeddedResourceMonitor = [&](bool enabled) {
@@ -151,50 +151,51 @@ TEST_CASE("settings_sections.resource_monitor_toggle_refreshes_idle_text_options
     EXPECT_EQ(requests, 1);
     EXPECT_FALSE(requested);
     EXPECT_EQ(text->selected, 1);
-    EXPECT_FALSE(text->optionEnabled[2]);
-    EXPECT_FALSE(sections.state.idleQuoteEnabled);
-    EXPECT_FALSE(sections.state.idleWelcomeEnabled);
-    EXPECT_TRUE(sections.findRow(settings_ui::kIdIdleCustomWelcome)->enabled);
+    EXPECT_FALSE(text->enabled);
+    EXPECT_FALSE(sections.state.idleTextEnabled);
+    EXPECT_EQ(sections.state.idleTextMode, 1);
+    EXPECT_FALSE(sections.findRow(settings_ui::kIdIdleCustomWelcome)->enabled);
 
     sections.onCommand(settings_ui::kIdEmbeddedResourceMonitor);
     EXPECT_EQ(requests, 2);
     EXPECT_TRUE(requested);
-    EXPECT_EQ(text->selected, 2);
-    EXPECT_TRUE(text->optionEnabled[2]);
+    EXPECT_EQ(text->selected, 1);
+    EXPECT_FALSE(text->enabled);
     EXPECT_FALSE(sections.findRow(settings_ui::kIdIdleCustomWelcome)->enabled);
 }
 
-TEST_CASE("settings_sections.idle_text_restrictions_restore_after_orientation_and_mode_changes") {
+TEST_CASE("settings_sections.idle_text_preferences_survive_orientation_and_mode_changes") {
     SettingsSections sections;
     sections.state.taskbarViewMode = 0;
     sections.state.embeddedResourceMonitor = true;
     sections.state.verticalTaskbar = false;
-    sections.state.idleQuoteEnabled = false;
-    sections.state.idleWelcomeEnabled = false;
+    sections.state.idleTextEnabled = false;
+    sections.state.idleTextMode = 1;
     sections.create();
     auto* text = sections.findRow(settings_ui::kIdIdleQuote);
     EXPECT_TRUE(text != nullptr);
-    EXPECT_EQ(text->selected, 2);
+    EXPECT_EQ(text->selected, 1);
+    EXPECT_FALSE(text->enabled);
 
     auto state = sections.state;
     state.verticalTaskbar = true;
     sections.update(state);
     EXPECT_EQ(text->selected, 1);
-    EXPECT_FALSE(text->optionEnabled[2]);
-    EXPECT_FALSE(sections.state.idleWelcomeEnabled);
+    EXPECT_FALSE(text->enabled);
+    EXPECT_FALSE(sections.state.idleTextEnabled);
 
     state.verticalTaskbar = false;
     sections.update(state);
-    EXPECT_EQ(text->selected, 2);
-    EXPECT_TRUE(text->optionEnabled[2]);
+    EXPECT_EQ(text->selected, 1);
+    EXPECT_FALSE(text->enabled);
     state.taskbarViewMode = 2;
     sections.update(state);
     EXPECT_EQ(text->selected, 1);
-    EXPECT_FALSE(text->optionEnabled[2]);
+    EXPECT_FALSE(text->enabled);
     state.taskbarViewMode = 0;
     sections.update(state);
-    EXPECT_EQ(text->selected, 2);
-    EXPECT_TRUE(text->optionEnabled[2]);
+    EXPECT_EQ(text->selected, 1);
+    EXPECT_FALSE(text->enabled);
 }
 
 TEST_CASE("settings_sections.search_and_interdependent_row_states") {

@@ -156,7 +156,6 @@ TEST_CASE("playback_controller.platform_switch_rejects_inflight_qq_results_befor
 TEST_CASE("presentation_model.scene_resolution_lead_time_and_transition_retention") {
     PresentationModel model;
     AppSettings settings;
-    settings.idleEntryEnabled_ = true;
     PlaybackState playback;
     playback.currentKey = L"qq|月牙湾|F.I.R.|61";
     playback.currentTitle = L"月牙湾";

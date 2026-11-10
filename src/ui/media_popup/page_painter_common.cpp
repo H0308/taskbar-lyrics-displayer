@@ -37,12 +37,12 @@ bool buttonEnabled(bool available, int index, const OverlayMediaInfo& content) {
     return available && (index == 1 ? content.canPlayPause : true);
 }
 bool idleCopyAvailable(const IdlePresentation& content) {
-    return content.showQuote && content.copyEnabled && !content.loading &&
+    return content.showText && content.showQuote && content.copyEnabled && !content.loading &&
            !content.sentence.empty();
 }
 bool idleReturnArrowVisible(const IdlePresentation& content, bool playbackScene, bool available,
                             bool manual) {
-    return playbackScene && available && content.quickStartEnabled && manual;
+    return playbackScene && available && content.hasContent() && manual;
 }
 float idleUnitHeight(const IdlePresentation& content, bool current, const IdlePresentation& idle,
                      IDWriteTextLayout* layout, float height) {

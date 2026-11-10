@@ -55,9 +55,9 @@ OverlayMediaInfo makeMediaInfo(const SmtcSnapshot& snap, const PlaybackState& pl
 }
 
 DisplayScene displaySceneFor(const SmtcSnapshot& snap, const AppSettings& settings,
-                             const PlaybackState& playback) {
+                             const PlaybackState& playback, bool idleVisible) {
     if (!snap.sessionAlive)
-        return settings.idleEntryEnabled_ ? DisplayScene::Idle : DisplayScene::NoPlayback;
+        return idleVisible ? DisplayScene::Idle : DisplayScene::NoPlayback;
     if (playback.lyricLoading_)
         return DisplayScene::Searching;
     if (!playback.currentLyrics_.empty())
@@ -71,7 +71,9 @@ void fillPresentationFrame(PresentationFrame& frame, const SmtcSnapshot& snap,
                            const IdleFrameInput& idle) {
     frame.requestGeneration = playback.requestGeneration_;
     frame.trackKey = playback.currentKey;
-    frame.scene = displaySceneFor(snap, settings, playback);
+    const bool idleVisible = idle.presentation.hasContent() || idle.resourcesVisible ||
+                             idle.summaryActive || (idle.summaryPending && idle.tasksEnabled);
+    frame.scene = displaySceneFor(snap, settings, playback, idleVisible);
     frame.media = makeMediaInfo(snap, playback, frame);
     frame.idle = idle.presentation;
     if (copyLyrics)
@@ -79,7 +81,7 @@ void fillPresentationFrame(PresentationFrame& frame, const SmtcSnapshot& snap,
     frame.actualPositionMs = snap.positionMs;
     frame.lineSelectionPositionMs = lyricSelectionPosition(snap, frame.lyrics);
     frame.currentLine = LyricProvider::findLine(frame.lyrics, frame.lineSelectionPositionMs);
-    frame.visible = snap.sessionAlive || (settings.idleEntryEnabled_ && !snap.sessionAlive);
+    frame.visible = snap.sessionAlive || idleVisible;
     frame.animateTransition = animateTransition;
     frame.durationOnlyUpdate = durationOnlyUpdate;
     const bool showStartupTaskSummary =
@@ -92,9 +94,16 @@ void fillPresentationFrame(PresentationFrame& frame, const SmtcSnapshot& snap,
         frame.statusTextOneShot = true;
     } else if (showStartupTaskLoading) {
         frame.statusText = L"正在同步今日任务…";
-    } else if (frame.scene == DisplayScene::Idle)
-        frame.statusText = idle.presentation.showText ? frame.idle.sentence : L"";
-    else if (!snap.sessionAlive)
+    } else if (frame.scene == DisplayScene::Idle) {
+        if (idle.presentation.showText)
+            frame.statusText = frame.idle.sentence;
+        else if (!idle.resourcesVisible && idle.presentation.quickStartEnabled)
+            frame.statusText = L"快捷启动";
+        else if (!idle.resourcesVisible && idle.presentation.todayTasksEnabled)
+            frame.statusText = L"今日任务";
+        else
+            frame.statusText.clear();
+    } else if (!snap.sessionAlive)
         frame.statusText = notRunningStatus(playback);
     else if (playback.lyricLoading_)
         frame.statusText = L"歌词加载中…";

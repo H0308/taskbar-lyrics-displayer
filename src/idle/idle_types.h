@@ -14,6 +14,8 @@ enum class IdleQuoteSource {
     Netease,
 };
 
+enum class IdleTextMode { DailyQuote, Welcome };
+
 enum class IdleQuoteRefreshInterval {
     Daily,
     HalfDay,
@@ -93,4 +95,7 @@ struct IdlePresentation {
     bool todayTasksLoading = false;
     bool todayTasksConnected = false;
     std::wstring todayTasksStatus;
+
+    bool hasQuickPanel() const { return quickStartEnabled || todayTasksEnabled; }
+    bool hasContent() const { return showText || hasQuickPanel(); }
 };

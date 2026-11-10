@@ -85,10 +85,9 @@ const char* idleQuoteIntervalConfigName(IdleQuoteRefreshInterval interval) {
 
 IdleController::IdleController(AppSettings& settings, std::function<void()> save,
                                std::function<void()> publish, std::function<void()> refreshSettings,
-                               std::function<bool()> mediaAlive, std::function<bool()> vertical)
+                               std::function<bool()> mediaAlive)
     : settings_(settings), save_(std::move(save)), publish_(std::move(publish)),
-      refreshSettings_(std::move(refreshSettings)), mediaAlive_(std::move(mediaAlive)),
-      vertical_(std::move(vertical)) {}
+      refreshSettings_(std::move(refreshSettings)), mediaAlive_(std::move(mediaAlive)) {}
 
 void IdleController::initializeCredentials() {
     tickTickProvider_.loadApiToken(state_.tickTickService_, state_.tickTickApiToken_);
@@ -261,18 +260,16 @@ bool IdleController::tickTickEffectiveEnabled() const {
 }
 
 bool IdleController::idleTextVisible() const {
-    return settings_.idleQuoteEnabled_ || settings_.idleWelcomeEnabled_ ||
-           settings_.taskbarViewMode_ != TaskbarViewMode::Embedded ||
-           !settings_.embeddedResourceMonitor_ || vertical_();
+    return settings_.idleTextEnabled_;
 }
 
 IdlePresentation IdleController::currentIdlePresentation() const {
     IdlePresentation presentation;
     presentation.showText = idleTextVisible();
-    presentation.showQuote = settings_.idleQuoteEnabled_;
-    presentation.quickStartEnabled = settings_.idleEntryEnabled_;
+    presentation.showQuote = settings_.idleTextMode_ == IdleTextMode::DailyQuote;
+    presentation.quickStartEnabled = settings_.quickStartEnabled_;
     presentation.showAppNames = settings_.idleAppNamesVisible_;
-    if (settings_.idleQuoteEnabled_) {
+    if (presentation.showText && presentation.showQuote) {
         presentation.loading = state_.idleQuoteLoading_;
         presentation.sentence = state_.idleQuoteText_;
         if (presentation.sentence.empty())
@@ -288,7 +285,8 @@ IdlePresentation IdleController::currentIdlePresentation() const {
         presentation.sentence = settings_.idleCustomWelcome_.empty() ? defaultIdleWelcome()
                                                                      : settings_.idleCustomWelcome_;
     }
-    presentation.apps = settings_.idleApps_;
+    if (settings_.quickStartEnabled_)
+        presentation.apps = settings_.idleApps_;
     presentation.todayTasksEnabled = tickTickEffectiveEnabled();
     presentation.todayTasks = state_.todayTasks_;
     presentation.todayTasksLoading = state_.tickTickTasksLoading_;
@@ -367,7 +365,7 @@ void IdleController::onHolidayReady(std::unique_ptr<HolidayPayload> payload) {
     settings_.holidayCalendarUpdatedAt_ = static_cast<int64_t>(std::time(nullptr));
     settings_.holidayCalendar_ = std::move(payload->result.days);
     save_();
-    if (settings_.idleEntryEnabled_ && !settings_.idleQuoteEnabled_ && idleTextVisible() &&
+    if (settings_.idleTextMode_ == IdleTextMode::Welcome && idleTextVisible() &&
         !mediaAlive_())
         publish_();
 }
@@ -375,7 +373,7 @@ void IdleController::onHolidayReady(std::unique_ptr<HolidayPayload> payload) {
 void IdleController::refreshIdleQuote(bool force) {
     // 每日一言属于空闲面板的独立内容状态；即使启动时已经存在播放器，
     // 也要先把内容准备好，用户切到“每日一言 + 快速打开”面板时才能直接显示。
-    if (!settings_.idleEntryEnabled_ || !settings_.idleQuoteEnabled_)
+    if (!idleTextVisible() || settings_.idleTextMode_ != IdleTextMode::DailyQuote)
         return;
 
     const std::string period = idleQuotePeriodKey(settings_.idleQuoteRefreshInterval_);
@@ -417,7 +415,7 @@ void IdleController::refreshIdleQuote(bool force) {
 }
 
 void IdleController::onIdleQuoteReady(std::unique_ptr<IdleQuotePayload> payload) {
-    if (!settings_.idleEntryEnabled_ || !settings_.idleQuoteEnabled_ || !payload ||
+    if (!idleTextVisible() || settings_.idleTextMode_ != IdleTextMode::DailyQuote || !payload ||
         payload->generation != state_.idleQuoteRequestGeneration_ ||
         state_.idleQuoteRequestKey_.empty())
         return;
@@ -442,17 +440,15 @@ void IdleController::onIdleQuoteReady(std::unique_ptr<IdleQuotePayload> payload)
 }
 
 void IdleController::applyIdleTextMode(int mode) {
-    mode = std::clamp(mode, 0, 2);
-    const bool enabled = mode == 0;
-    const bool welcome = mode == 1;
-    if (settings_.idleQuoteEnabled_ == enabled && settings_.idleWelcomeEnabled_ == welcome)
+    const auto next = static_cast<IdleTextMode>(std::clamp(mode, 0, 1));
+    if (settings_.idleTextMode_ == next)
         return;
-    settings_.idleQuoteEnabled_ = enabled;
-    settings_.idleWelcomeEnabled_ = welcome;
+    settings_.idleTextMode_ = next;
     runtime_log::writef(L"[action][idle-text] mode=%d", mode);
-    if (!enabled) {
+    if (!idleTextVisible() || next != IdleTextMode::DailyQuote) {
         ++state_.idleQuoteRequestGeneration_;
         state_.idleQuoteRequestKey_.clear();
+        state_.idleQuoteAttemptKey_.clear();
         state_.idleQuoteLoading_ = false;
     } else {
         refreshIdleQuote(false);
@@ -461,18 +457,28 @@ void IdleController::applyIdleTextMode(int mode) {
     publish_();
 }
 
-void IdleController::applyIdleEntryEnabled(bool enabled) {
-    if (settings_.idleEntryEnabled_ == enabled)
+void IdleController::applyIdleTextEnabled(bool enabled) {
+    if (settings_.idleTextEnabled_ == enabled)
         return;
-    settings_.idleEntryEnabled_ = enabled;
-    runtime_log::writef(L"[action][idle-entry] enabled=%s", enabled ? L"on" : L"off");
+    settings_.idleTextEnabled_ = enabled;
+    runtime_log::writef(L"[action][idle-text] enabled=%s", enabled ? L"on" : L"off");
     if (!enabled) {
         ++state_.idleQuoteRequestGeneration_;
         state_.idleQuoteRequestKey_.clear();
+        state_.idleQuoteAttemptKey_.clear();
         state_.idleQuoteLoading_ = false;
-    } else if (settings_.idleQuoteEnabled_) {
+    } else if (settings_.idleTextMode_ == IdleTextMode::DailyQuote) {
         refreshIdleQuote(false);
     }
+    save_();
+    publish_();
+}
+
+void IdleController::applyQuickStartEnabled(bool enabled) {
+    if (settings_.quickStartEnabled_ == enabled)
+        return;
+    settings_.quickStartEnabled_ = enabled;
+    runtime_log::writef(L"[action][quick-start] enabled=%s", enabled ? L"on" : L"off");
     save_();
     publish_();
 }
@@ -683,7 +689,7 @@ void IdleController::onTickTickTasksReady(std::unique_ptr<TickTickTasksPayload> 
     if (state_.startupTaskSummaryPending_) {
         if (payload->result.ok) {
             state_.startupTaskSummaryPending_ = false;
-            state_.startupTaskSummaryActive_ = !sessionAlive && settings_.idleEntryEnabled_;
+            state_.startupTaskSummaryActive_ = !sessionAlive;
         } else if (!payload->result.authRequired && !sessionAlive &&
                    scheduleTickTickStartupRetry()) {
             // 保持 loading 状态，直到补试成功或达到上限；任务面板会同时显示可读的失败状态。

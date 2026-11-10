@@ -160,8 +160,10 @@ inline settings_icon::Kind iconForRow(int id) {
         return settings_icon::Kind::Fullscreen;
     case kIdSongToastPosition:
         return settings_icon::Kind::Position;
-    case kIdIdleEntry:
+    case kIdIdleTextEnabled:
         return settings_icon::Kind::Idle;
+    case kIdQuickStartEnabled:
+        return settings_icon::Kind::QuickLaunch;
     case kIdIdleQuote:
     case kIdIdleCustomWelcome:
         return settings_icon::Kind::Quote;

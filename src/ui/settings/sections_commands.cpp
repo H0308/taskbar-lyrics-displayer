@@ -8,17 +8,24 @@
 namespace settings_ui {
 bool SettingsSections::onIdleCommand(int id, Row* row, int option) {
     switch (id) {
-    case kIdIdleEntry:
+    case kIdIdleTextEnabled:
         row->checked = !row->checked;
-        state.idleEntryEnabled = row->checked;
+        state.idleTextEnabled = row->checked;
         updateIdleRowsEnabled();
         updateFloatingCardRowsEnabled();
-        if (actions.onIdleEntryEnabled)
-            actions.onIdleEntryEnabled(row->checked);
+        if (actions.onIdleTextEnabled)
+            actions.onIdleTextEnabled(row->checked);
+        break;
+    case kIdQuickStartEnabled:
+        row->checked = !row->checked;
+        state.quickStartEnabled = row->checked;
+        updateIdleRowsEnabled();
+        updateFloatingCardRowsEnabled();
+        if (actions.onQuickStartEnabled)
+            actions.onQuickStartEnabled(row->checked);
         break;
     case kIdIdleQuote:
-        state.idleQuoteEnabled = row->selected == 0;
-        state.idleWelcomeEnabled = row->selected == 1;
+        state.idleTextMode = row->selected;
         updateIdleRowsEnabled();
         if (actions.onIdleTextMode)
             actions.onIdleTextMode(row->selected);
@@ -32,6 +39,7 @@ bool SettingsSections::onIdleCommand(int id, Row* row, int option) {
         state.tickTickEnabled = requested && state.tickTickApiTokenConfigured;
         row->checked = state.tickTickEnabled;
         updateTickTickRows();
+        updateFloatingCardRowsEnabled();
         if (actions.onTickTickEnabled)
             actions.onTickTickEnabled(requested);
         break;

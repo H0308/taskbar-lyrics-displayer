@@ -165,29 +165,31 @@ void SettingsSections::createTaskbarModeRows() {
 void SettingsSections::createIdleRows() {
     const bool vertical = state.verticalTaskbar;
     addHeader(kIdlePage, L"空闲内容");
-    Row& idleEntry = addRow(kIdlePage, kIdIdleEntry, ControlKind::Toggle, L"无播放时保留任务栏入口",
-                            L"播放器未运行时，任务栏显示空闲内容；悬浮后可打开已配置的应用。"
-                            L"关闭后，播放器未运行时隐藏任务栏入口。",
-                            40.0f, kRowTallH);
-    idleEntry.checked = state.idleEntryEnabled;
-    addRadio(kIdlePage, kIdIdleQuote, L"空闲文字",
-             L"“不显示”需先开启内嵌模式资源监视；滴答清单仍会在启动时播报一次今日任务。",
-             {L"每日一言", L"欢迎语", L"不显示"}, idleTextMode(), true, kRowTallH);
+    Row& idleText = addRow(kIdlePage, kIdIdleTextEnabled, ControlKind::Toggle, L"显示空闲文字",
+                           L"控制每日一言或欢迎语的显示，不影响资源监视、快捷启动和滴答清单。",
+                           40.0f, kRowTallH);
+    idleText.checked = state.idleTextEnabled;
+    addRadio(kIdlePage, kIdIdleQuote, L"空闲文字类型", nullptr,
+             {L"每日一言", L"欢迎语"}, idleTextMode(), state.idleTextEnabled, kRowH);
     addButton(
         kIdlePage, kIdIdleCustomWelcome, L"自定义欢迎语",
         L"选择欢迎语时显示自定义内容，最多 20 个字符且不能为纯空格；留空则恢复按时间和日期类型生成的默认欢迎语。",
         L"编辑…", kRowTallH);
     addRadio(kIdlePage, kIdIdleQuoteSource, L"每日一言来源",
              idleQuoteSourceHint(state.idleQuoteSource), {L"一言", L"今日诗词", L"网易云热评"},
-             state.idleQuoteSource, state.idleQuoteEnabled, kRowTallH);
+             state.idleQuoteSource, state.idleTextEnabled && idleTextMode() == 0, kRowTallH);
     addRadio(kIdlePage, kIdIdleQuoteRefreshInterval, L"每日一言更新频率", nullptr,
              {L"每天", L"每 12 小时", L"每小时"}, state.idleQuoteRefreshInterval,
-             state.idleQuoteEnabled, kRowTallH);
+             state.idleTextEnabled && idleTextMode() == 0, kRowTallH);
     addRadio(kIdlePage, kIdIdleQuoteAlignment, L"每日一言字体对齐方式",
              L"仅影响任务栏和悬浮卡片中的每日一言，不影响正常歌词对齐。",
              {L"左对齐", L"居中", L"右对齐"}, vertical ? 0 : state.idleQuoteAlignment,
-             state.idleQuoteEnabled && !vertical, kRowH);
+             state.idleTextEnabled && idleTextMode() == 0 && !vertical, kRowH);
     addHeader(kIdlePage, L"快捷启动");
+    Row& quickStart = addRow(kIdlePage, kIdQuickStartEnabled, ControlKind::Toggle, L"启用快捷启动",
+                             L"控制已配置应用的快捷启动入口，不影响空闲文字、资源监视和今日任务。",
+                             40.0f, kRowTallH);
+    quickStart.checked = state.quickStartEnabled;
     Row& idleApps = addRow(
         kIdlePage, kIdIdleApps, ControlKind::AppList, L"可打开的应用",
         L"可拖动应用条目调整快速启动顺序；通过文件选择器添加本地 EXE，最多添加 10 个应用；开关统一控制名称显示。",
@@ -196,12 +198,12 @@ void SettingsSections::createIdleRows() {
             static_cast<float>(std::max<size_t>(1, state.idleApps.size())) * kIdleAppItemH);
     idleApps.checked = state.idleAppNamesVisible;
     idleApps.height = idleApps.minHeight;
-    idleApps.enabled = state.idleEntryEnabled;
+    idleApps.enabled = state.quickStartEnabled;
     updateIdleRowsEnabled();
     addHeader(kIdlePage, L"滴答清单");
     Row& tickTickEnabled =
         addRow(kIdlePage, kIdTickTickEnabled, ControlKind::Toggle, L"启用滴答清单",
-               L"开启后自动同步今日任务，并在快捷启动卡片中显示今日任务入口。", 40.0f, kRowTallH);
+               L"开启后自动同步今日任务，并提供独立的今日任务入口。", 40.0f, kRowTallH);
     tickTickEnabled.checked = state.tickTickEnabled;
     addButton(kIdlePage, kIdTickTickApiToken, L"API 口令",
               L"在滴答清单网页版的「设置 → 账号与安全 → API 口令」中创建后填写。",

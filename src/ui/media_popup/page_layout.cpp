@@ -3,7 +3,7 @@
 
 namespace media_popup_detail {
 float IdlePageLayout::idleQuickExpandProgress(const IdlePresentation& content) const {
-    if (!content.quickStartEnabled)
+    if (!content.hasQuickPanel())
         return 0.0f;
     if (!content.showText)
         return 1.0f;
@@ -23,7 +23,7 @@ float IdlePageLayout::idleQuickExpandButtonTop(float headerTop) const {
 }
 
 std::size_t IdlePageLayout::idleQuickRowCount(const IdlePresentation& content) const {
-    if (content.apps.empty())
+    if (!content.quickStartEnabled || content.apps.empty())
         return 0;
     return (content.apps.size() + kIdleQuickColumnCount - 1) / kIdleQuickColumnCount;
 }
@@ -69,7 +69,7 @@ float IdlePageLayout::idleQuickListTop(float headerTop) const {
 
 float IdlePageLayout::idleQuickTabContentOffset(float progress,
                                                 const IdlePresentation& content) const {
-    if (!content.todayTasksEnabled)
+    if (!content.quickStartEnabled || !content.todayTasksEnabled)
         return 0.0f;
     return (kIdleQuickTabHeightDip + kIdleQuickTabContentGapDip) * std::clamp(progress, 0.0f, 1.0f);
 }
@@ -121,6 +121,8 @@ IdleListLayout IdlePageLayout::list(float w, float top, const IdlePresentation& 
     // 收起时只展示第一排；展开时尽量扩大网格可视区，内容超出后在
     // 列表内部滚动，始终不让内容越过卡片底部。
     IdleListLayout result;
+    if (!listContent.hasQuickPanel())
+        return result;
     result.offset = offset;
     const float expandProgress = idleQuickExpandProgress(listContent);
     const float maxListHeight = idleQuickListHeight(listContent, expandProgress);

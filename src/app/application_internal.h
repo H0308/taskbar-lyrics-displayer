@@ -201,8 +201,7 @@ private:
         [this] { saveSettings(); },
         [this] { publishPresentationFrame(monitor.snapshot(), {.lyricsChanged = true}); },
         [this] { refreshSettingsDialog(); },
-        [this] { return monitor.snapshot().sessionAlive; },
-        [this] { return taskbarVertical_; }};
+        [this] { return monitor.snapshot().sessionAlive; }};
     AppVolumeController appVolume_;           // 当前音乐应用的独立音量（音量合成器中该应用的一格）
     AppVolumeState appVolumeState_;           // 最近推送给宿主的音量状态（去重用）
     uint64_t appVolumeRequestRevision_ = 0;    // 主线程最近处理的音量请求版本

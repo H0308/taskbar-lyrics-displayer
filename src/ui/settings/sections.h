@@ -18,7 +18,6 @@ public:
     bool backgroundWaveActive() const;
     bool spectrumBackgroundAvailable() const;
     int idleTextMode() const;
-    bool embeddedResourceOnlyAvailable() const;
     void create();
     void update(const SettingsState& s);
     void onCommand(int id, int option = -1);

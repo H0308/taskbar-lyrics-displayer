@@ -249,7 +249,7 @@ std::vector<fluent::FluentMenuItem> App::buildDockQuickAppItems() {
 
     if (dockQuickAppActions_.empty()) {
         fluent::FluentMenuItem empty;
-        empty.text = L"请在“每日一言与应用速启”中添加应用";
+        empty.text = L"请在设置的“快捷启动”中添加应用";
         empty.enabled = false;
         items.push_back(std::move(empty));
     }
@@ -257,11 +257,15 @@ std::vector<fluent::FluentMenuItem> App::buildDockQuickAppItems() {
 }
 
 void App::showDockQuickApps(POINT screenPt) {
+    if (!settings_.quickStartEnabled_)
+        return;
     fluent::FluentMenu::show(trayHwnd, screenPt, buildDockQuickAppItems(),
                              [this](int command) { onDockQuickAppCommand(command); });
 }
 
 void App::onDockQuickAppCommand(int command) {
+    if (!settings_.quickStartEnabled_)
+        return;
     const int index = command - kDockQuickAppCommandBase;
     if (index < 0 || static_cast<size_t>(index) >= dockQuickAppActions_.size())
         return;

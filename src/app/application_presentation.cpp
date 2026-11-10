@@ -39,7 +39,7 @@ void App::updateRuntimeLogState(const SmtcSnapshot& snap) {
 
 void App::refreshIdleWelcome() {
     const SmtcSnapshot snap = monitor.snapshot();
-    if (!settings_.idleEntryEnabled_ || settings_.idleQuoteEnabled_ || !idle_.idleTextVisible() ||
+    if (settings_.idleTextMode_ != IdleTextMode::Welcome || !idle_.idleTextVisible() ||
         snap.sessionAlive || !settings_.idleCustomWelcome_.empty())
         return;
     if (presentation_.frame().idle.sentence == idle_.defaultIdleWelcome())
@@ -54,6 +54,9 @@ const PresentationFrame& App::preparePresentationFrame(const SmtcSnapshot& snap,
     input.summaryActive = idle_.state().startupTaskSummaryActive_;
     input.summaryPending = idle_.state().startupTaskSummaryPending_;
     input.tasksEnabled = idle_.tickTickEffectiveEnabled();
+    input.resourcesVisible = settings_.taskbarViewMode_ == TaskbarViewMode::AppBar ||
+        (settings_.taskbarViewMode_ == TaskbarViewMode::Embedded &&
+         settings_.embeddedResourceMonitor_ && !taskbarVertical_);
     if (input.summaryActive)
         input.summaryText = idle_.startupTaskSummaryText();
     return presentation_.update(snap, settings_, playback_.state(), input, update);

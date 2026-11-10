@@ -1890,10 +1890,10 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (isExpandedView() || isMinimalMode() || isStoppedMode())
             return false;
         if (scene_ == DisplayScene::Idle)
-            return isSessionVisible() && idle.quickStartEnabled;
+            return isSessionVisible() && idle.hasContent();
         if (hoverControlStyle_ == HoverControlStyle::Popup)
             return controlsOnHover_;
-        return isSessionVisible() && idle.quickStartEnabled;
+        return isSessionVisible() && idle.hasContent();
     }
 
     void syncMediaPopupEnabled() {
@@ -2507,6 +2507,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             frame.idle.loading != idle.loading || frame.idle.showText != idle.showText ||
             frame.idle.showQuote != idle.showQuote || frame.idle.copyEnabled != idle.copyEnabled ||
             frame.idle.quickStartEnabled != idle.quickStartEnabled ||
+            frame.idle.todayTasksEnabled != idle.todayTasksEnabled ||
             frame.idle.apps.size() != idle.apps.size();
         const bool wasVisible = isWindowVisible();
         const bool shouldAnimateScene = isWindowVisible() && frame.visible && clientAnimations_ &&
@@ -2640,7 +2641,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         }
 
         renderState_.setSessionVisible(frame.visible);
-        // 无媒体且关闭空闲入口时会停止定位定时器；重新显示时也要恢复
+        // 无媒体且没有任何待机内容时会停止定位定时器；重新显示时也要恢复
         // 首次探测和暂不可用状态的处理，否则显示抑制可能一直无法解除。
         if (isSessionVisible() &&
             (renderState_.visibilitySuppressed() ||
@@ -4383,7 +4384,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 enabled = media.canNext;
                 break;
             case kDockControlQuickApps:
-                enabled = static_cast<bool>(onDockQuickApps);
+                enabled = idle.quickStartEnabled && static_cast<bool>(onDockQuickApps);
                 break;
             case kImmersiveControlMenu:
                 enabled = static_cast<bool>(onImmersiveMenu);
@@ -4475,7 +4476,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                                             centers[kDockControlQuickApps].y - r * 0.82f,
                                             centers[kDockControlQuickApps].x + r * 0.82f,
                                             centers[kDockControlQuickApps].y + r * 0.82f),
-                                onDockQuickApps ? brushBtn_.Get() : brushBtnDisabled_.Get(), 1.45f);
+                                onDockQuickApps && idle.quickStartEnabled
+                                    ? brushBtn_.Get() : brushBtnDisabled_.Get(), 1.45f);
         }
         if (brushBtn_.Get()) {
             const float dotRadius = std::clamp(r * 0.13f, 1.0f, 1.6f);
@@ -4798,7 +4800,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     }
 
     void openDockQuickApps(POINT screenPoint) {
-        if (!isAppBarView() || !onDockQuickApps)
+        if (!isAppBarView() || !onDockQuickApps || !idle.quickStartEnabled)
             return;
         prepareForExternalPopup();
         onDockQuickApps(screenPoint);

@@ -986,9 +986,9 @@ SettingsState App::currentSettingsState() const {
     SettingsState st;
     const bool vertical = taskbarVertical_;
     const TaskbarAppearance view = appearanceForHost(vertical);
-    st.idleEntryEnabled = settings_.idleEntryEnabled_;
-    st.idleQuoteEnabled = settings_.idleQuoteEnabled_;
-    st.idleWelcomeEnabled = settings_.idleWelcomeEnabled_;
+    st.idleTextEnabled = settings_.idleTextEnabled_;
+    st.idleTextMode = static_cast<int>(settings_.idleTextMode_);
+    st.quickStartEnabled = settings_.quickStartEnabled_;
     st.idleQuoteSource = settings_.idleQuoteSource_ == IdleQuoteSource::Jinrishici ? 1
                          : settings_.idleQuoteSource_ == IdleQuoteSource::Netease  ? 2
                                                                                    : 0;
@@ -1104,7 +1104,8 @@ SettingsActions App::buildSettingsActions() {
                       nullptr, SW_SHOWNORMAL);
     };
     act.onOpenAbout = [this] { showAbout(); };
-    act.onIdleEntryEnabled = [this](bool on) { idle_.applyIdleEntryEnabled(on); };
+    act.onIdleTextEnabled = [this](bool on) { idle_.applyIdleTextEnabled(on); };
+    act.onQuickStartEnabled = [this](bool on) { idle_.applyQuickStartEnabled(on); };
     act.onIdleTextMode = [this](int mode) { idle_.applyIdleTextMode(mode); };
     act.onIdleQuoteSource = [this](int source) { idle_.applyIdleQuoteSource(source); };
     act.onIdleQuoteRefreshInterval = [this](int interval) {

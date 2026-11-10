@@ -171,7 +171,6 @@ struct SettingsDialog::Impl {
     void updateTickTickRows() { sections_.updateTickTickRows(); }
     void updateIdleQuoteSourceRow() { sections_.updateIdleQuoteSourceRow(); }
     int idleTextMode() const { return sections_.idleTextMode(); }
-    bool embeddedResourceOnlyAvailable() const { return sections_.embeddedResourceOnlyAvailable(); }
     void updateIdleRowsEnabled() { sections_.updateIdleRowsEnabled(); }
     void updateCompactLyricRows() { sections_.updateCompactLyricRows(); }
     const Row* findRow(int id) const { return sections_.findRow(id); }

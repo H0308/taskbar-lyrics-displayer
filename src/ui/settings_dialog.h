@@ -15,9 +15,9 @@
 
 // 设置窗口的初始状态快照（打开时由 App 填充）
 struct SettingsState {
-    bool idleEntryEnabled = true;
-    bool idleQuoteEnabled = true;
-    bool idleWelcomeEnabled = true;
+    bool idleTextEnabled = true;
+    int idleTextMode = 0; // 0 每日一言 1 欢迎语
+    bool quickStartEnabled = true;
     int idleQuoteSource = 0; // 0 一言 1 今日诗词 2 网易云热评
     int idleQuoteRefreshInterval = 0; // 0 每天 1 每 12 小时 2 每小时
     int idleQuoteAlignment = 0; // 0 左对齐 1 居中 2 右对齐
@@ -101,8 +101,9 @@ struct SettingsActions {
     std::function<void()> onOpenDocs;
     std::function<void()> onOpenFeedback;
     std::function<void()> onOpenAbout;
-    std::function<void(bool)> onIdleEntryEnabled;
-    std::function<void(int)> onIdleTextMode; // 0 每日一言 1 欢迎语 2 不显示
+    std::function<void(bool)> onIdleTextEnabled;
+    std::function<void(int)> onIdleTextMode; // 0 每日一言 1 欢迎语
+    std::function<void(bool)> onQuickStartEnabled;
     std::function<void(int)> onIdleQuoteSource;
     std::function<void(int)> onIdleQuoteRefreshInterval;
     std::function<void(int)> onIdleQuoteAlignment;

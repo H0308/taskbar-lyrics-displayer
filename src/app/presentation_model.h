@@ -10,6 +10,7 @@ struct IdleFrameInput {
     bool summaryActive = false;
     bool summaryPending = false;
     bool tasksEnabled = false;
+    bool resourcesVisible = false;
     std::wstring summaryText;
 };
 

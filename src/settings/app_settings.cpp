@@ -391,9 +391,9 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
     albumCoverEffect_ = j.value("albumCoverEffect", std::string("default")) == "vinyl"
                             ? AlbumCoverEffect::Vinyl
                             : AlbumCoverEffect::Default;
-    idleEntryEnabled_ = j.value("idleEntryEnabled", true);
-    idleQuoteEnabled_ = j.value("idleQuoteEnabled", true);
-    idleWelcomeEnabled_ = j.value("idleWelcomeEnabled", !idleQuoteEnabled_);
+    idleTextEnabled_ = j.value("idleTextEnabled", true);
+    idleTextMode_ = static_cast<IdleTextMode>(std::clamp(j.value("idleTextMode", 0), 0, 1));
+    quickStartEnabled_ = j.value("quickStartEnabled", true);
     idleAppNamesVisible_ = j.value("idleAppNamesVisible", true);
     idleCustomWelcome_ =
         normalizeIdleCustomWelcome(wideOf(j.value("idleCustomWelcome", std::string())));
@@ -480,9 +480,9 @@ nlohmann::json AppSettings::toJson() const {
     saveAppearance("Dark", darkLyricAppearance_);
     if (hasGlobalLyricAppearance_)
         saveAppearance("Global", globalLyricAppearance_);
-    j["idleEntryEnabled"] = idleEntryEnabled_;
-    j["idleQuoteEnabled"] = idleQuoteEnabled_;
-    j["idleWelcomeEnabled"] = idleWelcomeEnabled_;
+    j["idleTextEnabled"] = idleTextEnabled_;
+    j["idleTextMode"] = static_cast<int>(idleTextMode_);
+    j["quickStartEnabled"] = quickStartEnabled_;
     j["idleAppNamesVisible"] = idleAppNamesVisible_;
     j["idleCustomWelcome"] = utf8Of(idleCustomWelcome_);
     j["idleQuoteSource"] = idleQuoteSourceConfigName(idleQuoteSource_);

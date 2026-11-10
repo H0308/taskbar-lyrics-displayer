@@ -22,9 +22,9 @@ struct AppSettings {
     LyricAppearance darkLyricAppearance_;
     bool hasGlobalLyricAppearance_ = false;
     LyricAppearance globalLyricAppearance_;
-    bool idleEntryEnabled_ = true;
-    bool idleQuoteEnabled_ = true;
-    bool idleWelcomeEnabled_ = true;
+    bool idleTextEnabled_ = true;
+    IdleTextMode idleTextMode_ = IdleTextMode::DailyQuote;
+    bool quickStartEnabled_ = true;
     bool idleAppNamesVisible_ = true;
     std::wstring idleCustomWelcome_;
     IdleQuoteSource idleQuoteSource_ = IdleQuoteSource::Hitokoto;

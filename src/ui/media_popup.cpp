@@ -344,7 +344,7 @@ struct MediaPopup::Impl {
     }
 
     bool idlePageAllowed() const {
-        return available && idle.quickStartEnabled;
+        return available && idle.hasContent();
     }
 
     static int categoryDirection(PopupPage from, PopupPage to) {
@@ -1467,6 +1467,14 @@ struct MediaPopup::Impl {
                            const IdlePresentation& content, bool updateHitTest) {
         if (!rt)
             return;
+        if (!content.hasQuickPanel()) {
+            if (updateHitTest) {
+                idleListRect = {};
+                idleScrollMax = 0.0f;
+                idleScrollView.setVisible(false);
+            }
+            return;
+        }
         layoutIdleList(w, top, &content);
         const float progress = idleQuickExpandProgress(content);
         drawIdleQuickTabs(rt, w, idleQuickTabTop(top, progress, content), progress,
@@ -2694,7 +2702,7 @@ struct MediaPopup::Impl {
     }
 
     bool hitIdleQuickExpand(float x, float y) const {
-        return !categoryTransition.active() && idleMode && idle.quickStartEnabled &&
+        return !categoryTransition.active() && idleMode && idle.hasQuickPanel() &&
                idle.showText && idleQuickExpandRect.right > idleQuickExpandRect.left &&
                contains(idleQuickExpandRect, x, y);
     }
@@ -2714,7 +2722,7 @@ struct MediaPopup::Impl {
 
     int hitIdleApp(float x, float y) const {
         y -= cardOriginDip;
-        if (categoryTransition.active() || !idleMode ||
+        if (categoryTransition.active() || !idleMode || !idle.quickStartEnabled ||
             (idle.todayTasksEnabled && idleQuickTab != IdleQuickTab::QuickStart) ||
             idle.apps.empty() || !contains(idleListRect, x, y))
             return -1;
@@ -2858,7 +2866,7 @@ struct MediaPopup::Impl {
     }
 
     void toggleIdleQuickExpand() {
-        if (!hwnd || !idleMode || !idle.quickStartEnabled || !idle.showText)
+        if (!hwnd || !idleMode || !idle.hasQuickPanel() || !idle.showText)
             return;
         // 再次点击时先完成上一目标的图层交接，再从该状态反向展开/收起。
         if (quickExpandTransition.active())
@@ -3953,7 +3961,7 @@ void MediaPopup::setIdleContent(const IdlePresentation& content, bool available)
     enqueue([=, this]() mutable {
         const bool textVisibilityChanged = content.showText != impl_->idle.showText;
         const bool idleAvailabilityChanged =
-            content.quickStartEnabled != impl_->idle.quickStartEnabled;
+            content.hasContent() != impl_->idle.hasContent();
         const bool quoteContentChanged = content.sentence != impl_->idle.sentence ||
                                          content.loading != impl_->idle.loading ||
                                          content.source != impl_->idle.source;
@@ -4043,7 +4051,14 @@ void MediaPopup::setIdleContent(const IdlePresentation& content, bool available)
             impl_->idleScrollView.setOffset(0.0f);
             impl_->idleScrollDragging = false;
         }
-        if (!content.quickStartEnabled) {
+        if (!content.quickStartEnabled && content.todayTasksEnabled) {
+            impl_->idleQuickTab = IdleQuickTab::TodayTasks;
+            impl_->hoverIdleQuickTab = -1;
+            impl_->pressedIdleQuickTab = -1;
+            impl_->idleQuickTabRects[0] = {};
+            impl_->idleQuickTabRects[1] = {};
+        }
+        if (!content.hasQuickPanel()) {
             impl_->quickExpansion.expanded = false;
             impl_->quickExpansion.opening = false;
             impl_->quickExpansion.progress = 0.0f;

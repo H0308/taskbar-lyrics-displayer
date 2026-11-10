@@ -7,6 +7,8 @@
 namespace media_popup_paint {
 void drawIdleQuickHeader(const PagePaintContext& context, ID2D1DeviceContext* rt, float w,
                          float headerTop, const IdlePresentation& content, bool updateHitTest) {
+    if (!content.hasQuickPanel())
+        return;
     auto& brushSecondary = context.resources.brushSecondary;
     auto& fmtIdleHeader = context.resources.fmtIdleHeader;
 
@@ -14,8 +16,10 @@ void drawIdleQuickHeader(const PagePaintContext& context, ID2D1DeviceContext* rt
     const D2D1_RECT_F expandButton =
         layoutFor(context, content).idleQuickExpandLocalRect(w, headerTop, content);
     const float headerRight =
-        content.quickStartEnabled && content.showText ? expandButton.left - 8.0f : w - 16.0f;
-    drawText(rt, content.todayTasksEnabled ? L"快捷启动与今日任务" : L"快捷启动",
+        content.hasQuickPanel() && content.showText ? expandButton.left - 8.0f : w - 16.0f;
+    const wchar_t* title = !content.quickStartEnabled ? L"今日任务"
+        : content.todayTasksEnabled ? L"快捷启动与今日任务" : L"快捷启动";
+    drawText(rt, title,
              fmtIdleHeader,
              D2D1::RectF(kIdleQuickTitleLeftDip, headerTop, headerRight,
                          headerTop + kIdleQuickHeaderHeightDip),
@@ -153,7 +157,7 @@ void drawIdleQuickExpandButton(const PagePaintContext& context, ID2D1DeviceConte
     auto& idleQuickExpandRect = context.geometry.idleQuickExpandRect;
     auto& brushSecondary = context.resources.brushSecondary;
 
-    if (!rt || !content.quickStartEnabled || !content.showText) {
+    if (!rt || !content.hasQuickPanel() || !content.showText) {
         if (updateHitTest)
             idleQuickExpandRect = {};
         return;
@@ -196,7 +200,7 @@ void drawIdleQuickTabs(const PagePaintContext& context, ID2D1DeviceContext* rt, 
 
     if (!rt)
         return;
-    if (!content.todayTasksEnabled || progress <= 0.01f) {
+    if (!content.quickStartEnabled || !content.todayTasksEnabled || progress <= 0.01f) {
         if (updateHitTest) {
             idleQuickTabRects[0] = {};
             idleQuickTabRects[1] = {};
@@ -379,6 +383,8 @@ void drawIdleTodayTasks(const PagePaintContext& context, ID2D1DeviceContext* rt,
 
 void drawIdleQuickListContent(const PagePaintContext& context, ID2D1DeviceContext* rt, float w,
                               const IdlePresentation& content, const D2D1_RECT_F* paintBounds) {
+    if (!content.hasQuickPanel())
+        return;
     auto& idleScrollOffset = context.idle.idleScrollOffset;
     auto& idleScrollMax = context.idle.idleScrollMax;
     auto& idleQuickTab = context.idle.idleQuickTab;

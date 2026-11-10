@@ -24,13 +24,13 @@ bool SettingsSections::minimalModeActive() const {
 }
 
 void SettingsSections::updateFloatingCardRowsEnabled() {
-    const auto* idleEntry = findRow(kIdIdleEntry);
     const auto* controls = findRow(kIdHoverControls);
     const auto* style = findRow(kIdHoverControlStyle);
     const auto* background = findRow(kIdFloatingCardBackground);
     const bool mediaCardEnabled = controls && controls->checked && style && style->selected == 1;
     const bool cardEnabled =
-        !minimalModeActive() && ((idleEntry && idleEntry->checked) || mediaCardEnabled);
+        !minimalModeActive() && (state.idleTextEnabled || state.quickStartEnabled ||
+                                state.tickTickEnabled || mediaCardEnabled);
     const bool frosted = cardEnabled && background && background->selected == 1;
     if (auto* row = findRow(kIdFloatingCardTrigger))
         row->enabled = cardEnabled;
@@ -160,7 +160,7 @@ void SettingsSections::updateTickTickRows() {
     if (auto* row = findRow(kIdTickTickEnabled)) {
         row->checked = enabled;
         row->enabled = true;
-        row->hint = hasToken ? (enabled ? L"已开启自动同步，并在快捷启动卡片中显示今日任务。"
+        row->hint = hasToken ? (enabled ? L"已开启自动同步，并在空闲卡片中显示今日任务。"
                                         : L"已关闭自动同步和今日任务入口；API 口令仍保留在本机。")
                              : L"未配置 API 口令，当前处于隐式关闭状态；开启时会先要求填写口令。";
         row->showHint = true;
@@ -208,22 +208,14 @@ void SettingsSections::updateIdleQuoteSourceRow() {
 }
 
 int SettingsSections::idleTextMode() const {
-    if (state.idleQuoteEnabled)
-        return 0;
-    return state.idleWelcomeEnabled || !embeddedResourceOnlyAvailable() ? 1 : 2;
-}
-
-bool SettingsSections::embeddedResourceOnlyAvailable() const {
-    return state.taskbarViewMode == 0 && state.embeddedResourceMonitor && !state.verticalTaskbar;
+    return std::clamp(state.idleTextMode, 0, 1);
 }
 
 void SettingsSections::updateIdleRowsEnabled() {
-    const bool quoteEnabled = state.idleQuoteEnabled;
+    const bool quoteEnabled = state.idleTextEnabled && idleTextMode() == 0;
     if (auto* row = findRow(kIdIdleQuote)) {
         row->selected = idleTextMode();
-        row->optionEnabled.assign(row->options.size(), true);
-        if (row->optionEnabled.size() > 2)
-            row->optionEnabled[2] = embeddedResourceOnlyAvailable();
+        row->enabled = state.idleTextEnabled;
     }
     if (auto* row = findRow(kIdIdleQuoteSource))
         row->enabled = quoteEnabled;
@@ -232,13 +224,15 @@ void SettingsSections::updateIdleRowsEnabled() {
     if (auto* row = findRow(kIdIdleQuoteAlignment))
         row->enabled = quoteEnabled && !state.verticalTaskbar;
     if (auto* row = findRow(kIdIdleCustomWelcome))
-        row->enabled = idleTextMode() == 1;
+        row->enabled = state.idleTextEnabled && idleTextMode() == 1;
     if (auto* row = findRow(kIdIdleQuoteBackground))
         row->enabled = !minimalModeActive();
     if (auto* row = findRow(kIdIdleQuoteBackgroundScope))
         row->enabled = !minimalModeActive() && state.idleQuoteBackground != 0;
     if (auto* row = findRow(kIdIdleApps))
-        row->enabled = !minimalModeActive() && state.idleEntryEnabled;
+        row->enabled = !minimalModeActive() && state.quickStartEnabled;
+    if (auto* row = findRow(kIdQuickStartEnabled))
+        row->enabled = !minimalModeActive();
 }
 
 void SettingsSections::updateCompactLyricRows() {
@@ -247,8 +241,10 @@ void SettingsSections::updateCompactLyricRows() {
 
 void SettingsSections::syncIdleRows(const SettingsState& s) {
     const bool vertical = s.verticalTaskbar;
-    if (auto* row = findRow(kIdIdleEntry))
-        row->checked = s.idleEntryEnabled;
+    if (auto* row = findRow(kIdIdleTextEnabled))
+        row->checked = s.idleTextEnabled;
+    if (auto* row = findRow(kIdQuickStartEnabled))
+        row->checked = s.quickStartEnabled;
     if (auto* row = findRow(kIdIdleQuote))
         row->selected = idleTextMode();
     if (auto* row = findRow(kIdIdleQuoteSource))
