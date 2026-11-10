@@ -8,6 +8,7 @@
 #include <cmath>
 #include <algorithm>
 #include <atomic>
+#include <cwchar>
 #include <mutex>
 
 #pragma comment(lib, "dwmapi.lib")
@@ -463,13 +464,42 @@ HFONT createUiFont(UINT dpi, float dipSize, int weight) {
     }
     if (isBoldFontStyle(style))
         weight = std::max(weight, FW_BOLD);
+    LOGFONTW description{};
+    description.lfWeight = weight;
+    description.lfItalic = dwriteStyleOf(style) == DWRITE_FONT_STYLE_ITALIC;
+    description.lfCharSet = DEFAULT_CHARSET;
+    description.lfQuality = CLEARTYPE_QUALITY;
+    wcsncpy_s(description.lfFaceName, family.c_str(), _TRUNCATE);
+
+    // 界面配置保存的是 DirectWrite 字体族名，不能直接当作 GDI 字体名称。
+    // 先按相同的字重、样式选字，再转换为该字体的 GDI 描述。
+    winrt::com_ptr<IDWriteFactory> factory;
+    winrt::com_ptr<IDWriteFontCollection> collection;
+    winrt::com_ptr<IDWriteFontFamily> fontFamily;
+    winrt::com_ptr<IDWriteFont> matchedFont;
+    winrt::com_ptr<IDWriteGdiInterop> interop;
+    UINT32 familyIndex = 0;
+    BOOL familyExists = FALSE;
+    if (SUCCEEDED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+                                      reinterpret_cast<IUnknown**>(factory.put()))) &&
+        SUCCEEDED(factory->GetSystemFontCollection(collection.put(), FALSE)) &&
+        SUCCEEDED(collection->FindFamilyName(family.c_str(), &familyIndex, &familyExists)) &&
+        familyExists &&
+        SUCCEEDED(collection->GetFontFamily(familyIndex, fontFamily.put())) &&
+        SUCCEEDED(fontFamily->GetFirstMatchingFont(static_cast<DWRITE_FONT_WEIGHT>(weight),
+                                                  DWRITE_FONT_STRETCH_NORMAL,
+                                                  dwriteStyleOf(style), matchedFont.put())) &&
+        SUCCEEDED(factory->GetGdiInterop(interop.put()))) {
+        LOGFONTW matchedDescription{};
+        BOOL isSystemFont = FALSE;
+        if (SUCCEEDED(interop->ConvertFontToLOGFONT(matchedFont.get(), &matchedDescription,
+                                                   &isSystemFont)))
+            description = matchedDescription;
+    }
     // DIP -> 像素：px = dip * dpi / 96（之前误按磅换算除以 72，字体偏大约 33%）
-    int px = -MulDiv(static_cast<int>(std::lround(dipSize)), static_cast<int>(dpi), 96);
-    HFONT font = CreateFontW(px, 0, 0, 0, weight, dwriteStyleOf(style) == DWRITE_FONT_STYLE_ITALIC,
-                             FALSE, FALSE, DEFAULT_CHARSET,
-                             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                             DEFAULT_PITCH | FF_DONTCARE, family.c_str());
-    return font;
+    description.lfHeight = -MulDiv(static_cast<int>(std::lround(dipSize)), static_cast<int>(dpi), 96);
+    description.lfQuality = CLEARTYPE_QUALITY;
+    return CreateFontIndirectW(&description);
 }
 
 } // namespace fluent
