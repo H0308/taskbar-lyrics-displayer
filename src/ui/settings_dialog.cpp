@@ -2208,11 +2208,6 @@ struct SettingsDialog::Impl {
             drawScrollBar(painter);
             return;
         }
-        if (hintHeightsDirty && !navOnly && !contentOnly && !contentScrollAnimating) {
-            updateHintHeights(painter);
-            // updateHintHeights 内部可能调整行高并重新布局；本次已完成相应量测。
-            hintHeightsDirty = false;
-        }
         const auto& p = painter.colors();
         if (!contentOnly)
             drawNav(painter);
@@ -2324,6 +2319,16 @@ struct SettingsDialog::Impl {
     void renderContentLayer() {
         if (!contentWindow)
             return;
+        if (hintHeightsDirty) {
+            if (!contentRenderer.initialize())
+                return;
+            // 局部重绘和滚动也可能首次提交内容；先完成量测，再计算缓存几何。
+            // 量测只使用 DirectWrite，不需要绑定或开始绘制目标表面。
+            fluent::FluentDialogSurface::Painter measurer(nullptr, contentRenderer.dwrite(),
+                                                         &contentTextCache);
+            updateHintHeights(measurer);
+            hintHeightsDirty = false;
+        }
         const auto started = runtime_log::uiTimeMs();
         const float scale = surface.dipScale();
         const float left = std::floor(contentViewportRect.left * scale) / scale;
