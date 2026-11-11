@@ -70,6 +70,9 @@ constexpr UINT kScrollTimerMs = 32;
 constexpr UINT kTransitionFrameMs = 16;
 // 音量滑块展开/收起过渡时长
 constexpr float kVolumeSliderMs = 140.0f;
+constexpr float kBackdropBlurDip = 16.0f;
+constexpr float kBackdropCapturePaddingDip = kBackdropBlurDip * 3.0f;
+constexpr float kAlbumTintAlpha = 0.08f;
 
 // d2d1effects.h 只声明这个 GUID；当前工程的链接配置不提供其外部定义，
 // 这里保留 Direct2D 标准 Gaussian Blur CLSID 的内部定义。
@@ -228,8 +231,7 @@ struct MediaPopup::Impl {
     ID2D1SolidColorBrush* brushTaskPriorityMedium = nullptr;
     ID2D1SolidColorBrush* brushTaskPriorityLow = nullptr;
     ID2D1SolidColorBrush* brushTaskPriorityNone = nullptr;
-    ID2D1LinearGradientBrush* brushDynamicGradient = nullptr;
-    ID2D1RadialGradientBrush* brushDynamicGlow = nullptr;
+    ID2D1SolidColorBrush* brushDynamicTint = nullptr;
     ID2D1LinearGradientBrush* brushMediaTextEdgeFade = nullptr;
     ID2D1LinearGradientBrush* brushIdleTextEdgeFade = nullptr;
     ID2D1Layer* textEdgeFadeLayer = nullptr;
@@ -268,6 +270,7 @@ struct MediaPopup::Impl {
     ID2D1Layer* coverLayer = nullptr;
     ID2D1Bitmap* backdropBmp = nullptr;
     ID2D1Effect* backdropBlur = nullptr;
+    D2D1_RECT_F backdropSourceRect{};
     ID2D1RoundedRectangleGeometry* backdropClip = nullptr;
     ID2D1Layer* backdropLayer = nullptr;
     media_control::Geometry controlGeometry;
@@ -493,8 +496,7 @@ struct MediaPopup::Impl {
     }
 
     void releaseDynamicBackgroundResources() {
-        releaseCom(brushDynamicGradient);
-        releaseCom(brushDynamicGlow);
+        releaseCom(brushDynamicTint);
         dynamicBackgroundDirty = true;
     }
 
@@ -514,12 +516,16 @@ struct MediaPopup::Impl {
             return;
         }
         // 自动对比度同时考虑磨砂上的底色，避免加深背景后仍按原截图选黑字。
-        const auto fill = cardFillForPage(page);
-        const uint8_t tintPixel[] = {
-            static_cast<uint8_t>(std::lround(fill.b * 255.0f)),
-            static_cast<uint8_t>(std::lround(fill.g * 255.0f)),
-            static_cast<uint8_t>(std::lround(fill.r * 255.0f)), 255};
-        luminance = luminance * (1.0f - fill.a) + backdropLuminance(tintPixel, 1, 1) * fill.a;
+        auto applyTint = [&luminance](D2D1_COLOR_F tint) {
+            const uint8_t tintPixel[] = {
+                static_cast<uint8_t>(std::lround(tint.b * 255.0f)),
+                static_cast<uint8_t>(std::lround(tint.g * 255.0f)),
+                static_cast<uint8_t>(std::lround(tint.r * 255.0f)), 255};
+            luminance = luminance * (1.0f - tint.a) + backdropLuminance(tintPixel, 1, 1) * tint.a;
+        };
+        applyTint(cardFillForPage(page));
+        if (dynamicBackgroundEnabledForPage(page))
+            applyTint(colorFromRef(media.dominantColor, kAlbumTintAlpha));
         const float blackContrast = (luminance + 0.05f) / 0.05f;
         const float whiteContrast = 1.05f / (luminance + 0.05f);
         const bool useBlack = blackContrast >= whiteContrast;
@@ -565,6 +571,13 @@ struct MediaPopup::Impl {
     float dip(int px) const {
         return static_cast<float>(px) / scale();
     }
+
+    int shadowPaddingPx() const {
+        return static_cast<int>(std::ceil(kPopupShadowPaddingDip * scale()));
+    }
+
+    float clientDipX(int px) const { return dip(px - shadowPaddingPx()); }
+    float clientDipY(int px) const { return dip(px - shadowPaddingPx()); }
 
     float popupHeightDip() const {
         return popupContentHeightDip();
@@ -665,6 +678,7 @@ struct MediaPopup::Impl {
         sourceIconDirty = true;
         releaseCom(backdropBmp);
         releaseCom(backdropBlur);
+        backdropSourceRect = {};
         lastBackdropLuminance = -1.0f;
         backdropDirty = true;
         releaseCom(brushBackground);
@@ -875,43 +889,19 @@ struct MediaPopup::Impl {
     bool createDynamicBackgroundResources(bool enabled) {
         if (!enabled)
             return false;
-        if (!dynamicBackgroundDirty && brushDynamicGradient && brushDynamicGlow)
+        if (!dynamicBackgroundDirty && brushDynamicTint)
             return true;
 
-        releaseCom(brushDynamicGradient);
-        releaseCom(brushDynamicGlow);
+        releaseCom(brushDynamicTint);
         auto* rt = renderer.renderTarget();
         if (!rt)
             return false;
 
         const COLORREF color = media.hasDominantColor ? media.dominantColor
                                                        : fluent::accentColor();
-        const D2D1_GRADIENT_STOP stops[] = {
-            {0.0f, colorFromRef(color, 0.44f)},
-            {0.56f, colorFromRef(color, 0.22f)},
-            {1.0f, colorFromRef(color, 0.0f)},
-        };
-        ID2D1GradientStopCollection* collection = nullptr;
-        if (FAILED(rt->CreateGradientStopCollection(stops, _countof(stops), &collection)) ||
-            !collection) {
-            return false;
-        }
-
-        const auto linear = D2D1::LinearGradientBrushProperties(
-            D2D1::Point2F(0.0f, 0.0f),
-            D2D1::Point2F(kPopupWidthDip, popupHeightDip()));
-        HRESULT hr = rt->CreateLinearGradientBrush(linear, collection, &brushDynamicGradient);
-        if (SUCCEEDED(hr)) {
-            const auto radial = D2D1::RadialGradientBrushProperties(
-                D2D1::Point2F(kPopupWidthDip * 0.74f, popupHeightDip() * 0.28f),
-                D2D1::Point2F(0.0f, 0.0f), kPopupWidthDip * 0.72f,
-                popupHeightDip() * 0.92f);
-            hr = rt->CreateRadialGradientBrush(radial, collection, &brushDynamicGlow);
-        }
-        collection->Release();
-        if (FAILED(hr) || !brushDynamicGradient || !brushDynamicGlow) {
-            releaseCom(brushDynamicGradient);
-            releaseCom(brushDynamicGlow);
+        if (FAILED(rt->CreateSolidColorBrush(colorFromRef(color, kAlbumTintAlpha),
+                                             &brushDynamicTint)) || !brushDynamicTint) {
+            releaseCom(brushDynamicTint);
             return false;
         }
         dynamicBackgroundDirty = false;
@@ -934,16 +924,54 @@ struct MediaPopup::Impl {
         backdropDirty = false;
         releaseCom(backdropBlur);
         releaseCom(backdropBmp);
+        backdropSourceRect = {};
         resetBackdropTextColors();
         if ((!force && !frostedBackgroundActive()) || !hwnd)
             return true;
 
-        const int width = cardWidthPx;
-        const int height = cardHeightPx;
-        if (width <= 0 || height <= 0)
+        if (cardWidthPx <= 0 || cardHeightPx <= 0)
             return false;
-        const RECT cardRect{cardScreenX, cardScreenY, cardScreenX + width,
-                            cardScreenY + height};
+        const RECT cardRect = popupCardScreenRect();
+        const int padding = static_cast<int>(std::ceil(kBackdropCapturePaddingDip * scale()));
+        const LONG desktopLeft = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        const LONG desktopTop = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        const LONG desktopRight = desktopLeft + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        const LONG desktopBottom = desktopTop + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        // 在实际桌面范围内多采集三倍模糊半径，最终只显示中央的卡片区域。
+        RECT captureRect{
+            std::max(cardRect.left - padding, desktopLeft),
+            std::max(cardRect.top - padding, desktopTop),
+            std::min(cardRect.right + padding, desktopRight),
+            std::min(cardRect.bottom + padding, desktopBottom)};
+        RECT anchorRect{};
+        const bool anchorVisible = anchor && anchor != hwnd && IsWindow(anchor) &&
+                                   IsWindowVisible(anchor) && GetWindowRect(anchor, &anchorRect);
+        const bool anchorOverlapsCard = anchorVisible &&
+                                        anchorRect.left < cardRect.right &&
+                                        anchorRect.right > cardRect.left &&
+                                        anchorRect.top < cardRect.bottom &&
+                                        anchorRect.bottom > cardRect.top;
+        // 额外采样只取卡片所在的一侧，不能为了取得外围像素而隐藏歌词窗口。
+        // 靠近任务栏的一边由模糊的硬边界延伸，其余方向保留原有采样余量。
+        if (anchorVisible && !anchorOverlapsCard &&
+            anchorRect.left < captureRect.right && anchorRect.right > captureRect.left &&
+            anchorRect.top < captureRect.bottom && anchorRect.bottom > captureRect.top) {
+            if (anchorRect.top >= cardRect.bottom)
+                captureRect.bottom = std::min(captureRect.bottom, anchorRect.top);
+            else if (anchorRect.bottom <= cardRect.top)
+                captureRect.top = std::max(captureRect.top, anchorRect.bottom);
+            else if (anchorRect.left >= cardRect.right)
+                captureRect.right = std::min(captureRect.right, anchorRect.left);
+            else if (anchorRect.right <= cardRect.left)
+                captureRect.left = std::max(captureRect.left, anchorRect.right);
+        }
+        const int width = captureRect.right - captureRect.left;
+        const int height = captureRect.bottom - captureRect.top;
+        const int cardLeft = cardRect.left - captureRect.left;
+        const int cardTop = cardRect.top - captureRect.top;
+        if (cardLeft < 0 || cardTop < 0 || cardLeft + cardWidthPx > width ||
+            cardTop + cardHeightPx > height)
+            return false;
 
         // 首次显示时窗口本来是隐藏的；切换设置或主题时可能已经可见，
         // 临时隐藏它再抓取，避免把自己的卡片拍进背景图形成递归灰层。
@@ -952,24 +980,15 @@ struct MediaPopup::Impl {
             ShowWindow(hwnd, SW_HIDE);
         }
 
-        // 锚点就是任务栏内嵌歌词窗口。弹出卡片覆盖它时，如果直接抓屏，
-        // 内嵌歌词的背景/强调色会被当作后方材质，形成底部第二块面板。
-        RECT anchorRect{};
-        const bool anchorOverlaps = anchor && anchor != hwnd && IsWindow(anchor) &&
-                                    IsWindowVisible(anchor) && GetWindowRect(anchor, &anchorRect) &&
-                                    anchorRect.left < cardRect.right &&
-                                    anchorRect.right > cardRect.left &&
-                                    anchorRect.top < cardRect.bottom &&
-                                    anchorRect.bottom > cardRect.top;
-        if (anchorOverlaps)
+        // 仅卡片本体确实覆盖歌词时才沿用原有的避让采样，外围采样不改变歌词显隐。
+        if (anchorOverlapsCard)
             ShowWindow(anchor, SW_HIDE);
-        // 只有实际隐藏过窗口才需要等合成器移除旧画面。首次打开时通常没有
-        // 窗口覆盖采样区域，无条件等待会把点击处理拖过一个或多个刷新周期。
-        if (restoreVisible || anchorOverlaps)
+        // 只有实际隐藏过窗口才需要等合成器移除旧画面，避免无条件等待刷新周期。
+        if (restoreVisible || anchorOverlapsCard)
             DwmFlush();
 
         auto restoreWindows = [&]() {
-            if (anchorOverlaps)
+            if (anchorOverlapsCard)
                 ShowWindow(anchor, SW_SHOWNA);
             if (restoreVisible)
                 ShowWindow(hwnd, SW_SHOWNOACTIVATE);
@@ -998,8 +1017,8 @@ struct MediaPopup::Impl {
         if (memoryDc && dib) {
             oldBitmap = SelectObject(memoryDc, dib);
             if (oldBitmap && oldBitmap != HGDI_ERROR)
-                copied = BitBlt(memoryDc, 0, 0, width, height, screenDc, cardRect.left,
-                                cardRect.top, SRCCOPY | CAPTUREBLT) != FALSE;
+                copied = BitBlt(memoryDc, 0, 0, width, height, screenDc, captureRect.left,
+                                captureRect.top, SRCCOPY | CAPTUREBLT) != FALSE;
         }
         if (oldBitmap && oldBitmap != HGDI_ERROR)
             SelectObject(memoryDc, oldBitmap);
@@ -1013,7 +1032,10 @@ struct MediaPopup::Impl {
             return false;
         }
 
-        const float sampledLuminance = backdropLuminance(pixels, width, height);
+        const auto* cardPixels = static_cast<const uint8_t*>(pixels) +
+            (static_cast<size_t>(cardTop) * width + cardLeft) * 4;
+        const float sampledLuminance =
+            backdropLuminance(cardPixels, cardWidthPx, cardHeightPx, width);
         lastBackdropLuminance = sampledLuminance;
 
         auto* rt = renderer.renderTarget();
@@ -1035,6 +1057,8 @@ struct MediaPopup::Impl {
         }
         DeleteObject(dib);
         backdropBmp = captured;
+        backdropSourceRect = D2D1::RectF(dip(cardLeft), dip(cardTop),
+                                        dip(cardLeft + cardWidthPx), dip(cardTop + cardHeightPx));
         if (frostedBackgroundActive())
             applyBackdropTextContrast(sampledLuminance);
 
@@ -1043,7 +1067,7 @@ struct MediaPopup::Impl {
         if (SUCCEEDED(hr))
             blur->SetInput(0, backdropBmp);
         if (SUCCEEDED(hr))
-            hr = blur->SetValue(D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, 16.0f);
+            hr = blur->SetValue(D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, kBackdropBlurDip);
         if (SUCCEEDED(hr))
             hr = blur->SetValue(D2D1_GAUSSIANBLUR_PROP_OPTIMIZATION,
                                 D2D1_GAUSSIANBLUR_OPTIMIZATION_BALANCED);
@@ -1487,9 +1511,12 @@ struct MediaPopup::Impl {
             // 收尾预绘制时保持滚动内容透明，避免它叠在仍可见的转场快照上。
             idleScrollView.setContentVisible(!categoryTransition.hasLayers() &&
                                              !quickExpandTransition.hasLayers());
+            const float paddingDip = dip(shadowPaddingPx());
             idleScrollView.layout(
-                D2D1::RectF(idleListRect.left, idleListRect.top + cardOriginDip,
-                            idleListRect.right, idleListRect.bottom + cardOriginDip),
+                D2D1::RectF(idleListRect.left + paddingDip,
+                            idleListRect.top + cardOriginDip + paddingDip,
+                            idleListRect.right + paddingDip,
+                            idleListRect.bottom + cardOriginDip + paddingDip),
                 idleQuickListContentHeight(content), dpi, false);
             if (!idleScrollView.animating())
                 idleScrollView.setOffset(idleScrollOffset);
@@ -1499,9 +1526,11 @@ struct MediaPopup::Impl {
                 auto* target = static_cast<ID2D1DeviceContext*>(painter.target());
                 D2D1_MATRIX_3X2_F saved{};
                 target->GetTransform(&saved);
-                target->SetTransform(D2D1::Matrix3x2F::Translation(0.0f, cardOriginDip) * saved);
-                const auto localBounds = D2D1::RectF(bounds.left, bounds.top - cardOriginDip,
-                                                     bounds.right, bounds.bottom - cardOriginDip);
+                target->SetTransform(D2D1::Matrix3x2F::Translation(
+                    paddingDip, cardOriginDip + paddingDip) * saved);
+                const auto localBounds = D2D1::RectF(
+                    bounds.left - paddingDip, bounds.top - cardOriginDip - paddingDip,
+                    bounds.right - paddingDip, bounds.bottom - cardOriginDip - paddingDip);
                 const float previous = idleScrollOffset;
                 idleScrollOffset = position;
                 drawIdleQuickListContent(target, w, content, &localBounds);
@@ -1648,11 +1677,11 @@ struct MediaPopup::Impl {
         }
         if (backdropBlur) {
             const D2D1_POINT_2F offset = D2D1::Point2F(0.0f, 0.0f);
-            rt->DrawImage(backdropBlur, &offset, nullptr, D2D1_INTERPOLATION_MODE_LINEAR,
+            rt->DrawImage(backdropBlur, &offset, &backdropSourceRect, D2D1_INTERPOLATION_MODE_LINEAR,
                           D2D1_COMPOSITE_MODE_SOURCE_OVER);
         } else {
             rt->DrawBitmap(backdropBmp, D2D1::RectF(0.0f, 0.0f, w, h), 1.0f,
-                           D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                           D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, backdropSourceRect);
         }
         if (clipped)
             rt->PopLayer();
@@ -1665,22 +1694,12 @@ struct MediaPopup::Impl {
     }
 
     void drawDynamicBackground(ID2D1DeviceContext* rt, float w, float h, bool enabled) {
-        if (!enabled || !rt || !brushDynamicGradient || !brushDynamicGlow)
+        if (!enabled || !rt || !brushDynamicTint)
             return;
-
-        brushDynamicGradient->SetStartPoint(D2D1::Point2F(0.0f, 0.0f));
-        brushDynamicGradient->SetEndPoint(D2D1::Point2F(w, h));
-        brushDynamicGradient->SetOpacity(0.36f);
-        brushDynamicGlow->SetCenter(D2D1::Point2F(w * 0.74f, h * 0.28f));
-        brushDynamicGlow->SetGradientOriginOffset(D2D1::Point2F(-w * 0.05f, -h * 0.06f));
-        brushDynamicGlow->SetRadiusX(w * 0.72f);
-        brushDynamicGlow->SetRadiusY(h * 0.92f);
-        brushDynamicGlow->SetOpacity(0.14f);
 
         const auto card = D2D1::RoundedRect(D2D1::RectF(0.0f, 0.0f, w, h),
                                              kPopupCornerDip, kPopupCornerDip);
-        rt->FillRoundedRectangle(card, brushDynamicGradient);
-        rt->FillRoundedRectangle(card, brushDynamicGlow);
+        rt->FillRoundedRectangle(card, brushDynamicTint);
     }
 
     void drawDynamicBackground(ID2D1DeviceContext* rt, float w, float h) {
@@ -2230,8 +2249,9 @@ struct MediaPopup::Impl {
         const auto renderStarted = runtime_log::uiTimeMs();
         RECT rc{};
         GetClientRect(hwnd, &rc);
-        const int pxW = rc.right - rc.left;
-        const int pxH = rc.bottom - rc.top;
+        const int padding = shadowPaddingPx();
+        const int pxW = rc.right - rc.left - padding * 2;
+        const int pxH = rc.bottom - rc.top - padding * 2;
         if (pxW <= 0 || pxH <= 0)
             return false;
         CompositionRenderer::BindTimings bindTimings;
@@ -2254,6 +2274,13 @@ struct MediaPopup::Impl {
         if (!renderer.setRootRoundedClip(cardTopPx, cardTopPx + static_cast<float>(cardHeightPx),
                                          kPopupCornerDip * scale()))
             return false;
+        if (!renderer.setRootShadow(padding, cardTopPx,
+                                     cardTopPx + static_cast<float>(cardHeightPx),
+                                     kPopupCornerDip * scale(),
+                                     fluent::isDarkMode(fluent::ThemeTarget::Window) ? 0.018f : 0.012f)) {
+            releaseDrawingResources();
+            return false;
+        }
         if (!createResources())
             return false;
         const auto resourcesReady = runtime_log::uiTimeMs();
@@ -2434,6 +2461,7 @@ struct MediaPopup::Impl {
         const float s = scale();
         const int popupW = static_cast<int>(std::lround(kPopupWidthDip * s));
         const int popupH = static_cast<int>(std::lround(popupHeightDip() * s));
+        const int padding = shadowPaddingPx();
         const int gap = static_cast<int>(std::lround(kPopupGapDip * s));
 
         HMONITOR monitor = MonitorFromRect(&anchorRect, MONITOR_DEFAULTTONEAREST);
@@ -2485,11 +2513,13 @@ struct MediaPopup::Impl {
 
             RECT windowRect{};
             const bool windowRectUnchanged =
-                GetWindowRect(hwnd, &windowRect) && windowRect.left == x &&
-                windowRect.top == y && windowRect.right - windowRect.left == popupW &&
-                windowRect.bottom - windowRect.top == popupH;
+                GetWindowRect(hwnd, &windowRect) && windowRect.left == x - padding &&
+                windowRect.top == y - padding &&
+                windowRect.right - windowRect.left == popupW + padding * 2 &&
+                windowRect.bottom - windowRect.top == popupH + padding * 2;
             if (!windowRectUnchanged) {
-                SetWindowPos(hwnd, HWND_TOPMOST, x, y, popupW, popupH,
+                SetWindowPos(hwnd, HWND_TOPMOST, x - padding, y - padding,
+                             popupW + padding * 2, popupH + padding * 2,
                              SWP_NOACTIVATE | SWP_NOOWNERZORDER);
             }
             return;
@@ -2522,9 +2552,10 @@ struct MediaPopup::Impl {
         const int travel = placedAbove ? anchorEdgeY - y : cardLocalY + popupH;
         RECT windowRect{};
         const bool windowRectUnchanged =
-            GetWindowRect(hwnd, &windowRect) && windowRect.left == x &&
-            windowRect.top == hostY && windowRect.right - windowRect.left == popupW &&
-            windowRect.bottom - windowRect.top == travel;
+            GetWindowRect(hwnd, &windowRect) && windowRect.left == x - padding &&
+            windowRect.top == hostY - padding &&
+            windowRect.right - windowRect.left == popupW + padding * 2 &&
+            windowRect.bottom - windowRect.top == travel + padding * 2;
         cardScreenX = x;
         cardScreenY = y;
         cardWidthPx = popupW;
@@ -2532,7 +2563,8 @@ struct MediaPopup::Impl {
         animationTravelPx = static_cast<float>(travel);
         cardOriginDip = dip(cardLocalY);
         if (!windowRectUnchanged) {
-            SetWindowPos(hwnd, HWND_TOPMOST, x, hostY, popupW, travel,
+            SetWindowPos(hwnd, HWND_TOPMOST, x - padding, hostY - padding,
+                         popupW + padding * 2, travel + padding * 2,
                          SWP_NOACTIVATE | SWP_NOOWNERZORDER);
         }
     }
@@ -3164,15 +3196,15 @@ struct MediaPopup::Impl {
             if (LOWORD(lp) == HTCLIENT) {
                 POINT point{};
                 if (GetCursorPos(&point) && ScreenToClient(hwnd, &point) &&
-                    (hitSource(dip(point.x), dip(point.y)) ||
-                     hitVolumeIcon(dip(point.x), dip(point.y)) ||
-                     hitVolumeSlider(dip(point.x), dip(point.y)) ||
-                     hitPageArrow(dip(point.x), dip(point.y)) ||
-                     hitCopy(dip(point.x), dip(point.y)) ||
-                     hitIdleQuickExpand(dip(point.x), dip(point.y)) ||
-                     hitIdleQuickTab(dip(point.x), dip(point.y)) >= 0 ||
-                     hitIdleApp(dip(point.x), dip(point.y)) >= 0 ||
-                     hitIdleTask(dip(point.x), dip(point.y)) >= 0)) {
+                    (hitSource(clientDipX(point.x), clientDipY(point.y)) ||
+                     hitVolumeIcon(clientDipX(point.x), clientDipY(point.y)) ||
+                     hitVolumeSlider(clientDipX(point.x), clientDipY(point.y)) ||
+                     hitPageArrow(clientDipX(point.x), clientDipY(point.y)) ||
+                     hitCopy(clientDipX(point.x), clientDipY(point.y)) ||
+                     hitIdleQuickExpand(clientDipX(point.x), clientDipY(point.y)) ||
+                     hitIdleQuickTab(clientDipX(point.x), clientDipY(point.y)) >= 0 ||
+                     hitIdleApp(clientDipX(point.x), clientDipY(point.y)) >= 0 ||
+                     hitIdleTask(clientDipX(point.x), clientDipY(point.y)) >= 0)) {
                     SetCursor(LoadCursorW(nullptr, IDC_HAND));
                     return TRUE;
                 }
@@ -3180,8 +3212,8 @@ struct MediaPopup::Impl {
             return DefWindowProcW(hwnd, msg, wp, lp);
         case WM_MOUSEMOVE: {
             onPopupEnter();
-            const float mx = dip(GET_X_LPARAM(lp));
-            const float my = dip(GET_Y_LPARAM(lp));
+            const float mx = clientDipX(GET_X_LPARAM(lp));
+            const float my = clientDipY(GET_Y_LPARAM(lp));
             if (idleMode) {
                 if (idleScrollDragging) {
                     setIdleScrollFromPointer(my);
@@ -3242,8 +3274,8 @@ struct MediaPopup::Impl {
         case WM_LBUTTONDOWN: {
             idleScrollOffset = idleScrollView.offset();
             idleScrollView.stop();
-            const float x = dip(GET_X_LPARAM(lp));
-            const float y = dip(GET_Y_LPARAM(lp));
+            const float x = clientDipX(GET_X_LPARAM(lp));
+            const float y = clientDipY(GET_Y_LPARAM(lp));
             if (idleMode) {
                 if (hitPageArrow(x, y)) {
                     pressedPageArrow = true;
@@ -3322,8 +3354,8 @@ struct MediaPopup::Impl {
             return 0;
         }
         case WM_LBUTTONUP: {
-            const float x = dip(GET_X_LPARAM(lp));
-            const float y = dip(GET_Y_LPARAM(lp));
+            const float x = clientDipX(GET_X_LPARAM(lp));
+            const float y = clientDipY(GET_Y_LPARAM(lp));
             if (idleMode) {
                 const bool arrow = pressedPageArrow;
                 const bool arrowHit = hitPageArrow(x, y);
@@ -3464,8 +3496,8 @@ struct MediaPopup::Impl {
             // 音量图标/展开的滑块上滚动：直接调整应用音量（每格 ±2）
             POINT point{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
             ScreenToClient(hwnd, &point);
-            const float x = dip(point.x);
-            const float y = dip(point.y);
+            const float x = clientDipX(point.x);
+            const float y = clientDipY(point.y);
             if (idleMode) {
                 const float localY = y - cardOriginDip;
                 if (contains(idleListRect, x, localY) || hitIdleScrollBar(x, y)) {
@@ -3513,8 +3545,8 @@ struct MediaPopup::Impl {
         {
             POINT point{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
             ScreenToClient(hwnd, &point);
-            const float x = dip(point.x);
-            const float y = dip(point.y);
+            const float x = clientDipX(point.x);
+            const float y = clientDipY(point.y);
             if (x < 0.0f || x > kPopupWidthDip || y < cardOriginDip ||
                 y > cardOriginDip + popupHeightDip())
                 return HTTRANSPARENT;

@@ -7,6 +7,7 @@ inline constexpr float kPopupHeightDip = 224.0f;
 inline constexpr float kIdlePopupHeightDip = kPopupHeightDip;
 inline constexpr float kPopupGapDip = 8.0f;
 inline constexpr float kPopupCornerDip = 10.0f;
+inline constexpr float kPopupShadowPaddingDip = 12.0f;
 inline constexpr float kCoverSizeDip = 80.0f;
 inline constexpr float kPopupTextLeftDip = 116.0f;
 inline constexpr float kPopupTextRightPaddingDip = 20.0f;

@@ -298,30 +298,7 @@ bool CompositionRenderer::ensureSwapchain(HWND hwnd, int width, int height) {
     }
     if (swapchain_ && hwnd != hwnd_) {
         // 窗口重建（Explorer 重启后 createWindow）：DComp 目标绑在原 HWND 上，必须重建
-        releaseTransitionLayers();
-        if (rootOpacity_) {
-            if (visual_)
-                visual_->SetEffect(nullptr);
-            rootOpacity_->Release();
-            rootOpacity_ = nullptr;
-        }
-        if (rootClip_) {
-            if (visual_)
-                visual_->SetClip(nullptr);
-            rootClip_->Release();
-            rootClip_ = nullptr;
-        }
-        if (visual_) {
-            visual_->Release();
-            visual_ = nullptr;
-        }
-        if (target_) {
-            target_->Release();
-            target_ = nullptr;
-        }
-        swapchain_->Release();
-        swapchain_ = nullptr;
-        releaseBackBuffer();
+        releaseWindowResources();
     }
     if (!swapchain_) {
         IDXGIFactory2* factory = nullptr;
@@ -1056,9 +1033,9 @@ bool CompositionRenderer::animateRoot(float fromX, float toX, float fromY, float
     if (SUCCEEDED(hr))
         hr = opacityAnim->End(duration, toOpacity);
     if (SUCCEEDED(hr))
-        hr = visual_->SetOffsetX(xAnim);
+        hr = animatedRoot()->SetOffsetX(xAnim);
     if (SUCCEEDED(hr))
-        hr = visual_->SetOffsetY(yAnim);
+        hr = animatedRoot()->SetOffsetY(yAnim);
     if (SUCCEEDED(hr))
         hr = rootOpacity_->SetOpacity(opacityAnim);
 
@@ -1074,8 +1051,8 @@ bool CompositionRenderer::animateRoot(float fromX, float toX, float fromY, float
 void CompositionRenderer::resetRoot() {
     if (!visual_)
         return;
-    visual_->SetOffsetX(0.0f);
-    visual_->SetOffsetY(0.0f);
+    animatedRoot()->SetOffsetX(0.0f);
+    animatedRoot()->SetOffsetY(0.0f);
     if (rootOpacity_)
         rootOpacity_->SetOpacity(1.0f);
 }
@@ -1087,7 +1064,7 @@ void CompositionRenderer::setRootOpacity(float opacity) {
 
 void CompositionRenderer::setRootOffsetY(float offset) {
     if (visual_)
-        visual_->SetOffsetY(offset);
+        animatedRoot()->SetOffsetY(offset);
 }
 
 bool CompositionRenderer::animateRootScroll(float from, float to, float velocity, float frequency) {
@@ -1125,7 +1102,7 @@ bool CompositionRenderer::animateRootScroll(float from, float to, float velocity
     if (SUCCEEDED(hr))
         hr = animation->End(duration, to);
     if (SUCCEEDED(hr))
-        hr = visual_->SetOffsetY(animation);
+        hr = animatedRoot()->SetOffsetY(animation);
     animation->Release();
     return SUCCEEDED(hr);
 }
@@ -1137,6 +1114,111 @@ bool CompositionRenderer::commit() {
 void CompositionRenderer::waitForCommitCompletion() {
     if (dcomp_)
         dcomp_->WaitForCommitCompletion();
+}
+
+bool CompositionRenderer::setRootShadow(int padding, float top, float bottom,
+                                        float cornerRadius, float opacity) {
+    if (!dcomp_ || !target_ || !visual_ || !rootOpacity_ || padding <= 0 || bottom <= top)
+        return false;
+    const int width = width_ + padding * 2;
+    const int height = height_ + padding * 2;
+    if (rootShadow_.surface && rootShadow_.width == width && rootShadow_.height == height &&
+        rootShadow_.padding == padding && rootShadow_.top == top && rootShadow_.bottom == bottom &&
+        rootShadow_.radius == cornerRadius && rootShadow_.opacity == opacity)
+        return true;
+
+    const auto fail = [this](HRESULT hr, const wchar_t* stage) {
+        runtime_log::writef(L"[dcomp] root shadow failed stage=%s hr=0x%08X",
+                            stage, static_cast<unsigned>(hr));
+        discard();
+        return false;
+    };
+    if (!rootShadow_.container) {
+        HRESULT hr = dcomp_->CreateVisual(&rootShadow_.container);
+        if (SUCCEEDED(hr))
+            hr = dcomp_->CreateVisual(&rootShadow_.visual);
+        // 已绑定为窗口根节点的视觉不能直接成为子节点。先解绑，再把完整
+        // 阴影树设为新根；中间不提交，避免出现可见的空白帧。
+        if (SUCCEEDED(hr))
+            hr = target_->SetRoot(nullptr);
+        if (SUCCEEDED(hr))
+            hr = rootShadow_.container->AddVisual(visual_, TRUE, nullptr);
+        if (SUCCEEDED(hr))
+            hr = rootShadow_.container->AddVisual(rootShadow_.visual, FALSE, visual_);
+        if (SUCCEEDED(hr))
+            hr = visual_->SetEffect(nullptr);
+        if (SUCCEEDED(hr))
+            hr = rootShadow_.container->SetEffect(rootOpacity_);
+        if (SUCCEEDED(hr))
+            hr = target_->SetRoot(rootShadow_.container);
+        if (FAILED(hr))
+            return fail(hr, L"attach-root-tree");
+    }
+    HRESULT hr = visual_->SetOffsetX(static_cast<float>(padding));
+    if (SUCCEEDED(hr))
+        hr = visual_->SetOffsetY(static_cast<float>(padding));
+    if (FAILED(hr))
+        return fail(hr, L"content-offset");
+
+    IDCompositionSurface* surface = nullptr;
+    hr = dcomp_->CreateSurface(static_cast<UINT>(width), static_cast<UINT>(height),
+                                       DXGI_FORMAT_B8G8R8A8_UNORM,
+                                       DXGI_ALPHA_MODE_PREMULTIPLIED, &surface);
+    if (FAILED(hr))
+        return fail(hr, L"create-surface");
+    POINT offset{};
+    ID2D1DeviceContext* dc = nullptr;
+    hr = surface->BeginDraw(nullptr, __uuidof(ID2D1DeviceContext),
+                             reinterpret_cast<void**>(&dc), &offset);
+    if (SUCCEEDED(hr) && dc) {
+        // 阴影表面直接使用物理像素；外层统一负责 DPI 换算和动画。
+        dc->SetDpi(96.0f, 96.0f);
+        dc->SetTransform(D2D1::Matrix3x2F::Translation(
+            static_cast<float>(offset.x), static_cast<float>(offset.y)));
+        dc->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
+        ID2D1SolidColorBrush* brush = nullptr;
+        hr = dc->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black, opacity), &brush);
+        if (SUCCEEDED(hr)) {
+            constexpr int rings = 12;
+            const float inset = static_cast<float>(padding);
+            const float drop = inset * 0.12f;
+            for (int ring = rings; ring >= 1; --ring) {
+                const float spread = inset * 0.72f * static_cast<float>(ring) / rings;
+                dc->FillRoundedRectangle(D2D1::RoundedRect(
+                    D2D1::RectF(inset - spread, inset + top + drop - spread,
+                                inset + static_cast<float>(width_) + spread,
+                                inset + bottom + drop + spread),
+                    cornerRadius + spread, cornerRadius + spread), brush);
+            }
+            brush->Release();
+        }
+        const HRESULT endResult = surface->EndDraw();
+        dc->Release();
+        if (SUCCEEDED(hr))
+            hr = endResult;
+    } else {
+        if (dc)
+            dc->Release();
+        if (SUCCEEDED(hr))
+            hr = E_FAIL;
+    }
+    if (SUCCEEDED(hr))
+        hr = rootShadow_.visual->SetContent(surface);
+    if (FAILED(hr)) {
+        surface->Release();
+        return fail(hr, L"draw-shadow");
+    }
+    if (rootShadow_.surface)
+        rootShadow_.surface->Release();
+    rootShadow_.surface = surface;
+    rootShadow_.width = width;
+    rootShadow_.height = height;
+    rootShadow_.padding = padding;
+    rootShadow_.top = top;
+    rootShadow_.bottom = bottom;
+    rootShadow_.radius = cornerRadius;
+    rootShadow_.opacity = opacity;
+    return true;
 }
 
 bool CompositionRenderer::setRootRoundedClip(float top, float bottom, float cornerRadius) {
@@ -1159,14 +1241,22 @@ void CompositionRenderer::releaseWindowResources() {
             p = nullptr;
         }
     };
-    if (visual_ && rootOpacity_)
-        visual_->SetEffect(nullptr);
+    if (animatedRoot() && rootOpacity_)
+        animatedRoot()->SetEffect(nullptr);
     if (visual_ && rootClip_)
         visual_->SetClip(nullptr);
     if (visual_)
         visual_->SetContent(nullptr);
     if (target_)
         target_->SetRoot(nullptr);
+    if (rootShadow_.container)
+        rootShadow_.container->RemoveAllVisuals();
+    if (rootShadow_.visual)
+        rootShadow_.visual->SetContent(nullptr);
+    release(rootShadow_.surface);
+    release(rootShadow_.visual);
+    release(rootShadow_.container);
+    rootShadow_ = {};
     release(rootOpacity_);
     release(rootClip_);
     release(visual_);

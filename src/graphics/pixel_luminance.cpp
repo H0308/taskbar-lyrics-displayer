@@ -14,7 +14,11 @@ float srgbChannelToLinear(uint8_t value) {
 } // namespace
 
 float backdropLuminance(const void* pixels, int width, int height) {
-    if (!pixels || width <= 0 || height <= 0)
+    return backdropLuminance(pixels, width, height, width);
+}
+
+float backdropLuminance(const void* pixels, int width, int height, int rowStridePixels) {
+    if (!pixels || width <= 0 || height <= 0 || rowStridePixels < width)
         return 0.0f;
     const auto* bytes = static_cast<const uint8_t*>(pixels);
     const int step = std::max(1, std::min(width, height) / 96);
@@ -22,7 +26,7 @@ float backdropLuminance(const void* pixels, int width, int height) {
     int samples = 0;
     for (int y = 0; y < height; y += step) {
         for (int x = 0; x < width; x += step) {
-            const auto* pixel = bytes + (static_cast<size_t>(y) * width + x) * 4;
+            const auto* pixel = bytes + (static_cast<size_t>(y) * rowStridePixels + x) * 4;
             const float blue = srgbChannelToLinear(pixel[0]);
             const float green = srgbChannelToLinear(pixel[1]);
             const float red = srgbChannelToLinear(pixel[2]);
