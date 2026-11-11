@@ -2,7 +2,7 @@
 #include "ui/font_sizes.h"
 
 #include "ui/fluent_theme.h"
-#include "graphics/bitmap_renderer.h"
+#include "graphics/composition_renderer.h"
 #include "ui/platform_icon.h"
 #include "logging/runtime_logger.h"
 #include "logging/ui_timing.h"
@@ -51,7 +51,8 @@ struct MenuWnd {
     int parentRow = -1;
     MenuWnd* child = nullptr;
     FluentMenu::Callback cb; // 仅根菜单持有
-    BitmapRenderer renderer;
+    CompositionRenderer renderer;
+    uint64_t deviceGeneration = 0;
     ID2D1SolidColorBrush* brush = nullptr;
     IDWriteTextFormat* fmt = nullptr;
     std::vector<ID2D1Bitmap*> nativeIconBitmaps;
@@ -63,6 +64,7 @@ struct MenuWnd {
     std::vector<RowText> rowText;
     float textWidthDip = 0.0f;
     bool frameReady = false;
+    bool backdrop = false;
 
     void prepareRowText(float widthDip) {
         if (rowText.size() == items.size() && textWidthDip == widthDip)
@@ -129,6 +131,14 @@ struct MenuWnd {
             }
         }
         nativeIconBitmaps.clear();
+    }
+
+    void releaseDrawingResources() {
+        releaseNativeIconBitmaps();
+        if (brush) {
+            brush->Release();
+            brush = nullptr;
+        }
     }
 
     void ensureNativeIconBitmaps(ID2D1RenderTarget* target) {
@@ -232,13 +242,13 @@ struct MenuWnd {
             return;
         UINT dpi = GetDpiForWindow(hwnd);
         renderer.setDpi(dpi);
-        if (!renderer.bindDC(w, h)) {
-            releaseNativeIconBitmaps();
-            if (brush) {
-                brush->Release();
-                brush = nullptr;
-            }
+        if (!renderer.bind(hwnd, w, h)) {
+            releaseDrawingResources();
             return;
+        }
+        if (deviceGeneration != renderer.deviceGeneration()) {
+            releaseDrawingResources();
+            deviceGeneration = renderer.deviceGeneration();
         }
         auto* rt = renderer.renderTarget();
         if (!rt)
@@ -263,8 +273,8 @@ struct MenuWnd {
         const Palette& p = palette();
         rt->BeginDraw();
         rt->SetTransform(D2D1::Matrix3x2F::Identity());
-        // 背景、描边和系统阴影保持稳定，只让内容短促淡入，避免整窗动画拖动阴影。
-        rt->Clear(p.windowBg);
+        // 零 alpha 底面让 DWM 的 Mica 透出；只让内容淡入，材质和系统阴影保持稳定。
+        rt->Clear(backdrop ? D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f) : p.windowBg);
 
         const float reveal = revealStarted == 0 ? 1.0f : std::min(
             1.0f, static_cast<float>(GetTickCount64() - revealStarted) / kRevealDurationMs);
@@ -343,21 +353,14 @@ struct MenuWnd {
         }
 
         HRESULT hr = rt->EndDraw();
-        if (hr == D2DERR_RECREATE_TARGET) {
-            releaseNativeIconBitmaps();
-            if (brush) {
-                brush->Release();
-                brush = nullptr;
-            }
+        if (FAILED(hr)) {
+            releaseDrawingResources();
             renderer.discard();
-        } else if (SUCCEEDED(hr)) {
+        } else if (renderer.present()) {
             frameReady = true;
-            // 显示前只准备位图，首个 WM_PAINT 复制它，不再重复整张菜单的绘制。
-            if (IsWindowVisible(hwnd)) {
-                HDC hdc = GetDC(hwnd);
-                renderer.copyToDC(hdc, w, h);
-                ReleaseDC(hwnd, hdc);
-            }
+        } else {
+            releaseDrawingResources();
+            renderer.discard();
         }
         const auto elapsed = runtime_log::uiTimeMs() - started;
         if (elapsed >= 24) {
@@ -496,14 +499,18 @@ MenuWnd* createMenuLevel(HWND owner, MenuWnd* parent, std::vector<FluentMenuItem
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     RegisterClassExW(&wc);
 
-    mw->hwnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, kMenuClass, L"", WS_POPUP, x, y, w,
+    // Mica 保留普通窗口的 caption 样式，由 WM_NCCALCSIZE 隐藏标题栏。
+    // 不使用 TOOLWINDOW；已有 owner 关系负责隐藏任务栏入口。
+    mw->hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP,
+                               kMenuClass, L"", WS_POPUP | WS_CAPTION, x, y, w,
                                h, owner, nullptr, GetModuleHandleW(nullptr), mw);
     if (!mw->hwnd) {
         delete mw;
         return nullptr;
     }
-    applyRoundCorners(mw->hwnd, false);
-    applyDarkCaption(mw->hwnd, isDarkMode(ThemeTarget::Window));
+    mw->backdrop = styleDialogWindow(mw->hwnd);
+    runtime_log::writef(L"[ui][menu-backdrop] mica=%d submenu=%d",
+                        mw->backdrop ? 1 : 0, parent ? 1 : 0);
     const auto& p = palette();
     const auto stroke = p.controlStroke;
     const auto borderChannel = [&](float foreground, float background) {
@@ -521,7 +528,13 @@ MenuWnd* createMenuLevel(HWND owner, MenuWnd* parent, std::vector<FluentMenuItem
         SetTimer(mw->hwnd, kTimerReveal, USER_TIMER_MINIMUM, nullptr))
         mw->revealStarted = GetTickCount64();
     mw->render();
+    if (!mw->frameReady) {
+        DestroyWindow(mw->hwnd);
+        return nullptr;
+    }
     ShowWindow(mw->hwnd, SW_SHOWNA);
+    if (mw->backdrop)
+        PostMessageW(mw->hwnd, WM_NCACTIVATE, TRUE, -1);
     return mw;
 }
 
@@ -533,21 +546,32 @@ LRESULT MenuWnd::handleMsg(UINT msg, WPARAM wp, LPARAM lp) {
         return GET_Y_LPARAM(l) / dipScale(GetDpiForWindow(hwnd));
     };
     switch (msg) {
+    case WM_NCCALCSIZE:
+        // 保留 DWM 所需的窗口样式，整个窗口仍作为菜单客户区使用。
+        return 0;
+    case WM_NCHITTEST:
+        // 隐藏的 caption 和边框不参与拖动、缩放或系统标题栏交互。
+        return HTCLIENT;
     case WM_SIZE:
         frameReady = false;
         return 0;
     case WM_THEMECHANGED:
     case WM_SETTINGCHANGE:
+    case WM_DWMCOMPOSITIONCHANGED:
+        backdrop = styleDialogWindow(hwnd);
+        if (backdrop)
+            PostMessageW(hwnd, WM_NCACTIVATE, TRUE, -1);
         render();
         return 0;
+    case WM_NCACTIVATE:
+        // 菜单链共享激活外观：显示及父子菜单切换不能让 DWM 将 Mica 切成实色。
+        // 仅更新非客户区外观，不抢占输入焦点；链外失焦仍由 WM_ACTIVATE 关闭菜单。
+        return DefWindowProcW(hwnd, msg, backdrop ? TRUE : wp, -1);
     case WM_PAINT: {
         PAINTSTRUCT ps;
-        HDC hdc = BeginPaint(hwnd, &ps);
-        if (frameReady) {
-            RECT client{};
-            GetClientRect(hwnd, &client);
-            renderer.copyToDC(hdc, client.right - client.left, client.bottom - client.top);
-        } else {
+        BeginPaint(hwnd, &ps);
+        // 已提交的透明合成表面由 DWM 保留，不再通过 GDI 位图复制覆盖材质。
+        if (!frameReady) {
             render();
         }
         EndPaint(hwnd, &ps);
@@ -686,15 +710,11 @@ LRESULT MenuWnd::handleMsg(UINT msg, WPARAM wp, LPARAM lp) {
             UnhookWindowsHookEx(g_mouseHook);
             g_mouseHook = nullptr;
         }
-        if (brush) {
-            brush->Release();
-            brush = nullptr;
-        }
+        releaseDrawingResources();
         if (fmt) {
             fmt->Release();
             fmt = nullptr;
         }
-        releaseNativeIconBitmaps();
         MenuWnd* self = this;
         if (self == g_root)
             g_root = nullptr;
