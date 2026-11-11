@@ -76,6 +76,7 @@ float LyricEasterEggs::fade(float age) {
 
 void LyricEasterEggs::clear() {
     cues_.clear();
+    cities_.clear();
     cloud_.Reset();
     stem_.Reset();
     leaf_.Reset();
@@ -84,10 +85,17 @@ void LyricEasterEggs::clear() {
     sparkle_.Reset();
     wave_.Reset();
     butterflyWing_.Reset();
+    flagStar_.Reset();
+    bauhiniaPetal_.Reset();
+    bauhiniaVein_.Reset();
+    lotusPetal_.Reset();
+    macauBridge_.Reset();
+    flagBitmaps_ = {};
 }
 
 bool LyricEasterEggs::ensureShapes(ID2D1DeviceContext* target) {
-    if (cloud_ && stem_ && leaf_ && petal_ && tulip_ && sparkle_ && wave_ && butterflyWing_)
+    if (cloud_ && stem_ && leaf_ && petal_ && tulip_ && sparkle_ && wave_ && butterflyWing_ &&
+        flagStar_ && bauhiniaPetal_ && bauhiniaVein_ && lotusPetal_ && macauBridge_)
         return true;
     Microsoft::WRL::ComPtr<ID2D1Factory> factory;
     target->GetFactory(factory.GetAddressOf());
@@ -146,7 +154,42 @@ bool LyricEasterEggs::ensureShapes(ID2D1DeviceContext* target) {
         {{0.95f, 0.13f}, {1.00f, 0.77f}, {0.49f, 0.75f}},
         {{0.13f, 0.76f}, {0.07f, 0.33f}, {0, 0}},
     });
-    if (!cloud || !stem || !leaf || !petal || !tulip || !sparkle || !wave || !wing)
+    Microsoft::WRL::ComPtr<ID2D1PathGeometry> flagStar;
+    Microsoft::WRL::ComPtr<ID2D1GeometrySink> starSink;
+    if (FAILED(factory->CreatePathGeometry(flagStar.GetAddressOf())) ||
+        FAILED(flagStar->Open(starSink.GetAddressOf())))
+        return false;
+    starSink->BeginFigure({0.0f, -1.0f}, D2D1_FIGURE_BEGIN_FILLED);
+    for (int i = 1; i < 10; ++i) {
+        const float angle = -kPi * 0.5f + i * kPi / 5.0f;
+        const float radius = i % 2 == 0 ? 1.0f : 0.381966f;
+        starSink->AddLine({std::cos(angle) * radius, std::sin(angle) * radius});
+    }
+    starSink->EndFigure(D2D1_FIGURE_END_CLOSED);
+    if (FAILED(starSink->Close()))
+        return false;
+    // 微型旗面使用五片向同一方向旋转的白色花瓣，花瓣内保留红星和花脉。
+    auto bauhiniaPetal = makeShape(factory.Get(), {0.0f, 0.0f}, {
+        {{-0.20f, -0.10f}, {-0.58f, -0.33f}, {-0.48f, -0.70f}},
+        {{-0.42f, -0.94f}, {-0.12f, -1.02f}, {0.10f, -0.98f}},
+        {{-0.04f, -0.85f}, {0.18f, -0.74f}, {0.20f, -0.57f}},
+        {{0.23f, -0.31f}, {0.08f, -0.10f}, {0.0f, 0.0f}},
+    });
+    auto bauhiniaVein = makeShape(factory.Get(), {0.0f, 0.0f}, {
+        {{-0.13f, -0.19f}, {-0.22f, -0.34f}, {-0.18f, -0.49f}},
+    }, false);
+    auto lotusPetal = makeShape(factory.Get(), {0.0f, 0.0f}, {
+        {{-0.15f, -0.02f}, {-0.17f, -0.17f}, {0.0f, -0.31f}},
+        {{0.17f, -0.17f}, {0.15f, -0.02f}, {0.0f, 0.0f}},
+    });
+    auto macauBridge = makeShape(factory.Get(), {0.43f, 0.72f}, {
+        {{0.54f, 0.72f}, {0.57f, 0.68f}, {0.61f, 0.68f}},
+        {{0.68f, 0.68f}, {0.70f, 0.73f}, {0.75f, 0.73f}},
+        {{0.80f, 0.73f}, {0.82f, 0.68f}, {0.89f, 0.68f}},
+        {{0.93f, 0.68f}, {0.96f, 0.72f}, {1.07f, 0.72f}},
+    }, false);
+    if (!cloud || !stem || !leaf || !petal || !tulip || !sparkle || !wave || !wing ||
+        !bauhiniaPetal || !bauhiniaVein || !lotusPetal || !macauBridge)
         return false;
     cloud_ = std::move(cloud);
     stem_ = std::move(stem);
@@ -156,24 +199,33 @@ bool LyricEasterEggs::ensureShapes(ID2D1DeviceContext* target) {
     sparkle_ = std::move(sparkle);
     wave_ = std::move(wave);
     butterflyWing_ = std::move(wing);
+    flagStar_ = std::move(flagStar);
+    bauhiniaPetal_ = std::move(bauhiniaPetal);
+    bauhiniaVein_ = std::move(bauhiniaVein);
+    lotusPetal_ = std::move(lotusPetal);
+    macauBridge_ = std::move(macauBridge);
     return true;
 }
 
 void LyricEasterEggs::resetPlayback(int64_t positionMs) {
     animations_ = {};
+    cityAnimations_ = {};
     cues_.clear();
     resetTriggerPosition(positionMs);
 }
 
 void LyricEasterEggs::resetTriggerPosition(int64_t positionMs) {
     emittedThroughMs_.fill(positionMs - 1);
+    cityEmittedThroughMs_.fill(positionMs - 1);
 }
 
 bool LyricEasterEggs::active() const {
     const auto now = taskbar_detail::monotonicNowMs();
-    return std::any_of(animations_.begin(), animations_.end(), [&](const auto& animation) {
+    const auto running = [&](const auto& animation) {
         return animation && now - animation->startedMs < static_cast<uint64_t>(kDurationMs);
-    });
+    };
+    return std::any_of(animations_.begin(), animations_.end(), running) ||
+           std::any_of(cityAnimations_.begin(), cityAnimations_.end(), running);
 }
 
 const std::vector<LyricEasterEggs::Cue>& LyricEasterEggs::cues(const LyricLine& line,
@@ -182,9 +234,89 @@ const std::vector<LyricEasterEggs::Cue>& LyricEasterEggs::cues(const LyricLine& 
         std::wstring_view text;
         Kind kind;
         Boundary boundary = Boundary::None;
+        LyricCityLandmarks::City city = LyricCityLandmarks::City::Count;
     };
-    // 跨逐字单元匹配，最长词只生成一次 cue；各种语言共用同一种视觉效果。
+    using City = LyricCityLandmarks::City;
+    // 跨逐字单元优先匹配最长词；含“花”的双旗关键词保留花朵触发时间。
     static constexpr Keyword kKeywords[] = {
+        {L"上海", Kind::City, Boundary::None, City::Shanghai},
+        {L"shanghai", Kind::City, Boundary::Word, City::Shanghai},
+        {L"东方明珠", Kind::City, Boundary::None, City::Shanghai},
+        {L"東方明珠", Kind::City, Boundary::None, City::Shanghai},
+        {L"陆家嘴", Kind::City, Boundary::None, City::Shanghai},
+        {L"陸家嘴", Kind::City, Boundary::None, City::Shanghai},
+        {L"纽约", Kind::City, Boundary::None, City::NewYork},
+        {L"紐約", Kind::City, Boundary::None, City::NewYork},
+        {L"new york", Kind::City, Boundary::Word, City::NewYork},
+        {L"自由女神", Kind::City, Boundary::None, City::NewYork},
+        {L"巴黎", Kind::City, Boundary::None, City::Paris},
+        {L"paris", Kind::City, Boundary::Word, City::Paris},
+        {L"埃菲尔铁塔", Kind::City, Boundary::None, City::Paris},
+        {L"埃菲爾鐵塔", Kind::City, Boundary::None, City::Paris},
+        {L"艾菲尔铁塔", Kind::City, Boundary::None, City::Paris},
+        {L"艾菲爾鐵塔", Kind::City, Boundary::None, City::Paris},
+        {L"东京", Kind::City, Boundary::None, City::Tokyo},
+        {L"東京", Kind::City, Boundary::None, City::Tokyo},
+        {L"日本", Kind::City, Boundary::None, City::Tokyo},
+        {L"tokyo", Kind::City, Boundary::Word, City::Tokyo},
+        {L"樱花", Kind::City, Boundary::None, City::Tokyo},
+        {L"櫻花", Kind::City, Boundary::None, City::Tokyo},
+        {L"伦敦", Kind::City, Boundary::None, City::London},
+        {L"倫敦", Kind::City, Boundary::None, City::London},
+        {L"英国", Kind::City, Boundary::None, City::London},
+        {L"英國", Kind::City, Boundary::None, City::London},
+        {L"london", Kind::City, Boundary::Word, City::London},
+        {L"大本钟", Kind::City, Boundary::None, City::London},
+        {L"大本鐘", Kind::City, Boundary::None, City::London},
+        {L"big ben", Kind::City, Boundary::Word, City::London},
+        {L"北京", Kind::City, Boundary::None, City::Beijing},
+        {L"beijing", Kind::City, Boundary::Word, City::Beijing},
+        {L"天坛", Kind::City, Boundary::None, City::Beijing},
+        {L"天壇", Kind::City, Boundary::None, City::Beijing},
+        {L"天安门", Kind::City, Boundary::None, City::Beijing},
+        {L"天安門", Kind::City, Boundary::None, City::Beijing},
+        {L"广州", Kind::City, Boundary::None, City::Guangzhou},
+        {L"廣州", Kind::City, Boundary::None, City::Guangzhou},
+        {L"guangzhou", Kind::City, Boundary::Word, City::Guangzhou},
+        {L"武汉", Kind::City, Boundary::None, City::Wuhan},
+        {L"武漢", Kind::City, Boundary::None, City::Wuhan},
+        {L"wuhan", Kind::City, Boundary::Word, City::Wuhan},
+        {L"黄鹤楼", Kind::City, Boundary::None, City::Wuhan},
+        {L"黃鶴樓", Kind::City, Boundary::None, City::Wuhan},
+        {L"悉尼", Kind::City, Boundary::None, City::Sydney},
+        {L"雪梨", Kind::City, Boundary::None, City::Sydney},
+        {L"sydney", Kind::City, Boundary::Word, City::Sydney},
+        {L"新加坡", Kind::City, Boundary::None, City::Singapore},
+        {L"singapore", Kind::City, Boundary::Word, City::Singapore},
+        {L"鱼尾狮", Kind::City, Boundary::None, City::Singapore},
+        {L"魚尾獅", Kind::City, Boundary::None, City::Singapore},
+        {L"旧金山", Kind::City, Boundary::None, City::SanFrancisco},
+        {L"舊金山", Kind::City, Boundary::None, City::SanFrancisco},
+        {L"三藩市", Kind::City, Boundary::None, City::SanFrancisco},
+        {L"金门大桥", Kind::City, Boundary::None, City::SanFrancisco},
+        {L"金門大橋", Kind::City, Boundary::None, City::SanFrancisco},
+        {L"san francisco", Kind::City, Boundary::Word, City::SanFrancisco},
+        {L"golden gate", Kind::City, Boundary::Word, City::SanFrancisco},
+        {L"洛杉矶", Kind::City, Boundary::None, City::LosAngeles},
+        {L"洛杉磯", Kind::City, Boundary::None, City::LosAngeles},
+        {L"洛圣都", Kind::City, Boundary::None, City::LosAngeles},
+        {L"洛聖都", Kind::City, Boundary::None, City::LosAngeles},
+        {L"好莱坞", Kind::City, Boundary::None, City::LosAngeles},
+        {L"好萊塢", Kind::City, Boundary::None, City::LosAngeles},
+        {L"los angeles", Kind::City, Boundary::Word, City::LosAngeles},
+        {L"los santos", Kind::City, Boundary::Word, City::LosAngeles},
+        {L"gta5", Kind::City, Boundary::Word, City::LosAngeles},
+        {L"gta 5", Kind::City, Boundary::Word, City::LosAngeles},
+        {L"gta v", Kind::City, Boundary::Word, City::LosAngeles},
+        {L"迈阿密", Kind::City, Boundary::None, City::Miami},
+        {L"邁阿密", Kind::City, Boundary::None, City::Miami},
+        {L"miami", Kind::City, Boundary::Word, City::Miami},
+        {L"罪恶都市", Kind::City, Boundary::None, City::Miami},
+        {L"罪惡都市", Kind::City, Boundary::None, City::Miami},
+        {L"vice city", Kind::City, Boundary::Word, City::Miami},
+        {L"紫荆花", Kind::ChinaHongKongFlags}, {L"紫荊花", Kind::ChinaHongKongFlags},
+        {L"澳门", Kind::ChinaMacauFlags}, {L"澳門", Kind::ChinaMacauFlags},
+        {L"莲花", Kind::ChinaMacauFlags}, {L"蓮花", Kind::ChinaMacauFlags},
         {L"云朵", Kind::Cloud}, {L"雲朵", Kind::Cloud}, {L"白云", Kind::Cloud},
         {L"白雲", Kind::Cloud}, {L"云", Kind::Cloud}, {L"雲", Kind::Cloud},
         {L"花朵", Kind::Flowers}, {L"鲜花", Kind::Flowers}, {L"鮮花", Kind::Flowers},
@@ -275,8 +407,24 @@ const std::vector<LyricEasterEggs::Cue>& LyricEasterEggs::cues(const LyricLine& 
         }
         if (tokenIndex < line.chars.size()) {
             const auto& token = line.chars[tokenIndex];
-            if (token.endMs > token.startMs) {
-                result.push_back({best->kind, token.startMs, offset});
+            if (token.endMs > token.startMs)
+                result.push_back({best->kind, token.startMs, offset, best->city});
+            if ((best->kind == Kind::ChinaHongKongFlags || best->kind == Kind::ChinaMacauFlags ||
+                 best->kind == Kind::City) &&
+                best->text.back() == L'花') {
+                const size_t flowerOffset = offset + best->text.size() - 1;
+                size_t flowerToken = tokenIndex;
+                size_t flowerEnd = tokenEnd;
+                while (flowerToken < line.chars.size() && flowerOffset >= flowerEnd) {
+                    ++flowerToken;
+                    if (flowerToken < line.chars.size())
+                        flowerEnd += line.chars[flowerToken].text.size();
+                }
+                if (flowerToken < line.chars.size()) {
+                    const auto& flower = line.chars[flowerToken];
+                    if (flower.endMs > flower.startMs)
+                        result.push_back({Kind::Flowers, flower.startMs, flowerOffset});
+                }
             }
         }
         offset += best->text.size();
@@ -297,16 +445,24 @@ void LyricEasterEggs::draw(ID2D1DeviceContext* target, ID2D1SolidColorBrush* bru
     for (auto& animation : animations_)
         if (animation && now - animation->startedMs >= static_cast<uint64_t>(kDurationMs))
             animation.reset();
+    for (auto& animation : cityAnimations_)
+        if (animation && now - animation->startedMs >= static_cast<uint64_t>(kDurationMs))
+            animation.reset();
+    const auto& lineCues = cues(line, lineIndex);
     if (playing) {
-        for (const auto& cue : cues(line, lineIndex)) {
+        for (const auto& cue : lineCues) {
             const int64_t elapsed = positionMs - cue.startMs;
-            const size_t kind = static_cast<size_t>(cue.kind);
+            const bool city = cue.kind == Kind::City;
+            const size_t index = city ? static_cast<size_t>(cue.city)
+                                      : static_cast<size_t>(cue.kind);
+            auto& emitted = city ? cityEmittedThroughMs_[index] : emittedThroughMs_[index];
+            auto& animation = city ? cityAnimations_[index] : animations_[index];
             if (cue.startMs < emitFromMs || elapsed < 0 || elapsed >= kDurationMs ||
-                cue.startMs <= emittedThroughMs_[kind])
+                cue.startMs <= emitted)
                 continue;
-            emittedThroughMs_[kind] = cue.startMs;
-            if (!animations_[kind])
-                animations_[kind] = Animation{
+            emitted = cue.startMs;
+            if (!animation)
+                animation = Animation{
                     now, static_cast<uint32_t>(cue.textOffset * 31 + lineIndex * 17)};
         }
     }
@@ -342,8 +498,58 @@ void LyricEasterEggs::draw(ID2D1DeviceContext* target, ID2D1SolidColorBrush* bru
         case Kind::Butterflies:
             drawButterflies(target, brush, viewport, age, 1.0f, animation->seed);
             break;
+        case Kind::ChinaHongKongFlags:
+        case Kind::ChinaMacauFlags:
+        case Kind::City:
         case Kind::Count:
             break;
+        }
+    }
+    // 为本行所有地标预留位置，后唱到的城市不会让已显示的城市左右跳动。
+    // 上一行尚未结束的动画也参与排布，不相互覆盖、不强行截断。
+    using City = LyricCityLandmarks::City;
+    struct Foreground { Kind kind; City city; };
+    std::array<Foreground, LyricCityLandmarks::kCityCount + 2> foregrounds{};
+    size_t count = 0;
+    const auto reserve = [&](Kind kind, City city) {
+        if (kind != Kind::City && kind != Kind::ChinaHongKongFlags && kind != Kind::ChinaMacauFlags)
+            return;
+        for (size_t i = 0; i < count; ++i)
+            if (foregrounds[i].kind == kind && foregrounds[i].city == city)
+                return;
+        if (count < foregrounds.size())
+            foregrounds[count++] = {kind, city};
+    };
+    for (const auto& cue : lineCues)
+        reserve(cue.kind, cue.city);
+    for (const auto kind : {Kind::ChinaHongKongFlags, Kind::ChinaMacauFlags})
+        if (animations_[static_cast<size_t>(kind)])
+            reserve(kind, City::Count);
+    for (size_t city = 0; city < cityAnimations_.size(); ++city)
+        if (cityAnimations_[city])
+            reserve(Kind::City, static_cast<City>(city));
+    if (count != 0) {
+        const float width = std::min(viewport.right - viewport.left,
+                                     unit * 1.65f * static_cast<float>(count));
+        const float cell = width / static_cast<float>(count);
+        const float left = (viewport.left + viewport.right - width) * 0.5f;
+        const float gap = std::min(5.0f, cell * 0.08f);
+        for (size_t i = 0; i < count; ++i) {
+            const auto item = foregrounds[i];
+            const auto& animation = item.kind == Kind::City
+                ? cityAnimations_[static_cast<size_t>(item.city)]
+                : animations_[static_cast<size_t>(item.kind)];
+            if (!animation)
+                continue;
+            const float age = static_cast<float>(now - animation->startedMs);
+            const float slotLeft = left + cell * static_cast<float>(i);
+            const auto slot = D2D1::RectF(slotLeft + gap * 0.5f, viewport.top,
+                                         slotLeft + cell - gap * 0.5f, viewport.bottom);
+            if (item.kind == Kind::City)
+                cities_.draw(target, brush, item.city, slot, fade(age));
+            else if (ensureShapes(target))
+                drawChinaRegionalFlags(target, brush, slot, age, 1.0f,
+                    item.kind == Kind::ChinaHongKongFlags ? Flag::HongKong : Flag::Macau);
         }
     }
     brush->SetColor(oldColor);

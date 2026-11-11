@@ -84,6 +84,7 @@ add_executable(QQMusicLyric
     src/ui/taskbar/lyric_effects_renderer.cpp
     src/ui/taskbar/lyric_easter_eggs.cpp
     src/ui/taskbar/lyric_easter_egg_scenes.cpp
+    src/ui/taskbar/lyric_city_landmarks.cpp
     src/ui/taskbar/word_wave_renderer.cpp
     src/ui/taskbar/lyric_typesetter.cpp
     src/ui/taskbar/vinyl_animation.cpp
