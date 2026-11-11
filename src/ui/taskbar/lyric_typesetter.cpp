@@ -1,4 +1,5 @@
 #include "ui/taskbar/lyric_typesetter.h"
+#include "ui/font_sizes.h"
 #include <algorithm>
 #include "ui/fluent_theme.h"
 #include <cwctype>
@@ -461,7 +462,8 @@ void LyricTypesetter::recreateClockFormats(const std::wstring& family, LyricFont
 }
 
 void LyricTypesetter::createDragPreviewFormat() {
-    createFormat(resources_.fmtDragPreview_, fluent::uiFontFamily(), LyricFontStyle::Normal, 11.0f,
+    createFormat(resources_.fmtDragPreview_, fluent::uiFontFamily(), LyricFontStyle::Normal,
+                 fluent::font_sizes::taskbar::dragPreview,
                  DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER);
     if (resources_.fmtDragPreview_)
         resources_.fmtDragPreview_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);

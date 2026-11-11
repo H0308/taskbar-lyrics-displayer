@@ -1,4 +1,5 @@
 #include "app/application_internal.h"
+#include "ui/font_sizes.h"
 namespace lyrics_app {
 void App::refreshSettingsDialog(bool onlyWhenOpen) {
     auto* dialog = settingsDialog.get();
@@ -350,8 +351,8 @@ void App::showUpdatePrompt(const std::wstring& latestVersion) {
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     const UINT dpi = GetDpiForSystem();
     const float s = fluent::dipScale(dpi);
-    RECT rc{0, 0, static_cast<LONG>(std::lround(500.0f * s)),
-            static_cast<LONG>(std::lround(280.0f * s))};
+    RECT rc{0, 0, static_cast<LONG>(std::lround(560.0f * s)),
+            static_cast<LONG>(std::lround(320.0f * s))};
     constexpr DWORD style = WS_CAPTION | WS_SYSMENU;
     constexpr DWORD exStyle = WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE;
     AdjustWindowRectExForDpi(&rc, style, FALSE, exStyle, dpi);
@@ -618,9 +619,11 @@ void App::showFontColorDialog() {
     st.globalTheme = settings_.globalLyricAppearance_;
     st.fontFamily = settings_.fontFamily_;
     st.fontStyle = settings_.fontStyle_;
-    // 与任务栏实际渲染字号一致：setFont 钳制 9..18，绘制时放大 1.18 倍
-    float baseSize = settings_.hasUserFont_ ? settings_.fontSize_ : 12.0f;
-    st.lyricFontSize = std::clamp(baseSize, 9.0f, 18.0f) * 1.18f;
+    // 与任务栏实际渲染共用基准、范围和主歌词比例。
+    float baseSize = settings_.hasUserFont_ ? settings_.fontSize_ : fluent::font_sizes::taskbar::base;
+    st.lyricFontSize = std::clamp(baseSize, fluent::font_sizes::taskbar::minimum,
+                                fluent::font_sizes::taskbar::maximum) *
+                       fluent::font_sizes::taskbar::mainScale;
     if (!fontColorDialog->create(GetModuleHandleW(nullptr), trayHwnd, st)) {
         fontColorDialog.reset();
         return;

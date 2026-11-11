@@ -1,4 +1,5 @@
 #include "about_dialog.h"
+#include "ui/font_sizes.h"
 
 #include "app_info.h"
 #include "ui/app_icon.h"
@@ -55,7 +56,7 @@ constexpr UINT kMsgDownloadProgress = WM_APP + 31;
 constexpr UINT kMsgDownloadFinished = WM_APP + 32;
 constexpr float kMinClientWidthDip = 440.0f;
 constexpr float kMinClientHeightDip = 460.0f;
-// 关于页本身是竖向布局，比例下限沿用其默认客户区 520×620，不能按最小宽高直接相除。
+// 关于页为竖向布局，比例下限保留原设计比例，不按最小宽高直接相除。
 constexpr float kMinClientAspectRatio = 520.0f / 620.0f;
 constexpr DWORD kDialogStyle = WS_CAPTION | WS_SYSMENU | WS_THICKFRAME;
 constexpr DWORD kDialogExStyle = WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE;
@@ -1090,7 +1091,7 @@ private:
                 layout->SetStrikethrough(TRUE, range);
             if (span.style.code) {
                 layout->SetFontFamilyName(L"Consolas", range);
-                layout->SetFontSize(12.0f, range);
+                layout->SetFontSize(fluent::font_sizes::code, range);
             }
             if (span.style.link) {
                 layout->SetUnderline(TRUE, range);
@@ -1130,7 +1131,7 @@ public:
         painter.strokeRoundRect(palette.cardStroke, panelRect, 1.0f,
                                 fluent::metrics::cardRadius);
 
-        auto* bodyFormat = painter.textFormat(13.0f, 400);
+        auto* bodyFormat = painter.textFormat(fluent::font_sizes::label, 400);
         if (bodyFormat)
             bodyFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
         if (!release_) {
@@ -1146,11 +1147,11 @@ public:
         }
 
         auto* factory = painter.dwrite();
-        auto* headerFormat = painter.textFormat(14.0f, 600);
-        auto* codeFormat = painter.textFormat(12.0f, 400, false, false, L"Consolas");
-        auto* heading1Format = painter.textFormat(18.0f, 700);
-        auto* heading2Format = painter.textFormat(16.0f, 700);
-        auto* heading3Format = painter.textFormat(14.0f, 600);
+        auto* headerFormat = painter.textFormat(fluent::font_sizes::body, 600);
+        auto* codeFormat = painter.textFormat(fluent::font_sizes::code, 400, false, false, L"Consolas");
+        auto* heading1Format = painter.textFormat(fluent::font_sizes::heading, 700);
+        auto* heading2Format = painter.textFormat(fluent::font_sizes::subheading, 700);
+        auto* heading3Format = painter.textFormat(fluent::font_sizes::body, 600);
         ID2D1SolidColorBrush* linkBrush = painter.createBrush(palette.accent);
         if (!factory || !bodyFormat || !headerFormat || !codeFormat || !heading1Format ||
             !heading2Format || !heading3Format)
@@ -1494,7 +1495,7 @@ struct AboutDialog::Impl {
                                                 rect.right - 1.5f, rect.bottom - 1.5f),
                                     1.5f, std::max(1.0f, fluent::metrics::controlRadius - 1.0f));
         }
-        auto* format = painter.textFormat(14.0f, 400, true, true);
+        auto* format = painter.textFormat(fluent::font_sizes::button, 400, true, true);
         painter.drawText(text, format,
                          D2D1::RectF(rect.left + 4.0f, rect.top, rect.right - 4.0f, rect.bottom),
                          textColor);
@@ -1530,7 +1531,7 @@ struct AboutDialog::Impl {
                 painter.target()->DrawEllipse(circle, br, pressed ? 1.5f : 1.0f);
         }
 
-        painter.drawText(text, painter.textFormat(13.0f, 400),
+        painter.drawText(text, painter.textFormat(fluent::font_sizes::label, 400),
                          D2D1::RectF(rect.left + 24.0f, rect.top, rect.right, rect.bottom),
                          enabled ? p.text : p.disabled);
         if (focusedId == id && focusVisible && enabled) {
@@ -1579,22 +1580,22 @@ struct AboutDialog::Impl {
 
     void paint(fluent::FluentDialogSurface::Painter& painter, float, float) {
         const auto& p = fluent::palette();
-        painter.drawText(L"QQ 音乐/网易云任务栏歌词", painter.textFormat(21.0f, 600), titleRect,
+        painter.drawText(L"QQ 音乐/网易云任务栏歌词", painter.textFormat(fluent::font_sizes::brandTitle, 600), titleRect,
                          p.text);
-        painter.drawText(L"把歌词带到 Windows 任务栏", painter.textFormat(13.0f, 400), subtitleRect,
+        painter.drawText(L"把歌词带到 Windows 任务栏", painter.textFormat(fluent::font_sizes::label, 400), subtitleRect,
                          p.textSecondary);
 
         painter.fillRoundRect(p.cardFill, infoCardRect, fluent::metrics::cardRadius);
         painter.strokeRoundRect(p.cardStroke, infoCardRect, 1.0f, fluent::metrics::cardRadius);
-        painter.drawText(versionText, painter.textFormat(13.0f, 400), versionRect, p.text);
-        painter.drawText(L"启动时自动检查更新", painter.textFormat(13.0f, 400), autoCheckLabelRect,
+        painter.drawText(versionText, painter.textFormat(fluent::font_sizes::label, 400), versionRect, p.text);
+        painter.drawText(L"启动时自动检查更新", painter.textFormat(fluent::font_sizes::label, 400), autoCheckLabelRect,
                          p.textSecondary);
         drawToggle(painter, autoSwitchRect, autoCheckOnStartup);
         drawButton(painter, projectRect, L"GitHub", false, kIdProjectButton);
         drawButton(painter, giteeProjectRect, L"Gitee", false, kIdGiteeProjectButton);
 
-        painter.drawText(L"更新日志", painter.textFormat(14.0f, 600), releaseTitleRect, p.text);
-        painter.drawText(L"更新来源", painter.textFormat(13.0f, 400), updateSourceLabelRect,
+        painter.drawText(L"更新日志", painter.textFormat(fluent::font_sizes::body, 600), releaseTitleRect, p.text);
+        painter.drawText(L"更新来源", painter.textFormat(fluent::font_sizes::label, 400), updateSourceLabelRect,
                          p.textSecondary);
         const int selectedSource = updateSourceIndex(updateSource);
         drawUpdateSourceRadio(painter, githubSourceRect, L"GitHub",
@@ -1602,8 +1603,8 @@ struct AboutDialog::Impl {
         drawUpdateSourceRadio(painter, giteeSourceRect, L"Gitee",
                               selectedSource == 1, kIdGiteeSourceButton);
         releaseNotes.paint(painter, notesRect, scrollbarRight);
-        painter.drawText(statusText, painter.textFormat(13.0f, 400), statusRect, p.textSecondary);
-        painter.drawText(latestText, painter.textFormat(13.0f, 400), latestRect, p.textSecondary);
+        painter.drawText(statusText, painter.textFormat(fluent::font_sizes::label, 400), statusRect, p.textSecondary);
+        painter.drawText(latestText, painter.textFormat(fluent::font_sizes::label, 400), latestRect, p.textSecondary);
 
         drawButton(painter, checkRect, L"检查更新", true, kIdCheckButton);
         drawButton(painter, releaseRect, releaseButtonText, releaseButtonAccent, kIdReleaseButton);
@@ -2008,8 +2009,8 @@ struct AboutDialog::Impl {
         const float pad = fluent::metrics::pagePadding;
         const float gap = fluent::metrics::controlGap;
 
-        const float titleH = 30.0f;
-        const float subtitleH = 20.0f;
+        const float titleH = fluent::font_sizes::brandTitle + 9.0f;
+        const float subtitleH = fluent::metrics::subtitleHeight;
         titleRect = D2D1::RectF(pad, pad, std::max(pad, w - pad), pad + titleH);
         subtitleRect = D2D1::RectF(pad, pad + titleH, std::max(pad, w - pad),
                                     pad + titleH + subtitleH);
@@ -2228,8 +2229,8 @@ bool AboutDialog::create(HINSTANCE inst, HWND parent, bool autoCheckOnStartup,
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     UINT dpi = GetDpiForSystem();
     float s = fluent::dipScale(dpi);
-    RECT rc{0, 0, static_cast<LONG>(std::lround(520.0f * s)),
-            static_cast<LONG>(std::lround(620.0f * s))};
+    RECT rc{0, 0, static_cast<LONG>(std::lround(600.0f * s)),
+            static_cast<LONG>(std::lround(700.0f * s))};
     AdjustWindowRectExForDpi(&rc, kDialogStyle, FALSE, kDialogExStyle, dpi);
     int w = rc.right - rc.left;
     int h = rc.bottom - rc.top;

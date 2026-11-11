@@ -139,6 +139,7 @@ add_executable(QQMusicLyric
     src/ui/taskbar_host.cpp
     src/ui/about_dialog.cpp
     src/ui/manual_search_dialog.cpp
+    src/ui/font_sizes.h
     src/ui/fluent_theme.cpp
     src/ui/fluent_controls.cpp
     src/ui/fluent_menu.cpp

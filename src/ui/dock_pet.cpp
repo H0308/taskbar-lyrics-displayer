@@ -1,4 +1,5 @@
 #include "dock_pet.h"
+#include "ui/font_sizes.h"
 
 #include "resource.h"
 
@@ -776,12 +777,11 @@ void DockPet::drawZzz(ID2D1DeviceContext* target, float headX, float headY) {
         FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
                                    reinterpret_cast<IUnknown**>(&dwrite_))))
         return;
-    constexpr float kZzzSizes[3] = {9.0f, 11.0f, 13.5f};
     for (int i = 0; i < 3; ++i) {
         if (!zzzFormats_[i] &&
             FAILED(dwrite_->CreateTextFormat(
                 L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_ITALIC,
-                DWRITE_FONT_STRETCH_NORMAL, kZzzSizes[i], L"en-us", &zzzFormats_[i])))
+                DWRITE_FONT_STRETCH_NORMAL, fluent::font_sizes::dockPet::sleep[i], L"en-us", &zzzFormats_[i])))
             return;
     }
     if (!zzzBrush_ &&

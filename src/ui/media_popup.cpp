@@ -1,4 +1,5 @@
 #include "media_popup.h"
+#include "ui/font_sizes.h"
 #include "ui/media_popup/visibility.h"
 #include "ui/media_popup/transitions.h"
 #include "ui/media_popup/page_layout.h"
@@ -780,16 +781,16 @@ struct MediaPopup::Impl {
                                              &brushTaskPriorityLow)) ||
             FAILED(rt->CreateSolidColorBrush(D2D1::ColorF(0x8A8A8A, 0.82f),
                                              &brushTaskPriorityNone)) ||
-            !createTextFormat(11.0f, DWRITE_FONT_WEIGHT_NORMAL, &fmtSource) ||
-            !createTextFormat(11.0f, DWRITE_FONT_WEIGHT_NORMAL, &fmtTimeRight) ||
-            !createTextFormat(17.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, &fmtTitle) ||
-            !createTextFormat(12.0f, DWRITE_FONT_WEIGHT_NORMAL, &fmtArtist) ||
-            !createTextFormat(13.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, &fmtIcon) ||
-            !createTextFormat(12.0f, DWRITE_FONT_WEIGHT_NORMAL, &fmtIdleHeader) ||
-            !createTextFormat(14.0f, DWRITE_FONT_WEIGHT_NORMAL, &fmtIdleQuote,
+            !createTextFormat(fluent::font_sizes::mediaPopup::source, DWRITE_FONT_WEIGHT_NORMAL, &fmtSource) ||
+            !createTextFormat(fluent::font_sizes::mediaPopup::time, DWRITE_FONT_WEIGHT_NORMAL, &fmtTimeRight) ||
+            !createTextFormat(fluent::font_sizes::mediaPopup::title, DWRITE_FONT_WEIGHT_SEMI_BOLD, &fmtTitle) ||
+            !createTextFormat(fluent::font_sizes::mediaPopup::artist, DWRITE_FONT_WEIGHT_NORMAL, &fmtArtist) ||
+            !createTextFormat(fluent::font_sizes::mediaPopup::icon, DWRITE_FONT_WEIGHT_SEMI_BOLD, &fmtIcon) ||
+            !createTextFormat(fluent::font_sizes::mediaPopup::idleHeader, DWRITE_FONT_WEIGHT_NORMAL, &fmtIdleHeader) ||
+            !createTextFormat(fluent::font_sizes::mediaPopup::idleQuote, DWRITE_FONT_WEIGHT_NORMAL, &fmtIdleQuote,
                                DWRITE_PARAGRAPH_ALIGNMENT_NEAR) ||
-            !createTextFormat(11.0f, DWRITE_FONT_WEIGHT_NORMAL, &fmtIdleSource) ||
-            !createTextFormat(10.5f, DWRITE_FONT_WEIGHT_NORMAL, &fmtIdleApp)) {
+            !createTextFormat(fluent::font_sizes::mediaPopup::idleSource, DWRITE_FONT_WEIGHT_NORMAL, &fmtIdleSource) ||
+            !createTextFormat(fluent::font_sizes::mediaPopup::idleApp, DWRITE_FONT_WEIGHT_NORMAL, &fmtIdleApp)) {
             releaseDrawingResources();
             return false;
         }

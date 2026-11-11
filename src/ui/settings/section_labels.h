@@ -63,7 +63,7 @@ inline const wchar_t* backgroundAdjustmentLabel(bool immersive, int mode) {
 }
 
 inline constexpr const wchar_t* kFontSettingNotice =
-    L"用于任务栏歌词、每日一言、歌曲信息、沉浸模式时间/日期和 Dock、内嵌模式资源监视；界面可选择仅跟随此字体的名称。";
+    L"用于任务栏歌词、每日一言、歌曲信息、沉浸模式时间/日期和 Dock、内嵌模式资源监视。";
 inline settings_icon::Kind iconForRow(int id) {
     switch (id) {
     case kIdTaskbarTheme:

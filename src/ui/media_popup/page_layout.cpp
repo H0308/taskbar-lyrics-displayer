@@ -164,9 +164,12 @@ IdleListLayout IdlePageLayout::list(float w, float top, const IdlePresentation& 
 MediaPageLayout mediaPageLayout(float w, float origin) {
     MediaPageLayout result;
     result.buttons = {
-        D2D1::RectF(w * 0.5f - 80.0f, origin + 164.0f, w * 0.5f - 44.0f, origin + 200.0f),
-        D2D1::RectF(w * 0.5f - 18.0f, origin + 164.0f, w * 0.5f + 18.0f, origin + 200.0f),
-        D2D1::RectF(w * 0.5f + 44.0f, origin + 164.0f, w * 0.5f + 80.0f, origin + 200.0f)};
+        D2D1::RectF(w * 0.5f - 80.0f, origin + kPopupHeightDip - 44.0f,
+                    w * 0.5f - 44.0f, origin + kPopupHeightDip - 8.0f),
+        D2D1::RectF(w * 0.5f - 18.0f, origin + kPopupHeightDip - 44.0f,
+                    w * 0.5f + 18.0f, origin + kPopupHeightDip - 8.0f),
+        D2D1::RectF(w * 0.5f + 44.0f, origin + kPopupHeightDip - 44.0f,
+                    w * 0.5f + 80.0f, origin + kPopupHeightDip - 8.0f)};
     result.source = D2D1::RectF(kMediaSourceTextLeftDip, kMediaSourceRowTopDip,
                                 kMediaSourceTextRightDip, kMediaSourceRowBottomDip);
     result.sourceHit = D2D1::RectF(8.0f, origin + 8.0f, 220.0f, origin + 40.0f);

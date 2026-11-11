@@ -1,4 +1,5 @@
 #include "song_toast.h"
+#include "ui/font_sizes.h"
 
 #include "util/com_release.h"
 #include "graphics/pixel_luminance.h"
@@ -35,15 +36,15 @@ constexpr UINT kCloseAnimationMs = 180;
 constexpr UINT kScrollTimerMs = 32;
 constexpr float kScrollSpeedDip = 24.0f;
 
-constexpr float kToastHeightDip = 56.0f;
-constexpr float kToastMinWidthDip = 220.0f;
-constexpr float kToastMaxWidthDip = 280.0f;
+constexpr float kToastHeightDip = 64.0f;
+constexpr float kToastMinWidthDip = 248.0f;
+constexpr float kToastMaxWidthDip = 320.0f;
 constexpr float kToastRadiusDip = 12.0f;
 constexpr float kShadowPaddingDip = 8.0f;
 constexpr float kCoverSizeDip = 36.0f;
 constexpr float kCoverRadiusDip = 8.0f;
 constexpr float kCoverLeftDip = 10.0f;
-constexpr float kCoverTopDip = 10.0f;
+constexpr float kCoverTopDip = 14.0f;
 constexpr float kTextLeftDip = 58.0f;
 constexpr float kTextRightPaddingDip = 12.0f;
 constexpr float kTextEdgeFadeDip = 8.0f;
@@ -56,8 +57,6 @@ constexpr float kTextScrollPaddingDip = 24.0f;
 constexpr float kBottomMarginDip = 20.0f;
 constexpr float kEnterTravelDip = 12.0f;
 constexpr float kExitTravelDip = 6.0f;
-constexpr float kTitleFontSize = 13.0f;
-constexpr float kArtistFontSize = 11.5f;
 
 // d2d1effects.h 只声明这个 GUID；与 media_popup.cpp 相同，这里保留内部定义。
 constexpr CLSID kGaussianBlurClsid = {
@@ -251,8 +250,8 @@ struct SongToast::Impl {
             fluent::applyUiFontFallback(*out);
             return true;
         };
-        if (!create(kTitleFontSize, DWRITE_FONT_WEIGHT_SEMI_BOLD, &fmtTitle) ||
-            !create(kArtistFontSize, DWRITE_FONT_WEIGHT_NORMAL, &fmtArtist))
+        if (!create(fluent::font_sizes::songToast::title, DWRITE_FONT_WEIGHT_SEMI_BOLD, &fmtTitle) ||
+            !create(fluent::font_sizes::songToast::artist, DWRITE_FONT_WEIGHT_NORMAL, &fmtArtist))
             return false;
         fontRevision = revision;
         return true;

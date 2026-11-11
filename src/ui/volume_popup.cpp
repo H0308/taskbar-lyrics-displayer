@@ -1,4 +1,5 @@
 #include "volume_popup.h"
+#include "ui/font_sizes.h"
 
 #include "fluent_theme.h"
 #include "graphics/composition_renderer.h"
@@ -20,14 +21,14 @@ constexpr wchar_t kWndClassName[] = L"QQMusicLyricVolumePopup";
 constexpr UINT_PTR kHideTimer = 1;
 constexpr UINT kHideDelayMs = 160;
 
-// 主体为 220 × 44 DIP；圆角、阴影与背景材质统一由 DWM 绘制。
-constexpr float kWidthDip = 220.0f;
-constexpr float kHeightDip = 44.0f;
-constexpr float kIconCenterDip = 22.0f;
-constexpr float kTrackLeftDip = 48.0f;
-constexpr float kTrackRightDip = 164.0f;
-constexpr float kTextLeftDip = 180.0f;
-constexpr float kTextRightDip = 208.0f;
+// 主体为 248 × 52 DIP；圆角、阴影与背景材质统一由 DWM 绘制。
+constexpr float kWidthDip = 248.0f;
+constexpr float kHeightDip = 52.0f;
+constexpr float kIconCenterDip = 26.0f;
+constexpr float kTrackLeftDip = 52.0f;
+constexpr float kTrackRightDip = 184.0f;
+constexpr float kTextLeftDip = 200.0f;
+constexpr float kTextRightDip = 236.0f;
 constexpr float kKnobRadiusDip = 7.5f;
 constexpr float kTrackHitPaddingDip = kKnobRadiusDip;
 constexpr float kTrackHalfHitDip = 14.0f;
@@ -94,7 +95,7 @@ struct VolumePopup::Impl {
             FAILED(rt->CreateSolidColorBrush(p.accent, &brushAccent)) ||
             FAILED(rt->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), &brushKnob)))
             return false;
-        if (FAILED(fluent::createUiTextFormat(renderer.dwrite(), 14.0f,
+        if (FAILED(fluent::createUiTextFormat(renderer.dwrite(), fluent::font_sizes::body,
                                               DWRITE_FONT_WEIGHT_NORMAL, &fmtValue)))
             return false;
         fmtValue->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);

@@ -1,4 +1,5 @@
 #include "color_picker_dialog.h"
+#include "ui/font_sizes.h"
 
 #include "ui/app_icon.h"
 #include "ui/fluent_controls.h"
@@ -220,7 +221,7 @@ private:
         rt->FillRoundedRectangle(D2D1::RoundedRect(newR, 4.0f, 4.0f), br);
 
         // 文字：旧 / 新（按色块亮度选黑/白字保证可读）
-        if (auto* fmt = textFormat(12.0f)) {
+        if (auto* fmt = textFormat(fluent::font_sizes::caption)) {
             auto lumText = [](COLORREF c) {
                 float lum = 0.299f * GetRValue(c) + 0.587f * GetGValue(c) + 0.114f * GetBValue(c);
                 return lum > 140.0f ? D2D1::ColorF(0, 0, 0, 0.8f) : D2D1::ColorF(1, 1, 1, 0.9f);
@@ -328,7 +329,8 @@ private:
 constexpr float kMinClientWidthDip = fluent::metrics::pagePadding + ColorCanvas::kSvSize +
                                      ColorCanvas::kGap + ColorCanvas::kHueW +
                                      fluent::metrics::pagePadding;
-constexpr float kMinClientHeightDip = fluent::metrics::pagePadding + 28.0f + 20.0f +
+constexpr float kMinClientHeightDip = fluent::metrics::pagePadding + fluent::metrics::titleHeight +
+                                      fluent::metrics::subtitleHeight +
                                       fluent::metrics::sectionGap + ColorCanvas::kSvSize +
                                       ColorCanvas::kGap + ColorCanvas::kSwatchH +
                                       fluent::metrics::controlGap + fluent::metrics::controlHeight +
@@ -445,8 +447,8 @@ struct ColorPickerDialog::Impl {
     }
 
     void createControls() {
-        titleLabel.create(hwnd, kIdTitleLabel, titleText.c_str(), false, 20.0f, 600);
-        subtitleLabel.create(hwnd, kIdSubtitleLabel, L"调整颜色后点击确定应用", true, 13.0f, 400);
+        titleLabel.create(hwnd, kIdTitleLabel, titleText.c_str(), false, fluent::font_sizes::title, 600);
+        subtitleLabel.create(hwnd, kIdSubtitleLabel, L"调整颜色后点击确定应用", true, fluent::font_sizes::label, 400);
         canvas.create(hwnd, kIdCanvas);
         canvas.setOldColor(initial);
         canvas.setColor(initial);
@@ -487,12 +489,13 @@ struct ColorPickerDialog::Impl {
         int pad = px(padDip);
         int gap = px(gapDip);
 
-        int titleH = px(28.0f);
-        int subtitleH = px(20.0f);
+        int titleH = px(fluent::metrics::titleHeight);
+        int subtitleH = px(fluent::metrics::subtitleHeight);
         titleLabel.move(originX + pad, pad, w - pad * 2, titleH);
         subtitleLabel.move(originX + pad, pad + titleH, w - pad * 2, subtitleH);
 
-        const float canvasYDip = padDip + 28.0f + 20.0f + fluent::metrics::sectionGap;
+        const float canvasYDip = padDip + fluent::metrics::titleHeight +
+                                 fluent::metrics::subtitleHeight + fluent::metrics::sectionGap;
         const float buttonHDip = fluent::metrics::controlHeight;
         const float buttonYDip = heightDip - padDip - buttonHDip;
         // 取色板、HEX 输入和底部按钮按垂直流式布局排列。取色板在窗口变大时
@@ -581,8 +584,8 @@ bool ColorPickerDialog::create(HINSTANCE inst, HWND parent, COLORREF initial,
     UINT dpi = GetDpiForSystem();
     float s = fluent::dipScale(dpi);
     // 期望的客户区尺寸（DIP），按标题栏等边框反推整个窗口尺寸，否则底部控件被裁掉
-    const float clientW = kMinClientWidthDip;
-    const float clientH = kMinClientHeightDip;
+    const float clientW = kMinClientWidthDip + 64.0f;
+    const float clientH = kMinClientHeightDip + 64.0f;
     RECT rc{0, 0, static_cast<LONG>(std::lround(clientW * s)),
             static_cast<LONG>(std::lround(clientH * s))};
     AdjustWindowRectExForDpi(&rc, kDialogStyle, FALSE, kDialogExStyle, dpi);

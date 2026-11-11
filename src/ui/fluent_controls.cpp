@@ -1,4 +1,5 @@
 #include "fluent_controls.h"
+#include "ui/font_sizes.h"
 
 #include <windowsx.h>
 #include <commctrl.h>
@@ -365,7 +366,7 @@ void FluentButton::render(ID2D1DCRenderTarget* rt, float wDip, float hDip) {
                         std::max(1.0f, kCornerRadius - 1.0f));
     }
 
-    if (auto* fmt = textFormat(14.0f, 400, true)) {
+    if (auto* fmt = textFormat(fluent::font_sizes::body, 400, true)) {
         br->SetColor(textColor);
         rt->DrawTextW(text_.c_str(), static_cast<UINT32>(text_.size()), fmt,
                       D2D1::RectF(4.0f, 0.0f, wDip - 4.0f, hDip), br);
@@ -908,7 +909,7 @@ int FluentList::nextSelectable(int from, int dir) const {
 
 bool FluentList::rowTextTruncated(int row) {
     IDWriteFactory* dw = dwrite();
-    auto* fmt = items_[row].header ? textFormat(12.0f, 600) : textFormat(13.0f);
+    auto* fmt = items_[row].header ? textFormat(fluent::font_sizes::caption, 600) : textFormat(fluent::font_sizes::label);
     if (!dw || !fmt)
         return false;
     const std::wstring& text = items_[row].text;
@@ -1208,12 +1209,12 @@ void FluentList::render(ID2D1DCRenderTarget* rt, float wDip, float hDip) {
                 rowDraw_(rt, rowRect, i, sel, hov);
             } else if (items_[i].header) {
                 // 每行按需取格式：不同参数会重建缓存格式，跨行持有指针会悬空
-                if (auto* hfmt = textFormat(12.0f, 600)) {
+                if (auto* hfmt = textFormat(fluent::font_sizes::caption, 600)) {
                     br->SetColor(p.textSecondary);
                     drawTrimmedText(dwrite(), rt, items_[i].text, hfmt,
                                     D2D1::RectF(12.0f, y, wDip - 12.0f, y + rh), br);
                 }
-            } else if (auto* fmt = textFormat(13.0f)) {
+            } else if (auto* fmt = textFormat(fluent::font_sizes::label)) {
                 br->SetColor(p.text);
                 drawTrimmedText(dwrite(), rt, items_[i].text, fmt,
                                 D2D1::RectF(16.0f, y, wDip - 12.0f, y + rh), br);
@@ -1607,7 +1608,7 @@ void FluentRadioGroup::render(ID2D1DCRenderTarget* rt, float wDip, float hDip) {
     (void)wDip;
     const Palette& p = palette();
     auto* br = brush(rt);
-    auto* fmt = textFormat(13.0f);
+    auto* fmt = textFormat(fluent::font_sizes::label);
     if (!br || !fmt)
         return;
     const bool enabled = IsWindowEnabled(hwnd_) != FALSE;

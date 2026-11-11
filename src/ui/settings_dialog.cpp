@@ -1,4 +1,5 @@
 #include "settings_dialog.h"
+#include "ui/font_sizes.h"
 
 #include "app_info.h"
 #include "logging/runtime_logger.h"
@@ -51,8 +52,8 @@ constexpr ULONGLONG kSearchLocateFadeMs = 800;
 constexpr float kContentScrollFrequency = 28.0f;
 // 应用列表卡片内嵌开关的键盘焦点 ID，不对应独立设置行。
 
-constexpr float kWindowW = 988.0f;
-constexpr float kWindowH = 718.0f;
+constexpr float kWindowW = 1080.0f;
+constexpr float kWindowH = 780.0f;
 constexpr float kMinClientWidthDip = 780.0f;
 constexpr float kMinClientHeightDip = 718.0f;
 constexpr float kMinClientAspectRatio = kMinClientWidthDip / kMinClientHeightDip;
@@ -65,7 +66,6 @@ constexpr float kNavIconTextGap = 10.0f;
 constexpr float kTitleTopPadding = 12.0f;
 constexpr float kTitleHintGap = 2.0f;
 constexpr float kHintBottomPadding = 8.0f;
-constexpr float kHintTextSize = 12.0f;
 constexpr float kHintMeasureHeight = 10000.0f;
 constexpr float kRowGap = 8.0f;
 constexpr float kModeGridGap = 8.0f;
@@ -770,7 +770,7 @@ struct SettingsDialog::Impl {
         if (!row.showHint || row.hint.empty())
             return 0.0f;
         return measureTextHeight(painter, row.hint, row.hintRect.right - row.hintRect.left,
-                                 kHintTextSize);
+                                 fluent::font_sizes::caption);
     }
 
     static bool isSpectrumEffectRow(int id) {
@@ -798,7 +798,7 @@ struct SettingsDialog::Impl {
                     0.0f, contentViewportRect.right - contentViewportRect.left -
                               32.0f - kRowIconSlotW);
                 float optionWidth = 0.0f;
-                auto* optionFormat = painter.textFormat(13.0f, 400, false, true);
+                auto* optionFormat = painter.textFormat(fluent::font_sizes::label, 400, false, true);
                 for (const auto& option : row.options)
                     optionWidth = std::max(optionWidth,
                         painter.measureTextWidth(option, optionFormat));
@@ -807,9 +807,9 @@ struct SettingsDialog::Impl {
                     static_cast<float>(row.options.size());
                 const float textWidth = std::max(
                     painter.measureTextWidth(row.text,
-                        painter.textFormat(14.0f, 400, false, true)),
+                        painter.textFormat(fluent::font_sizes::body, 400, false, true)),
                     row.showHint ? painter.measureTextWidth(row.hint,
-                        painter.textFormat(kHintTextSize, 400, false, true)) : 0.0f);
+                        painter.textFormat(fluent::font_sizes::caption, 400, false, true)) : 0.0f);
                 const bool inlineChoice =
                     std::ceil(textWidth) + fluent::metrics::pagePadding + controlWidth <=
                     availableWidth;
@@ -824,12 +824,12 @@ struct SettingsDialog::Impl {
                              : availableWidth;
             }
             const float measuredTitleHeight =
-                measureTextHeight(painter, row.text, labelW, 14.0f);
+                measureTextHeight(painter, row.text, labelW, fluent::font_sizes::body);
             const float titleHeight =
                 std::max(kTitleMinHeight, measuredTitleHeight);
             const float measuredValueHeight =
                 row.id == kIdPickFont
-                    ? measureTextHeight(painter, row.valueText, labelW, 13.0f)
+                    ? measureTextHeight(painter, row.valueText, labelW, fluent::font_sizes::label)
                     : 0.0f;
             const float valueHeight =
                 row.id == kIdPickFont && !row.valueText.empty()
@@ -838,7 +838,7 @@ struct SettingsDialog::Impl {
             float requiredHeight = row.minHeight;
             if (isSegmentedChoice(row)) {
                 const float hintHeight = row.showHint
-                    ? measureTextHeight(painter, row.hint, labelW, kHintTextSize) : 0.0f;
+                    ? measureTextHeight(painter, row.hint, labelW, fluent::font_sizes::caption) : 0.0f;
                 const float controlBlockHeight = row.choiceInline
                     ? 0.0f : kModeGridTopGap + fluent::metrics::controlHeight;
                 requiredHeight = std::max(
@@ -847,7 +847,7 @@ struct SettingsDialog::Impl {
                                         controlBlockHeight + kHintBottomPadding);
             } else if (row.id == kIdPickFont) {
                 const float hintHeight =
-                    measureTextHeight(painter, row.hint, labelW, kHintTextSize);
+                    measureTextHeight(painter, row.hint, labelW, fluent::font_sizes::caption);
                 if (hintHeight > 0.0f) {
                     const float valueBlockHeight =
                         valueHeight > 0.0f
@@ -939,8 +939,8 @@ struct SettingsDialog::Impl {
                         18.0f + kPageTitleIconSize);
         pageTitleRects[activePage] =
             D2D1::RectF(contentX + kPageTitleIconSize + kPageTitleIconTextGap, 14.0f,
-                        contentX + contentW, 42.0f);
-        const float contentTop = 14.0f + 28.0f + 16.0f;
+                        contentX + contentW, 14.0f + fluent::metrics::titleHeight);
+        const float contentTop = 14.0f + fluent::metrics::titleHeight + 16.0f;
         const float contentBottom = std::max(contentTop, h - 12.0f);
         contentViewportRect =
             D2D1::RectF(contentX, contentTop, contentX + contentW, contentBottom);
@@ -1355,9 +1355,9 @@ struct SettingsDialog::Impl {
                         search_.triggerRect().right - 7.0f, triggerCenterY + 9.5f);
         painter.fillRoundRect(p.listHover, shortcutBadgeRect, 4.0f);
         painter.strokeRoundRect(p.cardStroke, shortcutBadgeRect, 1.0f, 4.0f);
-        painter.drawText(L"Ctrl+F", painter.textFormat(10.5f, 500, true, true),
+        painter.drawText(L"Ctrl+F", painter.textFormat(fluent::font_sizes::settings::shortcut, 500, true, true),
                          shortcutBadgeRect, p.textSecondary);
-        painter.drawText(L"搜索设置", painter.textFormat(13.5f, 400, false, true),
+        painter.drawText(L"搜索设置", painter.textFormat(fluent::font_sizes::settings::searchTrigger, 400, false, true),
                          D2D1::RectF(navRect.left + kNavIconLeft + kNavIconSize + kNavIconTextGap,
                                      search_.triggerRect().top, shortcutBadgeRect.left - 6.0f,
                                      search_.triggerRect().bottom),
@@ -1375,7 +1375,7 @@ struct SettingsDialog::Impl {
                             navRect.bottom - 1.5f),
                 1.5f, fluent::metrics::cardRadius - 1.0f);
         }
-        auto* format = painter.textFormat(14.0f, 400, false, true);
+        auto* format = painter.textFormat(fluent::font_sizes::body, 400, false, true);
         for (int i = 0; i < kSettingsPageCount; ++i) {
             const bool selected = i == activePage;
             const bool hovered = hoverId == kIdNav && hoverOption == i;
@@ -1434,12 +1434,12 @@ struct SettingsDialog::Impl {
                     D2D1::RectF(navRect.left + kNavIconLeft, iconTop,
                                 navRect.left + kNavIconLeft + kNavIconSize,
                                 iconTop + kNavIconSize), brush);
-            painter.drawText(footerLabels[index], painter.textFormat(12.5f, 400, false, true),
+            painter.drawText(footerLabels[index], painter.textFormat(fluent::font_sizes::settings::navigationFooter, 400, false, true),
                 D2D1::RectF(navRect.left + kNavIconLeft + kNavIconSize + kNavIconTextGap,
                             rect.top, rect.right - 8.0f, rect.bottom), p.textSecondary);
         }
         painter.drawText(std::wstring(L"版本 ") + app_info::kVersion,
-                         painter.textFormat(11.0f, 400, false, true), versionRect,
+                         painter.textFormat(fluent::font_sizes::smallText, 400, false, true), versionRect,
                          p.textSecondary);
     }
 
@@ -1461,7 +1461,7 @@ struct SettingsDialog::Impl {
                 1.5f, fluent::metrics::controlRadius - 1.0f);
         }
         if (row.id == kIdFloatingCardBackgroundColor) {
-            auto* format = painter.textFormat(14.0f, 400, false, true);
+            auto* format = painter.textFormat(fluent::font_sizes::body, 400, false, true);
             constexpr float kPreviewSize = 18.0f;
             constexpr float kPreviewGap = 8.0f;
             const float textW = format ? painter.measureTextWidth(row.controlText, format) : 0.0f;
@@ -1485,7 +1485,7 @@ struct SettingsDialog::Impl {
             }
             return;
         }
-        painter.drawText(row.controlText, painter.textFormat(14.0f, 400, true, true),
+        painter.drawText(row.controlText, painter.textFormat(fluent::font_sizes::button, 400, true, true),
                          D2D1::RectF(row.controlRect.left + 4.0f, row.controlRect.top,
                                      row.controlRect.right - 4.0f, row.controlRect.bottom),
                          textColor);
@@ -1560,7 +1560,7 @@ struct SettingsDialog::Impl {
         const auto numberRect = sliderNumberRect(row);
         painter.fillRoundRect(row.enabled ? p.controlFill : p.listHover, valueRect);
         painter.strokeRoundRect(editing ? p.accent : p.controlStroke, valueRect);
-        auto* numberFormat = painter.textFormat(12.0f, 600, true, true);
+        auto* numberFormat = painter.textFormat(fluent::font_sizes::caption, 600, true, true);
         const std::wstring number = editing ? slider_.state().text : std::to_wstring(row.value);
         painter.target()->PushAxisAlignedClip(numberRect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         if (editing && numberFormat) {
@@ -1592,7 +1592,7 @@ struct SettingsDialog::Impl {
                     brush);
         }
         painter.target()->PopAxisAlignedClip();
-        painter.drawText(row.valueSuffix, painter.textFormat(12.0f, 600, true, true),
+        painter.drawText(row.valueSuffix, painter.textFormat(fluent::font_sizes::caption, 600, true, true),
                          D2D1::RectF(numberRect.right, numberRect.top,
                                      valueRect.right - 4.0f, numberRect.bottom),
                          row.enabled ? p.text : p.disabled);
@@ -1658,7 +1658,7 @@ struct SettingsDialog::Impl {
 
     void drawSpectrumStyleRadio(fluent::FluentDialogSurface::Painter& painter, Row& row) {
         const auto& p = painter.colors();
-        auto* titleFormat = painter.textFormat(13.0f, 500, true, true);
+        auto* titleFormat = painter.textFormat(fluent::font_sizes::label, 500, true, true);
         if (!titleFormat)
             return;
 
@@ -1703,7 +1703,7 @@ struct SettingsDialog::Impl {
 
     void drawCoverEffectRadio(fluent::FluentDialogSurface::Painter& painter, Row& row) {
         const auto& p = painter.colors();
-        auto* titleFormat = painter.textFormat(13.0f, 500, false, true);
+        auto* titleFormat = painter.textFormat(fluent::font_sizes::label, 500, false, true);
         if (!titleFormat)
             return;
 
@@ -1740,7 +1740,7 @@ struct SettingsDialog::Impl {
 
     void drawSongToastPositionRadio(fluent::FluentDialogSurface::Painter& painter, Row& row) {
         const auto& p = painter.colors();
-        auto* titleFormat = painter.textFormat(13.0f, 500, true, true);
+        auto* titleFormat = painter.textFormat(fluent::font_sizes::label, 500, true, true);
         if (!titleFormat)
             return;
 
@@ -1788,8 +1788,8 @@ struct SettingsDialog::Impl {
 
     void drawIdleQuoteBackgroundRadio(fluent::FluentDialogSurface::Painter& painter, Row& row) {
         const auto& p = painter.colors();
-        auto* titleFormat = painter.textFormat(12.5f, 600, true, true);
-        auto* noneFormat = painter.textFormat(12.0f, 600, true, true);
+        auto* titleFormat = painter.textFormat(fluent::font_sizes::settings::option, 600, true, true);
+        auto* noneFormat = painter.textFormat(fluent::font_sizes::caption, 600, true, true);
         if (!titleFormat || !noneFormat)
             return;
 
@@ -1865,7 +1865,7 @@ struct SettingsDialog::Impl {
 
     void drawHoverControlStyleRadio(fluent::FluentDialogSurface::Painter& painter, Row& row) {
         const auto& p = painter.colors();
-        auto* titleFormat = painter.textFormat(12.5f, 500, true, true);
+        auto* titleFormat = painter.textFormat(fluent::font_sizes::settings::option, 500, true, true);
         if (!titleFormat)
             return;
 
@@ -1925,7 +1925,7 @@ struct SettingsDialog::Impl {
         }
 
         const auto& p = painter.colors();
-        auto* format = painter.textFormat(13.0f, 400, true, true);
+        auto* format = painter.textFormat(fluent::font_sizes::label, 400, true, true);
         if (!format)
             return;
         const float width = row.controlRect.right - row.controlRect.left;
@@ -1970,8 +1970,8 @@ struct SettingsDialog::Impl {
 
     void drawModeGrid(fluent::FluentDialogSurface::Painter& painter, Row& row) {
         const auto& p = painter.colors();
-        auto* titleFormat = painter.textFormat(13.0f, 600, false, true);
-        auto* hintFormat = painter.textFormat(11.0f, 400);
+        auto* titleFormat = painter.textFormat(fluent::font_sizes::label, 600, false, true);
+        auto* hintFormat = painter.textFormat(fluent::font_sizes::smallText, 400);
         if (!titleFormat || !hintFormat)
             return;
 
@@ -2039,9 +2039,9 @@ struct SettingsDialog::Impl {
         const float innerRight = row.cardRect.right - 16.0f;
         const float listTop = row.cardRect.top + kIdleAppsListTop;
         const size_t count = sections_.state.idleApps.size();
-        auto* nameFormat = painter.textFormat(13.0f, 600, false, true);
-        auto* pathFormat = painter.textFormat(11.0f, 400, false, true);
-        auto* actionFormat = painter.textFormat(11.0f, 600, true, true);
+        auto* nameFormat = painter.textFormat(fluent::font_sizes::label, 600, false, true);
+        auto* pathFormat = painter.textFormat(fluent::font_sizes::smallText, 400, false, true);
+        auto* actionFormat = painter.textFormat(fluent::font_sizes::smallText, 600, true, true);
         if (!nameFormat || !pathFormat || !actionFormat)
             return;
 
@@ -2061,7 +2061,7 @@ struct SettingsDialog::Impl {
                             kIdleAppNamesToggleLabelW,
                         row.controlRect.top, row.controlRect.left - kIdleAppNamesToggleGap,
                         row.controlRect.bottom);
-        painter.drawText(L"显示名称", painter.textFormat(12.0f, 400, true, true),
+        painter.drawText(L"显示名称", painter.textFormat(fluent::font_sizes::caption, 400, true, true),
                          toggleLabelRect, row.enabled ? p.textSecondary : p.disabled);
         drawToggle(painter, row,
                    row.enabled && hoverId == row.id && hoverOption == kIdleAppNamesOption,
@@ -2157,7 +2157,7 @@ struct SettingsDialog::Impl {
                    : p.listHover,
             row.addAppRect, 7.0f);
         painter.strokeRoundRect(canAdd ? p.accent : p.disabled, row.addAppRect, 1.0f, 7.0f);
-        painter.drawText(L"添加应用", painter.textFormat(13.0f, 600, true, true),
+        painter.drawText(L"添加应用", painter.textFormat(fluent::font_sizes::label, 600, true, true),
                          row.addAppRect, canAdd ? p.textOnAccent : p.disabled);
     }
 
@@ -2219,7 +2219,7 @@ struct SettingsDialog::Impl {
                     settings_icon::draw(painter.target(), icon, pageTitleIconRects[activePage],
                                         iconBrush, 1.35f);
             }
-            painter.drawText(pageTitles[activePage], painter.textFormat(20.0f, 600),
+            painter.drawText(pageTitles[activePage], painter.textFormat(fluent::font_sizes::title, 600),
                              pageTitleRects[activePage], p.text);
         }
 
@@ -2261,7 +2261,7 @@ struct SettingsDialog::Impl {
             if (bounds.bottom < drawRegion.top - 1.0f || bounds.top > drawRegion.bottom + 1.0f)
                 continue;
             if (row.kind == ControlKind::Header) {
-                painter.drawText(row.text, painter.textFormat(13.0f, 600), row.labelRect,
+                painter.drawText(row.text, painter.textFormat(fluent::font_sizes::section, 600), row.labelRect,
                                  p.text);
                 continue;
             }
@@ -2279,13 +2279,13 @@ struct SettingsDialog::Impl {
                 if (auto* iconBrush = painter.brush(iconColor))
                     settings_icon::draw(painter.target(), icon, row.iconRect, iconBrush);
             }
-            painter.drawText(row.text, painter.textFormat(14.0f, 400), row.labelRect,
+            painter.drawText(row.text, painter.textFormat(fluent::font_sizes::body, 400), row.labelRect,
                              row.enabled ? p.text : p.disabled);
             if (row.id == kIdPickFont && !row.valueText.empty())
-                painter.drawText(row.valueText, painter.textFormat(13.0f, 600),
+                painter.drawText(row.valueText, painter.textFormat(fluent::font_sizes::label, 600),
                                  row.valueRect, row.enabled ? p.accent : p.disabled);
             if (row.showHint)
-                painter.drawText(row.hint, painter.textFormat(12.0f, 400), row.hintRect,
+                painter.drawText(row.hint, painter.textFormat(fluent::font_sizes::caption, 400), row.hintRect,
                                  row.enabled ? p.textSecondary : p.disabled);
             if (row.kind == ControlKind::AppList) {
                 drawIdleApps(painter, row);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ui/font_style.h"
+#include "ui/font_sizes.h"
 
 #include <windows.h>
 
@@ -26,7 +27,7 @@ public:
         LyricAppearance globalTheme;                       // 全局模式正在使用的共享配置
         std::wstring fontFamily;                           // 预览用字体族，空则用 UI 默认字体
         LyricFontStyle fontStyle = LyricFontStyle::Normal; // 预览用字体样式
-        float lyricFontSize = 14.0f; // 预览用歌词字号（与实际任务栏渲染字号一致）
+        float lyricFontSize = fluent::font_sizes::taskbar::colorPreview; // 预览用歌词字号（与实际任务栏渲染字号一致）
     };
 
     // 确定时回传全局开关、两种主题各自的配置，以及全局模式的共享配置。

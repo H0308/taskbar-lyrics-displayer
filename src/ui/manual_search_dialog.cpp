@@ -1,4 +1,5 @@
 #include "ui/manual_search_dialog.h"
+#include "ui/font_sizes.h"
 
 #include "ui/app_icon.h"
 #include "ui/dialog_notify.h"
@@ -443,8 +444,8 @@ struct ManualSearchDialog::Impl {
         const float compactGap = fluent::metrics::compactGap;
         const float controlH = fluent::metrics::controlHeight;
 
-        const float titleH = 30.0f;
-        const float subtitleH = 20.0f;
+        const float titleH = fluent::metrics::titleHeight;
+        const float subtitleH = fluent::metrics::subtitleHeight;
         titleRect = D2D1::RectF(pad, pad, std::max(pad, w - pad), pad + titleH);
         subtitleRect = D2D1::RectF(pad, pad + titleH, std::max(pad, w - pad),
                                     pad + titleH + subtitleH);
@@ -670,7 +671,7 @@ struct ManualSearchDialog::Impl {
         if (text.empty())
             return kLyricRowHeightDip;
 
-        auto* format = painter.textFormat(15.0f, 700, true);
+        auto* format = painter.textFormat(fluent::font_sizes::emphasis, 700, true);
         auto* layout = painter.textLayout(text, format, width, 10000.0f);
         if (!layout)
             return kLyricRowHeightDip;
@@ -852,7 +853,7 @@ struct ManualSearchDialog::Impl {
     void drawCurrentLyric(fluent::FluentDialogSurface::Painter& painter, const LyricLine& line,
                           const D2D1_RECT_F& rect) {
         const auto& p = fluent::palette();
-        auto* format = painter.textFormat(15.0f, 700, true);
+        auto* format = painter.textFormat(fluent::font_sizes::emphasis, 700, true);
         if (!format)
             return;
 
@@ -928,14 +929,14 @@ struct ManualSearchDialog::Impl {
         if (current) {
             drawCurrentLyric(painter, line, mainRect);
         } else {
-            painter.drawText(line.text, painter.textFormat(14.0f, 400, true), mainRect, p.text);
+            painter.drawText(line.text, painter.textFormat(fluent::font_sizes::body, 400, true), mainRect, p.text);
         }
 
         float secondaryTop = mainRect.bottom + kPreviewSecondaryGap;
         auto drawSecondary = [&](const std::wstring& text) {
             if (!text.empty()) {
                 painter.drawTrimmedText(
-                    text, painter.textFormat(12.0f, 400, true, true),
+                    text, painter.textFormat(fluent::font_sizes::caption, 400, true, true),
                     D2D1::RectF(rowRect.left, secondaryTop, rowRect.right,
                                 secondaryTop + kPreviewSecondaryLineHeight),
                     p.textSecondary);
@@ -969,7 +970,7 @@ struct ManualSearchDialog::Impl {
                             rect.bottom - 1.5f),
                 1.5f, std::max(1.0f, fluent::metrics::controlRadius - 1.0f));
         }
-        painter.drawText(label, painter.textFormat(13.0f, 600, true, true), rect, textColor);
+        painter.drawText(label, painter.textFormat(fluent::font_sizes::label, 600, true, true), rect, textColor);
     }
 
     void drawTextField(fluent::FluentDialogSurface::Painter& painter,
@@ -986,7 +987,7 @@ struct ManualSearchDialog::Impl {
                 br);
         }
 
-        auto* format = painter.textFormat(14.0f, 400, false, true);
+        auto* format = painter.textFormat(fluent::font_sizes::body, 400, false, true);
         if (!format)
             return;
         const D2D1_RECT_F textRect =
@@ -1062,7 +1063,7 @@ struct ManualSearchDialog::Impl {
                             rect.bottom - 1.5f),
                 1.5f, fluent::metrics::controlRadius - 1.0f);
         }
-        painter.drawText(text, painter.textFormat(14.0f, 400, true, true),
+        painter.drawText(text, painter.textFormat(fluent::font_sizes::button, 400, true, true),
                          D2D1::RectF(rect.left + 4.0f, rect.top, rect.right - 4.0f, rect.bottom),
                          textColor);
     }
@@ -1118,13 +1119,13 @@ struct ManualSearchDialog::Impl {
                                         y + rowH * 0.5f + 8.0f),
                             1.5f);
                     painter.drawTrimmedText(
-                        item.text, painter.textFormat(13.0f, 400, false, true),
+                        item.text, painter.textFormat(fluent::font_sizes::label, 400, false, true),
                         D2D1::RectF(paintBounds.left + 16.0f, y,
                                     paintBounds.right - 8.0f, y + rowH),
                         p.text);
                 } else {
                     painter.drawText(
-                        item.text, painter.textFormat(12.0f, 600, false, true),
+                        item.text, painter.textFormat(fluent::font_sizes::caption, 600, false, true),
                         D2D1::RectF(paintBounds.left + 16.0f, y,
                                     paintBounds.right - 8.0f, y + rowH),
                         p.textSecondary);
@@ -1163,7 +1164,7 @@ struct ManualSearchDialog::Impl {
         if (previewLines.empty()) {
             previewScrollView.layout({}, 0.0f, surface.dpi());
             painter.drawText(
-                L"选择左侧歌曲预览歌词", painter.textFormat(15.0f, 400, true),
+                L"选择左侧歌曲预览歌词", painter.textFormat(fluent::font_sizes::emphasis, 400, true),
                 D2D1::RectF(previewRect.left + 12.0f, previewRect.top + height * 0.4f,
                             previewRect.right - 12.0f, previewRect.top + height * 0.6f),
                 p.textSecondary);
@@ -1172,7 +1173,7 @@ struct ManualSearchDialog::Impl {
 
         const float contentTop = previewContentTop();
         if (!previewCapabilityLabel.empty())
-            painter.drawText(previewCapabilityLabel, painter.textFormat(11.0f, 400, true),
+            painter.drawText(previewCapabilityLabel, painter.textFormat(fluent::font_sizes::smallText, 400, true),
                              D2D1::RectF(previewRect.left + 12.0f, previewRect.top + 7.0f,
                                          previewRect.right - 12.0f, previewRect.top + 27.0f),
                              p.textSecondary);
@@ -1283,25 +1284,25 @@ struct ManualSearchDialog::Impl {
 
     void paint(fluent::FluentDialogSurface::Painter& painter, float, float) {
         const auto& p = fluent::palette();
-        painter.drawText(L"手动搜索歌词", painter.textFormat(20.0f, 600), titleRect, p.text);
+        painter.drawText(L"手动搜索歌词", painter.textFormat(fluent::font_sizes::title, 600), titleRect, p.text);
         painter.drawText(targetIsSoda ? L"搜索汽水音乐并预览原生歌词" : L"从多个来源选择并预览歌词",
-                         painter.textFormat(13.0f, 400), subtitleRect,
+                         painter.textFormat(fluent::font_sizes::label, 400), subtitleRect,
                          p.textSecondary);
         drawTextField(painter, titleEditRect, titleEdit, kIdTitleEdit);
         drawTextField(painter, artistEditRect, artistEdit, kIdArtistEdit);
         drawButton(painter, searchRect, L"搜索", true, kIdSearchButton);
 
-        painter.drawTrimmedText(statusText, painter.textFormat(13.0f, 400, false, true), statusRect,
+        painter.drawTrimmedText(statusText, painter.textFormat(fluent::font_sizes::label, 400, false, true), statusRect,
                                  p.text);
         painter.drawTrimmedText(
             targetIsSoda ? L"来自汽水音乐的原生歌词，支持逐字和逐行显示。"
                            : L"YRC/LRC 为网易云歌词；QRC 为 QQ 原生逐字歌词；KRC 为酷狗逐字歌词",
-            painter.textFormat(12.0f, 400, false, true), hintRect, p.textSecondary);
+            painter.textFormat(fluent::font_sizes::caption, 400, false, true), hintRect, p.textSecondary);
         painter.drawTrimmedText(
             targetIsSoda ? L"当前为汽水音乐，仅显示汽水音乐歌词候选。"
             : targetIsNetease ? L"当前为网易云音乐，仅显示网易云歌词候选。"
                             : L"当前仅显示酷狗和 QQ 音乐歌词候选。",
-            painter.textFormat(13.0f, 600, false, true), compatibilityRect, p.text);
+            painter.textFormat(fluent::font_sizes::label, 600, false, true), compatibilityRect, p.text);
 
         drawCandidateList(painter);
         drawPreview(painter);
@@ -1989,8 +1990,8 @@ bool ManualSearchDialog::create(HINSTANCE inst, HWND parent, LyricProvider* prov
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     const UINT dpi = GetDpiForSystem();
     const float scale = fluent::dipScale(dpi);
-    RECT rc{0, 0, static_cast<LONG>(std::lround(920.0f * scale)),
-            static_cast<LONG>(std::lround(640.0f * scale))};
+    RECT rc{0, 0, static_cast<LONG>(std::lround(1024.0f * scale)),
+            static_cast<LONG>(std::lround(720.0f * scale))};
     AdjustWindowRectExForDpi(&rc, kDialogStyle, FALSE, kDialogExStyle, dpi);
     const int width = rc.right - rc.left;
     const int height = rc.bottom - rc.top;

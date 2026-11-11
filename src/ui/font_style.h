@@ -1,6 +1,7 @@
 #pragma once
 
 #include "model/display_types.h"
+#include "ui/font_sizes.h"
 #include <windows.h>
 #include <dwrite.h>
 
@@ -12,8 +13,8 @@ struct LyricFontSizeContext {
     float mainScale = 1.0f;
     float extraScale = 0.0f;
     float gapDip = 0.0f;
-    float minSize = 9.0f;
-    float maxSize = 18.0f;
+    float minSize = fluent::font_sizes::taskbar::minimum;
+    float maxSize = fluent::font_sizes::taskbar::maximum;
     bool star = false;
 };
 

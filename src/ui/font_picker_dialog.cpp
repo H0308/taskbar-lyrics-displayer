@@ -1,4 +1,5 @@
 #include "font_picker_dialog.h"
+#include "ui/font_sizes.h"
 
 #include "ui/app_icon.h"
 #include "ui/dialog_notify.h"
@@ -31,7 +32,7 @@ constexpr DWORD kDialogStyle = WS_CAPTION | WS_SYSMENU | WS_THICKFRAME;
 constexpr DWORD kDialogExStyle = WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE;
 constexpr float kMinClientWidthDip = 520.0f;
 constexpr float kMinClientHeightDip = 468.0f;
-// 默认客户区为 600×560；最小尺寸更宽，比例下限取两者中较小的设计比例。
+// 最小尺寸更宽，比例下限保留原设计比例。
 constexpr float kMinClientAspectRatio = 600.0f / 560.0f;
 
 constexpr float kListRowHeight = 32.0f;
@@ -93,7 +94,7 @@ struct FontPickerDialog::Impl {
     bool scrollOnlyPaint = false;
 
     std::wstring initFamily;
-    float initSize = 16.0f;
+    float initSize = fluent::font_sizes::taskbar::pickerInitial;
     LyricFontStyle initStyle = LyricFontStyle::Normal;
     bool interfaceFont = false;
 
@@ -116,8 +117,8 @@ struct FontPickerDialog::Impl {
     D2D1_RECT_F sizeListRect{};
     int recommendedSize = 0;
     int suggestedMaxSize = -1;
-    float supportedMinSize = 9.0f;
-    float supportedMaxSize = 18.0f;
+    float supportedMinSize = fluent::font_sizes::taskbar::minimum;
+    float supportedMaxSize = fluent::font_sizes::taskbar::maximum;
     bool sizeAdviceChanged = false;
     D2D1_RECT_F previewRect{};
     D2D1_RECT_F okRect{};
@@ -605,7 +606,7 @@ struct FontPickerDialog::Impl {
         IDWriteTextFormat* format = nullptr;
         if (FAILED(dw->CreateTextFormat(families[familyIndex].c_str(), nullptr,
                                          DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-                                         DWRITE_FONT_STRETCH_NORMAL, 15.0f, L"zh-cn", &format)) ||
+                                         DWRITE_FONT_STRETCH_NORMAL, fluent::font_sizes::fontPicker::familySample, L"zh-cn", &format)) ||
             !format)
             return nullptr;
         fluent::applyUiFontFallback(format);
@@ -629,7 +630,7 @@ struct FontPickerDialog::Impl {
                 br);
         }
 
-        auto* format = painter.textFormat(13.0f, 400, false, true);
+        auto* format = painter.textFormat(fluent::font_sizes::label, 400, false, true);
         if (!format)
             return;
         const D2D1_RECT_F textRect = D2D1::RectF(rect.left + 12.0f, rect.top,
@@ -667,7 +668,7 @@ struct FontPickerDialog::Impl {
 
     void drawStyleGroup(fluent::FluentDialogSurface::Painter& painter) {
         const auto& p = fluent::palette();
-        auto* format = painter.textFormat(13.0f, 400, false, true);
+        auto* format = painter.textFormat(fluent::font_sizes::label, 400, false, true);
         if (!format)
             return;
 
@@ -814,7 +815,7 @@ struct FontPickerDialog::Impl {
             } else {
                 float numberRight = rect.right - 18.0f;
                 if (sizeLabel) {
-                    auto* labelFormat = painter.textFormat(11.0f, 400, false, true);
+                    auto* labelFormat = painter.textFormat(fluent::font_sizes::smallText, 400, false, true);
                     const float labelWidth = painter.measureTextWidth(sizeLabel, labelFormat);
                     numberRight -= labelWidth + 8.0f;
                     painter.drawText(sizeLabel, labelFormat,
@@ -822,7 +823,7 @@ struct FontPickerDialog::Impl {
                                     rect.right - 18.0f, y + kListRowHeight), ratingText);
                 }
                 painter.drawText(std::to_wstring(kSizePresets[i]),
-                                 painter.textFormat(13.0f, 400, false, true),
+                                 painter.textFormat(fluent::font_sizes::label, 400, false, true),
                                  D2D1::RectF(rect.left + 16.0f, y, numberRight,
                                              y + kListRowHeight),
                                  p.text);
@@ -885,8 +886,8 @@ struct FontPickerDialog::Impl {
     void drawPreview(fluent::FluentDialogSurface::Painter& painter) {
         recommendedSize = 0;
         suggestedMaxSize = -1;
-        supportedMinSize = 9.0f;
-        supportedMaxSize = 18.0f;
+        supportedMinSize = fluent::font_sizes::taskbar::minimum;
+        supportedMaxSize = fluent::font_sizes::taskbar::maximum;
         const auto& p = fluent::palette();
         painter.fillRoundRect(p.cardFill, previewRect, fluent::metrics::cardRadius);
         painter.strokeRoundRect(p.cardStroke, previewRect, 1.0f, fluent::metrics::cardRadius);
@@ -933,7 +934,7 @@ struct FontPickerDialog::Impl {
                             rect.bottom - 1.5f),
                 1.5f, fluent::metrics::controlRadius - 1.0f);
         }
-        painter.drawText(text, painter.textFormat(14.0f, 400, true, true),
+        painter.drawText(text, painter.textFormat(fluent::font_sizes::button, 400, true, true),
                          D2D1::RectF(rect.left + 4.0f, rect.top, rect.right - 4.0f, rect.bottom),
                          textColor);
     }
@@ -941,12 +942,12 @@ struct FontPickerDialog::Impl {
     void paint(fluent::FluentDialogSurface::Painter& painter, float, float) {
         const auto& p = fluent::palette();
         painter.drawText(interfaceFont ? L"界面字体" : L"选择字体",
-                         painter.textFormat(20.0f, 600), titleRect, p.text);
+                         painter.textFormat(fluent::font_sizes::title, 600), titleRect, p.text);
         painter.drawText(interfaceFont ? L"选择字体、粗细和斜体并实时预览"
-                                      : L"搜索字体、字号和样式并实时预览", painter.textFormat(13.0f, 400),
+                                      : L"搜索字体、字号和样式并实时预览", painter.textFormat(fluent::font_sizes::label, 400),
                          subtitleRect, p.textSecondary);
         drawTextField(painter, filterRect, filterEdit, kIdFilterEdit);
-        painter.drawText(L"样式", painter.textFormat(13.0f, 400, false, true), styleLabelRect,
+        painter.drawText(L"样式", painter.textFormat(fluent::font_sizes::label, 400, false, true), styleLabelRect,
                          p.textSecondary);
         drawStyleGroup(painter);
         const int previousRecommended = recommendedSize;
@@ -1417,8 +1418,8 @@ struct FontPickerDialog::Impl {
         const float pad = fluent::metrics::pagePadding;
         const float gap = fluent::metrics::controlGap;
 
-        const float titleH = 30.0f;
-        const float subtitleH = 20.0f;
+        const float titleH = fluent::metrics::titleHeight;
+        const float subtitleH = fluent::metrics::subtitleHeight;
         titleRect = D2D1::RectF(pad, pad, std::max(pad, w - pad), pad + titleH);
         subtitleRect = D2D1::RectF(pad, pad + titleH, std::max(pad, w - pad),
                                     pad + titleH + subtitleH);
@@ -1511,8 +1512,8 @@ bool FontPickerDialog::create(HINSTANCE inst, HWND parent, const std::wstring& f
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     UINT dpi = GetDpiForSystem();
     float s = fluent::dipScale(dpi);
-    RECT rc{0, 0, static_cast<LONG>(std::lround(600.0f * s)),
-            static_cast<LONG>(std::lround(560.0f * s))};
+    RECT rc{0, 0, static_cast<LONG>(std::lround(680.0f * s)),
+            static_cast<LONG>(std::lround(630.0f * s))};
     AdjustWindowRectExForDpi(&rc, kDialogStyle, FALSE, kDialogExStyle, dpi);
     int w = rc.right - rc.left;
     int h = rc.bottom - rc.top;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "graphics/bitmap_renderer.h"
+#include "ui/font_sizes.h"
 #include "ui/fluent_theme.h"
 #include "ui/fluent_dialog_surface.h"
 #include "ui/settings_icons.h"
@@ -93,7 +94,7 @@ public:
     FluentEdit& operator=(const FluentEdit&) = delete;
 
     bool create(HWND parent, int id, const wchar_t* cueBanner, bool directEdit = false,
-                float fontSizeDip = 14.0f, bool wrapText = false);
+                float fontSizeDip = fluent::font_sizes::body, bool wrapText = false);
     std::wstring text() const;
     void setText(const std::wstring& text);
     // 紧凑型数字输入等场景可缩小原生 EDIT 的内边距，避免小控件裁剪文字。
@@ -136,7 +137,7 @@ private:
     bool chromeless_ = false;
     bool chromelessMenuSurface_ = false;
     bool wrapText_ = false;
-    float fontSizeDip_ = 14.0f;
+    float fontSizeDip_ = fluent::font_sizes::body;
     UINT editFontDpi_ = 0;
     float contentPaddingXDip_ = 12.0f;
     float contentPaddingYDip_ = 5.0f;
@@ -211,7 +212,7 @@ private:
 class FluentLabel : public LayeredChild {
 public:
     bool create(HWND parent, int id, const wchar_t* text, bool secondary = false,
-                float dipSize = 13.0f, int weight = 400);
+                float dipSize = fluent::font_sizes::label, int weight = 400);
     void setText(const std::wstring& text);
 
 private:
@@ -220,7 +221,7 @@ private:
 
     std::wstring text_;
     bool secondary_ = false;
-    float dipSize_ = 13.0f;
+    float dipSize_ = fluent::font_sizes::label;
     int weight_ = 400;
 };
 

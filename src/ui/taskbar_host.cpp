@@ -1,4 +1,5 @@
 #include "taskbar_host.h"
+#include "ui/font_sizes.h"
 #include "lyric/lyric_provider.h"
 #include "media/player_source.h"
 #include "ui/taskbar/vinyl_animation.h"
@@ -154,18 +155,13 @@ constexpr float kImmersiveControlRadiusFactor = 0.24f;
 constexpr float kImmersiveControlMinRadius = 8.0f;
 constexpr float kImmersiveControlMaxRadius = 12.0f;
 constexpr float kImmersiveControlPitchFactor = 3.0f;
-constexpr float kLyricMainFontScale = 1.18f;
-constexpr float kLyricPreviewFontScale = 0.86f;
-constexpr float kLyricPreviewScale = kLyricPreviewFontScale / kLyricMainFontScale;
-constexpr float kMinFont = 9.0f;
-constexpr float kMaxFont = 18.0f;
-constexpr float kBaseFontSize = 12.0f;
+constexpr float kLyricPreviewScale =
+    fluent::font_sizes::taskbar::previewScale / fluent::font_sizes::taskbar::mainScale;
 constexpr float kCompactTaskbarHeightDip = 36.0f;
 
 
 constexpr float kImmersiveSpectrumClockGap = 10.0f;
 constexpr float kDockResourceZoneGap = 10.0f;
-constexpr float kResourceFontSize = 13.5f;
 constexpr float kDockResourceRightPadding = 3.0f;
 constexpr float kDockPetSeatW = 42.0f;
 constexpr float kPetLaneMinWidthDip = 44.0f;
@@ -480,7 +476,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     uint64_t frameRevision_ = 0;
 
     // 任务栏默认字体独立于用户选择的界面字体。
-    float fontSize_ = kBaseFontSize;
+    float fontSize_ = fluent::font_sizes::taskbar::base;
     float compactTaskbarHeight_ = 0.0f;
     std::wstring fontFamily_ = kDefaultUiFontFamily;
     LyricFontStyle fontStyle_ = LyricFontStyle::Normal;
@@ -3484,9 +3480,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         typesetter_.setFactory(renderer.dwrite());
         typesetter_.recreateClockFormats(
             fontFamily_, fontStyle_,
-            fitCompactFontSize(13.5f, (compactTaskbarHeight_ - 2.0f) * 0.56f,
+            fitCompactFontSize(fluent::font_sizes::taskbar::clock,
+                               (compactTaskbarHeight_ - 2.0f) * 0.56f,
                                DWRITE_FONT_WEIGHT_SEMI_BOLD),
-            fitCompactFontSize(11.0f, (compactTaskbarHeight_ - 2.0f) * 0.44f));
+            fitCompactFontSize(fluent::font_sizes::taskbar::date,
+                               (compactTaskbarHeight_ - 2.0f) * 0.44f));
     }
 
     bool ensureResourceFormat() {
@@ -3495,7 +3493,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         typesetter_.setFactory(renderer.dwrite());
         return typesetter_.ensureResourceFormat(
             fontFamily_, fontStyle_,
-            fitCompactFontSize(kResourceFontSize, compactTaskbarHeight_ - 2.0f));
+            fitCompactFontSize(fluent::font_sizes::taskbar::resource, compactTaskbarHeight_ - 2.0f));
     }
 
     bool updateResourceColumnWidths() {
@@ -3571,14 +3569,15 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         recreateClockFormats();
         const float lyricPad = lyricGlow_ ? 6.0f : lyricOutline_ ? 4.0f : 2.0f;
         LyricFontSizes sizes;
-        sizes.title = fitCompactFontSize(kBaseFontSize * 1.05f,
+        sizes.title = fitCompactFontSize(fluent::font_sizes::taskbar::base * 1.05f,
                                          (compactTaskbarHeight_ - 6.0f) * 1.05f / 1.97f,
                                          DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        sizes.artist = fitCompactFontSize(kBaseFontSize * 0.92f,
+        sizes.artist = fitCompactFontSize(fluent::font_sizes::taskbar::base * 0.92f,
                                           (compactTaskbarHeight_ - 6.0f) * 0.92f / 1.97f);
         sizes.lyric =
-            fitCompactFontSize(fontSize_ * kLyricMainFontScale, compactTaskbarHeight_ - lyricPad);
-        sizes.next = fontSize_ * kLyricPreviewFontScale;
+            fitCompactFontSize(fontSize_ * fluent::font_sizes::taskbar::mainScale,
+                               compactTaskbarHeight_ - lyricPad);
+        sizes.next = fontSize_ * fluent::font_sizes::taskbar::previewScale;
         sizes.secondary = fontSize_ * 0.78f;
         typesetter_.setFactory(dwrite);
         typesetter_.recreateLyricFormats(fontFamily_, fontStyle_, sizes);
@@ -3590,8 +3589,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
     LyricFontSizeContext fontSizeContext() const {
         LyricFontSizeContext context;
-        context.minSize = kMinFont;
-        context.maxSize = kMaxFont;
+        context.minSize = fluent::font_sizes::taskbar::minimum;
+        context.maxSize = fluent::font_sizes::taskbar::maximum;
         RECT client{};
         if (!hwnd || !GetClientRect(hwnd, &client))
             return context;
@@ -3601,12 +3600,12 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             scale();
         const float effectPad = lyricGlow_ ? 4.8f : lyricOutline_ ? 2.4f : 0.0f;
         context.availableDip = std::max(0.0f, crossAxis - 4.0f - effectPad);
-        context.mainScale = kLyricMainFontScale;
+        context.mainScale = fluent::font_sizes::taskbar::mainScale;
         if (compactTaskbarHeight_ > 0.0f && typesetter_.resources().fmtLyric_.Get() &&
             fontSize_ > 0.0f)
             context.mainScale = typesetter_.resources().fmtLyric_->GetFontSize() / fontSize_;
         if (!vertical && compactTaskbarHeight_ <= 0.0f && doubleLineLyricsEnabled_) {
-            context.extraScale = kLyricPreviewFontScale;
+            context.extraScale = fluent::font_sizes::taskbar::previewScale;
             context.gapDip = kLyricPreviewGap;
         } else if (!vertical && compactTaskbarHeight_ <= 0.0f &&
                    (translationEnabled_ || romanizationEnabled_)) {
@@ -3619,7 +3618,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
     void setFont(const std::wstring& family, float size, LyricFontStyle style) {
         fontFamily_ = family;
-        fontSize_ = std::clamp(size, kMinFont, kMaxFont);
+        fontSize_ = std::clamp(size, fluent::font_sizes::taskbar::minimum,
+                             fluent::font_sizes::taskbar::maximum);
         fontStyle_ = style;
         recreateFormats();
         requestInvalidation(RenderInvalidation::Layout);

@@ -1,4 +1,5 @@
 #include "ui/settings/search_palette.h"
+#include "ui/font_sizes.h"
 #include "ui/settings/section_labels.h"
 #include "ui/app_icon.h"
 #include "ui/settings_icons.h"
@@ -402,7 +403,7 @@ void SettingsSearchPalette::layoutSearchPalette() {
 
     const float maxAllowedWidthDip = std::max(320.0f, ownerWidthDip - 48.0f);
     const float paletteWidthDip =
-        std::min(maxAllowedWidthDip, std::clamp(ownerWidthDip * 0.58f, 480.0f, 560.0f));
+        std::min(maxAllowedWidthDip, std::clamp(ownerWidthDip * 0.58f, 520.0f, 620.0f));
     const float maxAllowedHeightDip = std::max(132.0f, ownerHeightDip - 88.0f);
     const float paletteHeightDip = std::min(searchPaletteDesiredHeightDip(), maxAllowedHeightDip);
 
@@ -697,7 +698,7 @@ void SettingsSearchPalette::paintSearchPalette(fluent::FluentDialogSurface::Pain
                               : (escHovered ? paletteColors.controlHover : paletteColors.listHover),
                           searchPaletteEscRect, 4.0f);
     painter.strokeRoundRect(paletteColors.cardStroke, searchPaletteEscRect, 1.0f, 4.0f);
-    painter.drawText(L"Esc", painter.textFormat(11.0f, 500, true, true), searchPaletteEscRect,
+    painter.drawText(L"Esc", painter.textFormat(fluent::font_sizes::smallText, 500, true, true), searchPaletteEscRect,
                      escHovered ? paletteColors.text : paletteColors.textSecondary);
 
     if (auto* separatorBrush = painter.brush(paletteColors.separator)) {
@@ -708,7 +709,7 @@ void SettingsSearchPalette::paintSearchPalette(fluent::FluentDialogSurface::Pain
 
     if (!searching()) {
         painter.drawText(L"输入关键词搜索设置名称、选项或说明，支持空格分词筛选",
-                         painter.textFormat(13.0f, 400, false, true),
+                         painter.textFormat(fluent::font_sizes::label, 400, false, true),
                          D2D1::RectF(20.0f, kSearchPaletteHeaderH, widthDip - 20.0f, heightDip),
                          paletteColors.textSecondary);
         return;
@@ -716,7 +717,7 @@ void SettingsSearchPalette::paintSearchPalette(fluent::FluentDialogSurface::Pain
 
     if (searchModel_.results().empty()) {
         painter.drawText(L"未找到匹配的设置，请尝试其他关键词",
-                         painter.textFormat(13.5f, 400, false, true),
+                         painter.textFormat(fluent::font_sizes::search::result, 400, false, true),
                          D2D1::RectF(20.0f, kSearchPaletteHeaderH, widthDip - 20.0f, heightDip),
                          paletteColors.textSecondary);
         return;
@@ -770,16 +771,16 @@ void SettingsSearchPalette::paintSearchPalette(fluent::FluentDialogSurface::Pain
 
         const float textRight = selected ? itemRect.right - 56.0f : itemRect.right - 14.0f;
         painter.drawTrimmedText(row->text,
-                                painter.textFormat(13.5f, selected ? 600 : 500, false, true),
+                                painter.textFormat(fluent::font_sizes::search::result, selected ? 600 : 500, false, true),
                                 D2D1::RectF(itemRect.left + 54.0f, itemRect.top + 6.0f, textRight,
                                             itemRect.top + 28.0f),
                                 paletteColors.text);
-        painter.drawTrimmedText(result.path, painter.textFormat(12.0f, 400, false, true),
+        painter.drawTrimmedText(result.path, painter.textFormat(fluent::font_sizes::caption, 400, false, true),
                                 D2D1::RectF(itemRect.left + 54.0f, itemRect.top + 27.0f, textRight,
                                             itemRect.bottom - 5.0f),
                                 paletteColors.textSecondary);
         if (selected) {
-            painter.drawText(L"跳转 ↵", painter.textFormat(11.5f, 500, true, true),
+            painter.drawText(L"跳转 ↵", painter.textFormat(fluent::font_sizes::search::footer, 500, true, true),
                              D2D1::RectF(itemRect.right - 54.0f, itemRect.top,
                                          itemRect.right - 10.0f, itemRect.bottom),
                              paletteColors.accent);
@@ -808,7 +809,7 @@ void SettingsSearchPalette::paintSearchPalette(fluent::FluentDialogSurface::Pain
         painter.target()->DrawLine(D2D1::Point2F(0.0f, footerTop + 0.5f),
                                    D2D1::Point2F(widthDip, footerTop + 0.5f), separatorBrush, 1.0f);
     }
-    auto* footerFormat = painter.textFormat(11.5f, 400, false, true);
+    auto* footerFormat = painter.textFormat(fluent::font_sizes::search::footer, 400, false, true);
     painter.drawText(L"↑↓ 选择    Enter 跳转    Esc 关闭", footerFormat,
                      D2D1::RectF(16.0f, footerTop, widthDip - 100.0f, heightDip),
                      paletteColors.textSecondary);
@@ -1016,7 +1017,7 @@ bool SettingsSearchPalette::ensureSearchPaletteWindow() {
     styleSearchPaletteWindow();
     searchPaletteSurface.initialize(searchPaletteHwnd, false, true);
     if (!settingsSearch.create(searchPaletteHwnd, kIdSettingsSearch, L"搜索设置项、选项或说明…",
-                               false, 14.5f)) {
+                               false, fluent::font_sizes::search::input)) {
         DestroyWindow(searchPaletteHwnd);
         searchPaletteHwnd = nullptr;
         return false;

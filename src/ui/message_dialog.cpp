@@ -1,4 +1,5 @@
 #include "message_dialog.h"
+#include "ui/font_sizes.h"
 
 #include "ui/app_icon.h"
 #include "ui/fluent_controls.h"
@@ -18,17 +19,16 @@ constexpr DWORD kWindowStyle = WS_CAPTION | WS_SYSMENU;
 constexpr DWORD kWindowExStyle = WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE;
 constexpr int kPrimaryButtonId = IDOK;
 constexpr int kSecondaryButtonId = IDCANCEL;
-constexpr float kClientWidthDip = 380.0f;
+constexpr float kClientWidthDip = 440.0f;
 constexpr float kPagePaddingDip = 24.0f;
-constexpr float kMessageTopDip = 22.0f;
-constexpr float kMessageButtonGapDip = 18.0f;
+constexpr float kMessageTopDip = 28.0f;
+constexpr float kMessageButtonGapDip = 24.0f;
 constexpr float kButtonHeightDip = fluent::metrics::controlHeight;
 constexpr float kButtonGapDip = fluent::metrics::compactGap;
-constexpr float kPrimaryButtonWidthDip = 88.0f;
-constexpr float kSecondaryButtonWidthDip = 104.0f;
-constexpr float kMessageFontSizeDip = 14.0f;
-constexpr float kMinimumMessageHeightDip = 22.0f;
-constexpr float kBottomPaddingDip = 20.0f;
+constexpr float kPrimaryButtonWidthDip = 96.0f;
+constexpr float kSecondaryButtonWidthDip = 112.0f;
+constexpr float kMinimumMessageHeightDip = 32.0f;
+constexpr float kBottomPaddingDip = 24.0f;
 
 float measureMessageHeightDip(const std::wstring& message, float widthDip) {
     IDWriteFactory* factory = nullptr;
@@ -40,7 +40,7 @@ float measureMessageHeightDip(const std::wstring& message, float widthDip) {
 
     IDWriteTextFormat* format = nullptr;
     const HRESULT formatResult = fluent::createUiTextFormat(
-        factory, kMessageFontSizeDip, DWRITE_FONT_WEIGHT_NORMAL, &format);
+        factory, fluent::font_sizes::body, DWRITE_FONT_WEIGHT_NORMAL, &format);
     if (FAILED(formatResult) || !format) {
         factory->Release();
         return kMinimumMessageHeightDip;
@@ -279,7 +279,7 @@ struct Impl {
             HDC hdc = BeginPaint(hwnd, &ps);
             surface.paint(hdc, backdrop,
                           [this](fluent::FluentDialogSurface::Painter& painter, float, float) {
-                              auto* format = painter.textFormat(kMessageFontSizeDip, 400, false);
+                              auto* format = painter.textFormat(fluent::font_sizes::body, 400, false);
                               painter.drawText(message, format, messageRect,
                                                fluent::palette().text);
                           });

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "model/display_types.h"
+#include "ui/font_sizes.h"
 #include <windows.h>
 #include <d2d1.h>
 #include <dwrite.h>
@@ -24,6 +25,8 @@ enum class ThemeTarget {
 // 普通桌面窗口统一使用的紧凑密度尺寸（单位：DIP）。
 // 这些尺寸对应文档中的 4/8/12/16/24 间距等级，避免各窗口各自漂移。
 namespace metrics {
+inline constexpr float titleHeight = font_sizes::title + 9.0f;
+inline constexpr float subtitleHeight = font_sizes::label + 6.0f;
 inline constexpr float pagePadding = 24.0f;
 inline constexpr float sectionGap = 16.0f;
 inline constexpr float controlGap = 12.0f;
@@ -105,7 +108,7 @@ HRESULT createUiTextFormat(IDWriteFactory* factory, float dipSize, int weight,
 // 为缺失字形设置 UI 专用字体回退链；调用方继续负责释放文本格式。
 void applyUiFontFallback(IDWriteTextFormat* format);
 // GDI 真控件（EDIT）用字体；调用方负责 DeleteObject
-HFONT createUiFont(UINT dpi, float dipSize = 14.0f, int weight = FW_NORMAL);
+HFONT createUiFont(UINT dpi, float dipSize = fluent::font_sizes::body, int weight = FW_NORMAL);
 
 inline float dipScale(UINT dpi) { return static_cast<float>(dpi) / 96.0f; }
 

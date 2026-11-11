@@ -1,4 +1,5 @@
 #include "runtime_log_dialog.h"
+#include "ui/font_sizes.h"
 
 #include "ui/app_icon.h"
 #include "ui/dialog_notify.h"
@@ -27,8 +28,8 @@ constexpr UINT kMsgDirectoryPicked = WM_APP + 240;
 constexpr UINT_PTR kRefreshTimer = 1;
 constexpr UINT64 kInitialPickerGeneration = 1;
 
-constexpr float kWindowW = 680.0f;
-constexpr float kWindowH = 560.0f;
+constexpr float kWindowW = 780.0f;
+constexpr float kWindowH = 640.0f;
 constexpr float kMinClientWidthDip = 620.0f;
 constexpr float kMinClientHeightDip = 520.0f;
 constexpr float kMinClientAspectRatio = kMinClientWidthDip / kMinClientHeightDip;
@@ -275,7 +276,7 @@ struct RuntimeLogDialog::Impl {
         painter.fillRoundRect(fill, rect, fluent::metrics::controlRadius);
         if (!accent)
             painter.strokeRoundRect(p.controlStroke, rect, 1.0f, fluent::metrics::controlRadius);
-        painter.drawText(text, painter.textFormat(13.0f, 600, true, true), rect,
+        painter.drawText(text, painter.textFormat(fluent::font_sizes::label, 600, true, true), rect,
                          accent ? p.textOnAccent : p.text);
         if (focusVisible && focusedId == id)
             painter.strokeRoundRect(p.accent,
@@ -290,13 +291,14 @@ struct RuntimeLogDialog::Impl {
         const auto& p = painter.colors();
         painter.fillRoundRect(p.cardFill, rect, kCardRadius);
         painter.strokeRoundRect(p.cardStroke, rect, 1.0f, kCardRadius);
-        painter.drawText(label, painter.textFormat(12.0f, 500, false, true),
+        painter.drawText(label, painter.textFormat(fluent::font_sizes::caption, 500, false, true),
                          D2D1::RectF(rect.left + 14.0f, rect.top + 10.0f, rect.right - 14.0f,
                                      rect.top + 28.0f),
                          p.textSecondary);
         const float valueTop = primary ? rect.top + 30.0f : rect.top + 32.0f;
-        painter.drawTrimmedText(value, painter.textFormat(primary ? 16.0f : 15.0f,
-                                                          primary ? 600 : 500, false, true),
+        const float valueSize = primary ? fluent::font_sizes::log::primaryValue
+                                        : fluent::font_sizes::log::value;
+        painter.drawTrimmedText(value, painter.textFormat(valueSize, primary ? 600 : 500, false, true),
                                 D2D1::RectF(rect.left + 14.0f, valueTop, rect.right - 14.0f,
                                             rect.bottom - 10.0f),
                                 p.text);
@@ -350,7 +352,7 @@ struct RuntimeLogDialog::Impl {
         const auto& p = painter.colors();
         painter.fillRoundRect(p.cardFill, rect, kCardRadius);
         painter.strokeRoundRect(p.cardStroke, rect, 1.0f, kCardRadius);
-        painter.drawText(L"封面加载", painter.textFormat(12.0f, 500, false, true),
+        painter.drawText(L"封面加载", painter.textFormat(fluent::font_sizes::caption, 500, false, true),
                          D2D1::RectF(rect.left + 14.0f, rect.top + 10.0f,
                                      coverToggleRect.left - 8.0f,
                                      rect.top + 28.0f),
@@ -361,7 +363,7 @@ struct RuntimeLogDialog::Impl {
             const bool hasSource = coverLoaded && !coverSource.empty();
             painter.drawText(!playbackActive ? L"未加载"
                                              : coverLoaded ? L"加载成功" : L"加载失败",
-                             painter.textFormat(15.0f, 500, true, true),
+                             painter.textFormat(fluent::font_sizes::emphasis, 500, true, true),
                              D2D1::RectF(rect.left + 14.0f, rect.top + 32.0f,
                                          rect.right - 14.0f,
                                          hasSource ? rect.top + 52.0f
@@ -369,7 +371,7 @@ struct RuntimeLogDialog::Impl {
                              p.text);
             if (hasSource)
                 painter.drawTrimmedText(
-                    coverSource, painter.textFormat(12.0f, 400, false, true),
+                    coverSource, painter.textFormat(fluent::font_sizes::caption, 400, false, true),
                     D2D1::RectF(rect.left + 14.0f, rect.top + 52.0f,
                                 rect.right - 14.0f, rect.bottom - 6.0f),
                     p.textSecondary);
@@ -395,7 +397,7 @@ struct RuntimeLogDialog::Impl {
             bitmap->Release();
             if (!coverSource.empty())
                 painter.drawTrimmedText(
-                    coverSource, painter.textFormat(12.0f, 400, false, true),
+                    coverSource, painter.textFormat(fluent::font_sizes::caption, 400, false, true),
                     D2D1::RectF(imageLeft + imageSize + 10.0f, rect.top + 32.0f,
                                 rect.right - 14.0f, rect.bottom - 8.0f),
                     p.textSecondary);
@@ -404,14 +406,14 @@ struct RuntimeLogDialog::Impl {
 
         const bool hasSource = coverLoaded && !coverSource.empty();
         painter.drawText(playbackActive ? L"加载失败" : L"未加载",
-                         painter.textFormat(15.0f, 500, true, true),
+                         painter.textFormat(fluent::font_sizes::emphasis, 500, true, true),
                          D2D1::RectF(rect.left + 14.0f, rect.top + 32.0f, rect.right - 14.0f,
                                      hasSource ? rect.top + 52.0f
                                                : rect.bottom - 10.0f),
                          p.text);
         if (hasSource)
             painter.drawTrimmedText(
-                coverSource, painter.textFormat(12.0f, 400, false, true),
+                coverSource, painter.textFormat(fluent::font_sizes::caption, 400, false, true),
                 D2D1::RectF(rect.left + 14.0f, rect.top + 52.0f,
                             rect.right - 14.0f, rect.bottom - 6.0f),
                 p.textSecondary);
@@ -428,11 +430,11 @@ struct RuntimeLogDialog::Impl {
         const float contentRight = content.offsetX + width - kPagePadding;
         const float contentWidth = std::max(1.0f, width - kPagePadding * 2.0f);
         const float titleY = 20.0f;
-        painter.drawText(L"运行日志", painter.textFormat(22.0f, 600, false, true),
+        painter.drawText(L"运行日志", painter.textFormat(fluent::font_sizes::largeTitle, 600, false, true),
                          D2D1::RectF(contentLeft, titleY, contentRight, titleY + 30.0f),
                          p.text);
         painter.drawText(L"当前会话状态与资源占用；详细事件写入下方日志文件",
-                         painter.textFormat(12.0f, 400, false, true),
+                         painter.textFormat(fluent::font_sizes::caption, 400, false, true),
                          D2D1::RectF(contentLeft, titleY + 32.0f, contentRight,
                                      titleY + 54.0f),
                          p.textSecondary);
@@ -471,16 +473,16 @@ struct RuntimeLogDialog::Impl {
                                                      contentRight, height - kPagePadding);
         painter.fillRoundRect(p.cardFill, settingsRect, kCardRadius);
         painter.strokeRoundRect(p.cardStroke, settingsRect, 1.0f, kCardRadius);
-        painter.drawText(L"日志文件", painter.textFormat(14.0f, 600, false, true),
+        painter.drawText(L"日志文件", painter.textFormat(fluent::font_sizes::body, 600, false, true),
                          D2D1::RectF(settingsRect.left + 14.0f, settingsRect.top + 12.0f,
                                      settingsRect.right - 14.0f, settingsRect.top + 34.0f),
                          p.text);
-        painter.drawText(L"保存位置", painter.textFormat(12.0f, 500, false, true),
+        painter.drawText(L"保存位置", painter.textFormat(fluent::font_sizes::caption, 500, false, true),
                          D2D1::RectF(settingsRect.left + 14.0f, settingsRect.top + 42.0f,
                                      settingsRect.left + 82.0f, settingsRect.top + 64.0f),
                          p.textSecondary);
         painter.drawTrimmedText(snapshot.logDirectory.empty() ? L"未配置" : snapshot.logDirectory,
-                                painter.textFormat(12.0f, 400, false, true),
+                                painter.textFormat(fluent::font_sizes::caption, 400, false, true),
                                 D2D1::RectF(settingsRect.left + 86.0f, settingsRect.top + 42.0f,
                                             settingsRect.right - 14.0f, settingsRect.top + 64.0f),
                                 p.text);
@@ -489,7 +491,7 @@ struct RuntimeLogDialog::Impl {
             sessionFileText += L"未创建";
         else
             sessionFileText += snapshot.sessionFileName;
-        painter.drawTrimmedText(sessionFileText, painter.textFormat(12.0f, 400, false, true),
+        painter.drawTrimmedText(sessionFileText, painter.textFormat(fluent::font_sizes::caption, 400, false, true),
                                 D2D1::RectF(settingsRect.left + 14.0f, settingsRect.top + 68.0f,
                                             settingsRect.right - 14.0f, settingsRect.top + 90.0f),
                                 p.textSecondary);

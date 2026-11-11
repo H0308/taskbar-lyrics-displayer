@@ -1,4 +1,5 @@
 #include "ui/settings/artwork.h"
+#include "ui/font_sizes.h"
 #include "ui/fluent_theme.h"
 #include "ui/media_control_icons.h"
 #include <algorithm>
@@ -302,7 +303,7 @@ void SettingsArtwork::drawLyricEffectArtwork(fluent::FluentDialogSurface::Painte
     const float textShift = effect == LyricEffect::Stardust ? 7.0f : 0.0f;
     const auto textRect = D2D1::RectF(panel.left + 8, panel.top + 6 + textShift, panel.right - 8,
                                       panel.bottom - 6 + textShift);
-    auto* format = painter.textFormat(14.0f, 500, true, true);
+    auto* format = painter.textFormat(fluent::font_sizes::settings::artwork, 500, true, true);
     if (!format) {
         rt->PopAxisAlignedClip();
         return;
@@ -897,7 +898,7 @@ void SettingsArtwork::drawIdleQuoteBackgroundArtwork(fluent::FluentDialogSurface
         break;
     }
     case 3: { // 二进制
-        auto* format = painter.textFormat(11.0f, 600, true, true);
+        auto* format = painter.textFormat(fluent::font_sizes::settings::artworkDigits, 600, true, true);
         if (format) {
             constexpr wchar_t digits[] = L"101100101011010010110101";
             constexpr int kColumns = 8;

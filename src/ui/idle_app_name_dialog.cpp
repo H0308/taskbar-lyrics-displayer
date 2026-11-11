@@ -1,4 +1,5 @@
 #include "idle_app_name_dialog.h"
+#include "ui/font_sizes.h"
 
 #include "ui/app_icon.h"
 #include "ui/fluent_controls.h"
@@ -19,11 +20,11 @@ constexpr int kIdCancel = 505;
 // 父窗口重绘背景时必须排除输入框等子窗口，避免盖掉其圆角表面与边框。
 constexpr DWORD kDialogStyle = WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_CLIPCHILDREN;
 constexpr DWORD kDialogExStyle = WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE;
-constexpr float kClientW = 520.0f;
-constexpr float kBaseClientH = 212.0f;
-constexpr float kShortEditH = 44.0f;
-constexpr float kLongEditH = 112.0f;
-constexpr float kSubtitleLineHeightDip = 20.0f;
+constexpr float kClientW = 600.0f;
+constexpr float kBaseClientH = 216.0f + fluent::metrics::titleHeight;
+constexpr float kShortEditH = 48.0f;
+constexpr float kLongEditH = 136.0f;
+constexpr float kSubtitleLineHeightDip = fluent::metrics::subtitleHeight;
 
 float measureSubtitleHeightDip(const std::wstring& text, float widthDip) {
     if (text.empty())
@@ -37,7 +38,7 @@ float measureSubtitleHeightDip(const std::wstring& text, float widthDip) {
 
     IDWriteTextFormat* format = nullptr;
     const HRESULT formatResult = fluent::createUiTextFormat(
-        factory, 13.0f, DWRITE_FONT_WEIGHT_NORMAL, &format);
+        factory, fluent::font_sizes::label, DWRITE_FONT_WEIGHT_NORMAL, &format);
     if (FAILED(formatResult) || !format) {
         factory->Release();
         return kSubtitleLineHeightDip;
@@ -116,10 +117,10 @@ struct IdleAppNameDialog::Impl {
     }
 
     void createControls() {
-        titleLabel.create(hwnd, kIdTitle, title.c_str(), false, 20.0f, 600);
-        subtitleLabel.create(hwnd, kIdSubtitle, subtitle.c_str(), true, 13.0f, 400);
+        titleLabel.create(hwnd, kIdTitle, title.c_str(), false, fluent::font_sizes::title, 600);
+        subtitleLabel.create(hwnd, kIdSubtitle, subtitle.c_str(), true, fluent::font_sizes::label, 400);
         const bool wrapText = editHeightDip() > kShortEditH;
-        nameEdit.create(hwnd, kIdNameEdit, placeholder.c_str(), false, 14.0f, wrapText);
+        nameEdit.create(hwnd, kIdNameEdit, placeholder.c_str(), false, fluent::font_sizes::body, wrapText);
         nameEdit.setContentPadding(14.0f, wrapText ? 12.0f : 5.0f);
         if (maxLength > 0)
             SendMessageW(nameEdit.editHwnd(), EM_SETLIMITTEXT,
@@ -143,7 +144,7 @@ struct IdleAppNameDialog::Impl {
         const int h = rc.bottom - rc.top;
         const int pad = px(fluent::metrics::pagePadding);
         const int gap = px(fluent::metrics::controlGap);
-        const int titleH = px(28.0f);
+        const int titleH = px(fluent::metrics::titleHeight);
         const int subtitleH = px(measureSubtitleHeightDip(
             subtitle, static_cast<float>(w - pad * 2) / s));
         const int buttonH = px(fluent::metrics::controlHeight);

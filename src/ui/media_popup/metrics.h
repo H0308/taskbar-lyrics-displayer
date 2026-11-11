@@ -1,8 +1,8 @@
 #pragma once
 #include <cstddef>
 namespace media_popup_detail {
-inline constexpr float kPopupWidthDip = 384.0f;
-inline constexpr float kPopupHeightDip = 208.0f;
+inline constexpr float kPopupWidthDip = 416.0f;
+inline constexpr float kPopupHeightDip = 224.0f;
 // 每日一言 + 快速启动组合面板与播放中的媒体控件卡片保持同一外层高度。
 inline constexpr float kIdlePopupHeightDip = kPopupHeightDip;
 inline constexpr float kPopupGapDip = 8.0f;
@@ -14,7 +14,7 @@ inline constexpr float kPopupTextEdgeFadeDip = 8.0f;
 inline constexpr float kPopupTextPaddingDip = 8.0f;
 inline constexpr float kPopupInfoScrollSpeed = 10.0f;
 inline constexpr std::size_t kIdleQuickColumnCount = 5;
-inline constexpr float kIdleQuickCellSizeDip = 62.0f;
+inline constexpr float kIdleQuickCellSizeDip = 66.0f;
 inline constexpr float kIdleQuickCellGapDip = 6.0f;
 inline constexpr float kIdleQuickRowPitchDip = kIdleQuickCellSizeDip + kIdleQuickCellGapDip;
 inline constexpr float kIdleQuickGridWidthDip =
@@ -39,9 +39,9 @@ inline constexpr float kIdleQuickExpandButtonRightPaddingDip = 16.0f;
 inline constexpr float kIdleQuickPageArrowReserveDip = 44.0f;
 inline constexpr float kIdleQuickTabWidthDip = 104.0f;
 inline constexpr float kIdleQuickTabGapDip = 2.0f;
-inline constexpr float kIdleQuickTabHeightDip = 26.0f;
+inline constexpr float kIdleQuickTabHeightDip = 30.0f;
 inline constexpr float kIdleQuickTabContentGapDip = 8.0f;
-inline constexpr float kIdleTaskRowHeightDip = 28.0f;
+inline constexpr float kIdleTaskRowHeightDip = 32.0f;
 inline constexpr float kIdleTaskRowGapDip = 6.0f;
 inline constexpr float kIdleScrollBarWidthDip = 3.0f;
 inline constexpr float kIdleScrollBarHitWidthDip = 12.0f;
@@ -52,7 +52,7 @@ inline constexpr float kIdleHeaderBottomDip = 36.0f;
 inline constexpr float kIdleQuoteTopDip = 40.0f;
 inline constexpr float kIdleQuoteSourceGapDip = 8.0f;
 inline constexpr float kIdleQuickHeaderGapDip = 30.0f;
-inline constexpr float kIdleQuickHeaderHeightDip = 16.0f;
+inline constexpr float kIdleQuickHeaderHeightDip = 20.0f;
 inline constexpr float kMediaSourceRowTopDip = 12.0f;
 inline constexpr float kMediaSourceRowBottomDip = 34.0f;
 inline constexpr float kMediaSourceTextLeftDip = 44.0f;

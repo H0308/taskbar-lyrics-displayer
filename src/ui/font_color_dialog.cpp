@@ -1,4 +1,5 @@
 #include "font_color_dialog.h"
+#include "ui/font_sizes.h"
 
 #include "ui/app_icon.h"
 #include "ui/color_picker_dialog.h"
@@ -260,7 +261,7 @@ struct FontColorDialog::Impl {
                                                 rect.right - 1.5f, rect.bottom - 1.5f),
                                     1.5f, std::max(1.0f, fluent::metrics::controlRadius - 1.0f));
         }
-        painter.drawText(text, painter.textFormat(13.0f, selected ? 600 : 400, true, true), rect,
+        painter.drawText(text, painter.textFormat(fluent::font_sizes::label, selected ? 600 : 400, true, true), rect,
                          p.text);
     }
 
@@ -285,7 +286,7 @@ struct FontColorDialog::Impl {
                                                 rect.right - 1.5f, rect.bottom - 1.5f),
                                     1.5f, fluent::metrics::controlRadius - 1.0f);
         }
-        painter.drawText(text, painter.textFormat(14.0f, 400, true, true),
+        painter.drawText(text, painter.textFormat(fluent::font_sizes::button, 400, true, true),
                          D2D1::RectF(rect.left + 4.0f, rect.top, rect.right - 4.0f, rect.bottom),
                          textColor);
     }
@@ -480,11 +481,11 @@ struct FontColorDialog::Impl {
     void paint(fluent::FluentDialogSurface::Painter& painter, float, float) {
         const auto& p = fluent::palette();
         const LyricAppearance& theme = activeThemeState();
-        painter.drawText(L"歌词字体颜色与效果", painter.textFormat(20.0f, 600), titleRect, p.text);
-        painter.drawText(L"调整歌词颜色、不透明度、光晕和描边", painter.textFormat(13.0f, 400),
+        painter.drawText(L"歌词字体颜色与效果", painter.textFormat(fluent::font_sizes::title, 600), titleRect, p.text);
+        painter.drawText(L"调整歌词颜色、不透明度、光晕和描边", painter.textFormat(fluent::font_sizes::label, 400),
                          subtitleRect, p.textSecondary);
 
-        painter.drawText(L"全局设置", painter.textFormat(13.0f, 400), globalLabelRect, p.text);
+        painter.drawText(L"全局设置", painter.textFormat(fluent::font_sizes::label, 400), globalLabelRect, p.text);
         drawToggle(painter, globalToggleRect, state.global, kIdToggleGlobal);
         if (!state.global) {
             drawTab(painter, tabDarkRect, L"深色模式", kIdTabDark, activeTab == 0);
@@ -498,7 +499,7 @@ struct FontColorDialog::Impl {
             L"未播放字体颜色", L"已播放字体颜色", L"未播放不透明度", L"光晕颜色", L"描边颜色",
         };
         for (size_t i = 0; i < labels.size(); ++i)
-            painter.drawText(labels[i], painter.textFormat(13.0f, 400), labelRects[i], p.text);
+            painter.drawText(labels[i], painter.textFormat(fluent::font_sizes::label, 400), labelRects[i], p.text);
 
         drawSwatch(painter, swatchRects[0], theme.unplayed, kIdSwatchUnplayed);
         drawSwatch(painter, swatchRects[1], theme.played, kIdSwatchPlayed);
@@ -511,7 +512,7 @@ struct FontColorDialog::Impl {
         wchar_t alphaText[8];
         swprintf_s(alphaText, L"%d%%", std::clamp(theme.unplayedAlphaPct, kAlphaMin, kAlphaMax));
         if (!alphaEditOpen)
-            painter.drawText(alphaText, painter.textFormat(13.0f, 400, true, true), alphaValueRect,
+            painter.drawText(alphaText, painter.textFormat(fluent::font_sizes::label, 400, true, true), alphaValueRect,
                              p.textSecondary);
 
         drawPreview(painter);
@@ -627,7 +628,7 @@ struct FontColorDialog::Impl {
     }
 
     void createAlphaEditor() {
-        if (!alphaValueEdit.create(hwnd, kIdAlphaValueEdit, nullptr, false, 12.0f))
+        if (!alphaValueEdit.create(hwnd, kIdAlphaValueEdit, nullptr, false, fluent::font_sizes::caption))
             return;
         alphaValueEdit.setContentPadding(4.0f, 0.0f);
         if (HWND edit = alphaValueEdit.editHwnd()) {
@@ -955,8 +956,8 @@ struct FontColorDialog::Impl {
         const float h = std::max(0.0f, static_cast<float>(rc.bottom - rc.top) / s);
         const float pad = fluent::metrics::pagePadding;
         const float gap = fluent::metrics::controlGap;
-        const float titleH = 30.0f;
-        const float subtitleH = 20.0f;
+        const float titleH = fluent::metrics::titleHeight;
+        const float subtitleH = fluent::metrics::subtitleHeight;
 
         titleRect = D2D1::RectF(pad, pad, std::max(pad, w - pad), pad + titleH);
         subtitleRect =
@@ -1116,8 +1117,8 @@ bool FontColorDialog::create(HINSTANCE inst, HWND parent, const State& initial) 
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     const UINT dpi = GetDpiForSystem();
     const float s = fluent::dipScale(dpi);
-    const float clientW = kMinClientWidthDip;
-    const float clientH = kMinClientHeightDip;
+    const float clientW = kMinClientWidthDip + 64.0f;
+    const float clientH = kMinClientHeightDip + 48.0f;
     RECT rc{0, 0, static_cast<LONG>(std::lround(clientW * s)),
             static_cast<LONG>(std::lround(clientH * s))};
     AdjustWindowRectExForDpi(&rc, kDialogStyle, FALSE, kDialogExStyle, dpi);

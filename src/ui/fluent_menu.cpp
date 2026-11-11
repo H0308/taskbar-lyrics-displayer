@@ -1,4 +1,5 @@
 #include "fluent_menu.h"
+#include "ui/font_sizes.h"
 
 #include "ui/fluent_theme.h"
 #include "graphics/bitmap_renderer.h"
@@ -189,7 +190,7 @@ struct MenuWnd {
     void measure(IDWriteFactory* dw, float& wDip) {
         float maxText = 0;
         IDWriteTextFormat* f = nullptr;
-        if (dw && SUCCEEDED(createUiTextFormat(dw, 13.0f, DWRITE_FONT_WEIGHT_NORMAL, &f)) &&
+        if (dw && SUCCEEDED(createUiTextFormat(dw, fluent::font_sizes::label, DWRITE_FONT_WEIGHT_NORMAL, &f)) &&
             f) {
             applyUiFontFallback(f);
             for (const auto& it : items) {
@@ -248,7 +249,7 @@ struct MenuWnd {
         if (!brush)
             rt->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 1), &brush);
         if (!fmt) {
-            createUiTextFormat(renderer.dwrite(), 13.0f, DWRITE_FONT_WEIGHT_NORMAL, &fmt);
+            createUiTextFormat(renderer.dwrite(), fluent::font_sizes::label, DWRITE_FONT_WEIGHT_NORMAL, &fmt);
             if (fmt) {
                 applyUiFontFallback(fmt);
                 fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
