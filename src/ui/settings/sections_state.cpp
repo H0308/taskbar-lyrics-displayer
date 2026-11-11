@@ -73,8 +73,8 @@ void SettingsSections::updateBackgroundAdjustmentPresentation() {
         const int selected = modeRow ? std::clamp(modeRow->selected, 0, 1) : 0;
         if (auto* slider = findRow(sliderId)) {
             slider->text = backgroundAdjustmentLabel(immersive, selected);
-            slider->hint = backgroundAdjustmentHint(state.backgroundBlurSupported, selected);
-            slider->showHint = true;
+            slider->hint = backgroundAdjustmentHint(state.backgroundBlurSupported);
+            slider->showHint = !slider->hint.empty();
             slider->minHeight = kRowTallH;
             slider->height = slider->minHeight;
         }
@@ -109,17 +109,15 @@ void SettingsSections::updateImmersiveRowsEnabled() {
     }
     if (auto* row = findRow(kIdImmersiveBackgroundBlur)) {
         row->enabled = selectedMode == 1 && immersiveEnabled && state.backgroundBlurSupported;
-        row->hint = backgroundAdjustmentHint(state.backgroundBlurSupported,
-                                             state.immersiveBackgroundAdjustment);
-        row->showHint = true;
+        row->hint = backgroundAdjustmentHint(state.backgroundBlurSupported);
+        row->showHint = !row->hint.empty();
         row->minHeight = kRowTallH;
         row->height = row->minHeight;
     }
     if (auto* row = findRow(kIdDockBackgroundBlur)) {
         row->enabled = appBarEnabled && state.backgroundBlurSupported;
-        row->hint =
-            backgroundAdjustmentHint(state.backgroundBlurSupported, state.dockBackgroundAdjustment);
-        row->showHint = true;
+        row->hint = backgroundAdjustmentHint(state.backgroundBlurSupported);
+        row->showHint = !row->hint.empty();
         row->minHeight = kRowTallH;
         row->height = row->minHeight;
     }
@@ -289,11 +287,8 @@ void SettingsSections::syncDisplayRows(const SettingsState& s) {
 
 void SettingsSections::syncTaskbarModeRows(const SettingsState& s) {
     const bool vertical = s.verticalTaskbar;
-    if (auto* row = findRow(kIdTaskbarViewMode)) {
+    if (auto* row = findRow(kIdTaskbarViewMode))
         row->selected = std::clamp(s.taskbarViewMode, 0, 2);
-        row->hint = taskbarViewModeHint(s.mediaSessionAlive, vertical);
-        row->showHint = true;
-    }
     if (auto* row = findRow(kIdTaskbarMonitor)) {
         row->controlText = s.taskbarMonitorLabel;
         row->enabled = s.taskbarViewMode != 0;
@@ -313,15 +308,14 @@ void SettingsSections::syncTaskbarModeRows(const SettingsState& s) {
     if (auto* row = findRow(kIdImmersiveBackgroundBlur)) {
         row->value = std::clamp(s.immersiveBackgroundBlur, 0, 100);
         row->enabled = !vertical && s.taskbarViewMode == 1 && s.backgroundBlurSupported;
-        row->hint =
-            backgroundAdjustmentHint(s.backgroundBlurSupported, s.immersiveBackgroundAdjustment);
-        row->showHint = true;
+        row->hint = backgroundAdjustmentHint(s.backgroundBlurSupported);
+        row->showHint = !row->hint.empty();
     }
     if (auto* row = findRow(kIdDockBackgroundBlur)) {
         row->value = std::clamp(s.dockBackgroundBlur, 0, 100);
         row->enabled = s.taskbarViewMode == 2 && s.backgroundBlurSupported;
-        row->hint = backgroundAdjustmentHint(s.backgroundBlurSupported, s.dockBackgroundAdjustment);
-        row->showHint = true;
+        row->hint = backgroundAdjustmentHint(s.backgroundBlurSupported);
+        row->showHint = !row->hint.empty();
     }
     updateBackgroundAdjustmentPresentation();
     if (auto* row = findRow(kIdEmbeddedResourceMonitor)) {

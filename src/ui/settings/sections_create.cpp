@@ -92,16 +92,14 @@ void SettingsSections::createDisplayRows() {
 void SettingsSections::createTaskbarModeRows() {
     const bool vertical = state.verticalTaskbar;
     addHeader(kTaskbarModePage, L"展示模式");
-    addRadio(kTaskbarModePage, kIdTaskbarViewMode, L"任务栏歌词展示模式",
-             taskbarViewModeHint(state.mediaSessionAlive, vertical),
+    addRadio(kTaskbarModePage, kIdTaskbarViewMode, L"任务栏歌词展示模式", nullptr,
              {L"内嵌", L"沉浸", L"Dock 模式"}, std::clamp(state.taskbarViewMode, 0, 2), true,
              kRowTallH);
     Row& taskbarMonitor = addButton(
-        kTaskbarModePage, kIdTaskbarMonitor, L"目标显示器",
-        L"内嵌模式固定显示在主显示器；沉浸模式覆盖所选任务栏，全部显示器时只覆盖横向任务栏。Dock 模式占用对应显示器的工作区；断开后切回主显示器。",
+        kTaskbarModePage, kIdTaskbarMonitor, L"目标显示器", nullptr,
         state.taskbarMonitorLabel.c_str(), kRowTallH);
     taskbarMonitor.enabled = state.taskbarViewMode != 0;
-    addRadio(kTaskbarModePage, kIdAppBarEdge, L"Dock 位置", L"当前仅支持水平顶部和底部。",
+    addRadio(kTaskbarModePage, kIdAppBarEdge, L"Dock 位置", nullptr,
              {L"顶部", L"底部"}, std::clamp(state.appBarEdge, 0, 1), state.taskbarViewMode == 2,
              kRowH);
     addHeader(kTaskbarModePage, L"沉浸模式背景");
@@ -112,8 +110,7 @@ void SettingsSections::createTaskbarModeRows() {
               backgroundAdjustmentLabel(true, state.immersiveBackgroundAdjustment),
               state.immersiveBackgroundBlur,
               !vertical && state.taskbarViewMode == 1 && state.backgroundBlurSupported,
-              backgroundAdjustmentHint(state.backgroundBlurSupported,
-                                       state.immersiveBackgroundAdjustment),
+              backgroundAdjustmentHint(state.backgroundBlurSupported),
               kRowTallH);
     addHeader(kTaskbarModePage, L"Dock 背景");
     addRadio(kTaskbarModePage, kIdDockBackgroundAdjustment, L"调整方式", nullptr,
@@ -123,7 +120,7 @@ void SettingsSections::createTaskbarModeRows() {
         kTaskbarModePage, kIdDockBackgroundBlur,
         backgroundAdjustmentLabel(false, state.dockBackgroundAdjustment), state.dockBackgroundBlur,
         state.taskbarViewMode == 2 && state.backgroundBlurSupported,
-        backgroundAdjustmentHint(state.backgroundBlurSupported, state.dockBackgroundAdjustment),
+        backgroundAdjustmentHint(state.backgroundBlurSupported),
         kRowTallH);
     addHeader(kTaskbarModePage, L"资源监视");
     Row& embeddedResources = addRow(
@@ -133,11 +130,11 @@ void SettingsSections::createTaskbarModeRows() {
     embeddedResources.enabled = state.taskbarViewMode == 0 && !vertical;
     Row& download =
         addRow(kTaskbarModePage, kIdDockResourceDownload, ControlKind::Toggle, L"显示下行速度",
-               L"扩展指标；关闭后由后续指标补位，没有其他指标时释放对应宽度。", 40.0f, kRowTallH);
+               nullptr, 40.0f, kRowTallH);
     download.checked = state.dockResourceDownload;
     Row& upload =
         addRow(kTaskbarModePage, kIdDockResourceUpload, ControlKind::Toggle, L"显示上行速度",
-               L"扩展指标；关闭后由后续指标补位，没有其他指标时释放对应宽度。", 40.0f, kRowTallH);
+               nullptr, 40.0f, kRowTallH);
     upload.checked = state.dockResourceUpload;
     Row& dockResourceGpu =
         addRow(kTaskbarModePage, kIdDockResourceGpuUsage, ControlKind::Toggle, L"显示 GPU 使用率",
@@ -260,8 +257,7 @@ void SettingsSections::createFloatingCardRows() {
     const bool minimal = minimalModeActive();
     addHeader(kFloatingCardPage, L"行为");
     addRadio(
-        kFloatingCardPage, kIdFloatingCardTrigger, L"悬浮卡片展开方式",
-        L"悬浮展开：鼠标在歌词区域停留片刻后展开；点击展开：点击歌词区域任意位置立即展开。媒体卡片、每日一言和快捷启动卡片共用此设置。",
+        kFloatingCardPage, kIdFloatingCardTrigger, L"悬浮卡片展开方式", nullptr,
         {L"悬浮展开", L"点击展开"}, state.floatingCardTrigger, !minimal, kRowTallH);
     addHeader(kFloatingCardPage, L"背景");
     addRadio(kFloatingCardPage, kIdFloatingCardBackground, L"悬浮卡片背景",

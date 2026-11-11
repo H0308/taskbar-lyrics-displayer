@@ -40,20 +40,10 @@ inline const wchar_t* idleQuoteSourceHint(int source) {
     return L"默认使用一言获取每日一言。";
 }
 
-inline const wchar_t* taskbarViewModeHint(bool mediaSessionAlive, bool verticalTaskbar) {
-    if (!mediaSessionAlive)
-        return L"当前没有音乐播放，沉浸模式暂不可用；开始播放后即可选择。Dock 模式仍可使用。";
-    if (verticalTaskbar)
-        return L"侧边任务栏不支持沉浸模式；Dock 模式以独立顶栏或底栏占用桌面工作区。";
-    return L"沉浸模式覆盖 Windows 任务栏；Dock 模式以独立顶栏或底栏占用桌面工作区。";
-}
-
-inline const wchar_t* backgroundAdjustmentHint(bool supported, int mode) {
+inline const wchar_t* backgroundAdjustmentHint(bool supported) {
     if (!supported)
         return L"背景模糊层初始化失败，请查看运行日志中的 dock-backdrop 信息。";
-    return mode == 1
-               ? L"0% 完全透明，100% 显示随 Windows 应用主题变化的纯底色；中间值为底色半透明。"
-               : L"0% 完全透明，100% 完全模糊；中间值混合清晰桌面与模糊背景。";
+    return L"";
 }
 
 inline const wchar_t* backgroundAdjustmentLabel(bool immersive, int mode) {
