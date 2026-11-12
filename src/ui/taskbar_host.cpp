@@ -403,6 +403,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     }
 
     void applyCoverAndFontAppearance(const TaskbarAppearance& value) {
+        if (!appearance_ || appearance_->lyricPlayedGradient != value.lyricPlayedGradient)
+            requestFrameAndFlush();
         if (!appearance_ || appearance_->albumCoverVisible != value.albumCoverVisible)
             setAlbumCoverVisible(value.albumCoverVisible);
         if (!appearance_ || appearance_->platformIconVisible != value.platformIconVisible)
@@ -5204,7 +5206,10 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 layout ? lyricStarTextShift(layout) : 0.0f,
                 lyricEffectLayoutLine_,
                 outgoingLyricEffectLine_,
-                lyricEffects_};
+                lyricEffects_,
+                scene_ == DisplayScene::Lyrics && appearance_ && appearance_->lyricPlayedGradient,
+                lyricColor_,
+                brushLyric_.Get()};
     }
 
     void drawScrollingText(IDWriteTextLayout* layout, float textW, float textH, float areaW,

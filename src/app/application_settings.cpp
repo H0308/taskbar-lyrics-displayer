@@ -1063,6 +1063,7 @@ SettingsState App::currentSettingsState() const {
     st.taskbarThemeMode = settings_.taskbarThemeMode_;
     st.windowThemeMode = settings_.windowThemeMode_;
     st.followAlbum = settings_.lyricFollowAlbum_;
+    st.lyricPlayedGradient = settings_.lyricPlayedGradient_;
     st.doubleLineLyrics = view.doubleLineLyrics;
     st.compactTaskbar = taskbarHost && taskbarHost->isCompactTaskbar();
     st.lyricEffects = settings_.lyricEffects_;
@@ -1144,6 +1145,11 @@ SettingsActions App::buildSettingsActions() {
     act.onSpectrumColorMode = [this](int mode) { applySpectrumColorMode(mode); };
     act.onSpectrumColor = [this](COLORREF color) { applySpectrumColor(color); };
     act.onSpectrumGradient = [this](bool on) { applySpectrumGradient(on); };
+    act.onLyricPlayedGradient = [this](bool on) {
+        settings_.lyricPlayedGradient_ = on;
+        logSettingBool(L"lyric-played-gradient", on);
+        commitAppearanceSettings();
+    };
     act.onSpectrumEffect = [this](int effect, bool on) { applySpectrumEffect(effect, on); };
     act.onSpectrumBackground = [this](bool on) { applySpectrumBackground(on); };
     act.onSpectrumOpacity = [this](int percent) { applySpectrumOpacity(percent); };

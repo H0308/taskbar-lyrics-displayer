@@ -14,6 +14,7 @@ public:
     void clear();
     void invalidate() { ++textFxGen_; }
     // 成功时返回持有一份引用的 bitmap，调用方负责 Release。
+    // brush 为空时只缓存光晕与描边，文字填充由调用方单独绘制。
     ID2D1Bitmap* bitmap(ID2D1RenderTarget* target, UINT dpi, IDWriteTextLayout* layout, float textW,
                         float textH, ID2D1Brush* brush, ID2D1Brush* outline, ID2D1Brush* glow);
 

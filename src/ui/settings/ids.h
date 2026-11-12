@@ -51,6 +51,7 @@ inline constexpr int kIdUiFontSource = 510;
 inline constexpr int kIdPickUiFont = 511;
 inline constexpr int kIdFontColor = 421;
 inline constexpr int kIdFollowAlbum = 422;
+inline constexpr int kIdLyricPlayedGradient = 513;
 inline constexpr int kIdTaskbarTheme = 424;
 inline constexpr int kIdWindowTheme = 425;
 inline constexpr int kIdDoubleLine = 430;

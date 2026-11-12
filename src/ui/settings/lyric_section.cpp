@@ -17,6 +17,10 @@ std::vector<Row> createLyricRows(const SettingsState& state) {
     builder.addHeader(L"颜色与效果");
     builder.addButton(kIdFontColor, L"歌词字体颜色与效果", nullptr, L"打开…");
     builder.addToggle(kIdFollowAlbum, L"歌词已播放颜色跟随专辑", state.followAlbum);
+    Row& gradient = builder.addRow(
+        kIdLyricPlayedGradient, ControlKind::Toggle, L"歌词已播放色渐变",
+        L"以歌词已播放色为基色，由底部深色连续过渡到顶部浅色。", 40.0f, kRowTallH);
+    gradient.checked = state.lyricPlayedGradient;
     builder.addHeader(L"歌词特效");
     const wchar_t* lyricEffectNames[kLyricEffectCount] = {L"星尘跟唱", L"跟唱流光", L"笔触下划线",
                                                           L"字间涟漪", L"逐字浮波", L"歌词彩蛋"};
@@ -74,6 +78,8 @@ void updateLyricRows(std::vector<Row>& rows, const SettingsState& s) {
     const bool minimal = s.renderMode == kRenderModeMinimal;
     if (auto* row = findRow(kIdFollowAlbum))
         row->checked = s.followAlbum;
+    if (auto* row = findRow(kIdLyricPlayedGradient))
+        row->checked = s.lyricPlayedGradient;
     if (auto* row = findRow(kIdDoubleLine)) {
         row->checked = vertical ? false : s.doubleLineLyrics;
         row->enabled = !vertical;
@@ -160,6 +166,12 @@ bool handleLyricCommand(int id, Row& value, std::vector<Row>& rows, SettingsStat
     case kIdFontColor:
         if (actions.onFontColorEffect)
             actions.onFontColorEffect();
+        break;
+    case kIdLyricPlayedGradient:
+        row->checked = !row->checked;
+        state.lyricPlayedGradient = row->checked;
+        if (actions.onLyricPlayedGradient)
+            actions.onLyricPlayedGradient(row->checked);
         break;
     case kIdFollowAlbum:
         row->checked = !row->checked;

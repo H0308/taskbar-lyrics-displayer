@@ -91,6 +91,7 @@ struct AppSettings {
     bool preferRomanization_ = false;
     bool doubleLineLyricsEnabled_ = false;
     uint32_t lyricEffects_ = 0;
+    bool lyricPlayedGradient_ = false;
     LyricAlignment lyricAlignment_ = LyricAlignment::Left;
     LyricAlignment idleQuoteAlignment_ = LyricAlignment::Left;
     bool songInfoVisible_ = true;

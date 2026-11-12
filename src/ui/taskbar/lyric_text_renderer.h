@@ -13,6 +13,9 @@ struct LyricTextDrawContext {
     float fontSize, width, starTextShift;
     int currentLine, outgoingLine;
     uint32_t effectsMask;
+    bool playedGradient = false;
+    COLORREF playedColor = RGB(49, 194, 124);
+    ID2D1Brush* playedTextBrush = nullptr;
 };
 
 // 独占文字离屏缓存、渐隐画刷和裁剪层；输入只在当前同步绘制期间借用。
@@ -63,6 +66,8 @@ public:
     void invalidate() { textEffectsCache_.invalidate(); }
 
 private:
+    ID2D1Brush* playedBrush(const LyricTextDrawContext& context, ID2D1Brush* solid,
+                           D2D1_POINT_2F bottom, D2D1_POINT_2F top);
     ID2D1LinearGradientBrush* ensureLyricEdgeFadeBrush(const LyricTextDrawContext& context);
     ID2D1LinearGradientBrush* lyricEdgeFadeBrush(const LyricTextDrawContext& context, float x,
                                                  float fadeW, float offset);
@@ -77,6 +82,8 @@ private:
     ID2D1LinearGradientBrush* verticalBorrowFadeBrush(const LyricTextDrawContext& context,
                                                       float edgeY, float extend, bool atTop);
     LyricTextEffectsCache textEffectsCache_;
+    Microsoft::WRL::ComPtr<ID2D1LinearGradientBrush> playedGradientBrush_;
+    COLORREF playedGradientColor_ = 0;
     Microsoft::WRL::ComPtr<ID2D1LinearGradientBrush> lyricEdgeFadeBrush_, lyricRightFadeBrush_;
     Microsoft::WRL::ComPtr<ID2D1Layer> lyricEdgeFadeLayer_, lyricRightFadeLayer_;
 };

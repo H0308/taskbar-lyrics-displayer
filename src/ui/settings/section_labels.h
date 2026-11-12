@@ -113,6 +113,7 @@ inline settings_icon::Kind iconForRow(int id) {
     case kIdFloatingCardBackgroundColor:
     case kIdSpectrumColorMode:
     case kIdSpectrumColor:
+    case kIdLyricPlayedGradient:
     case kIdFontColor:
         return settings_icon::Kind::Color;
     case kIdFloatingCardFollowAlbum:

@@ -13,7 +13,7 @@ ID2D1Bitmap* LyricTextEffectsCache::bitmap(ID2D1RenderTarget* rt, UINT dpi,
                                            IDWriteTextLayout* layout, float textW, float textH,
                                            ID2D1Brush* brush, ID2D1Brush* outline,
                                            ID2D1Brush* glow) {
-    if (!rt || !layout || !brush)
+    if (!rt || !layout || (!brush && !outline && !glow))
         return nullptr;
     constexpr float pad = 3.0f; // 覆盖 2.4 DIP 的光晕外扩和边缘抗锯齿
     const float wDip = textW + pad * 2.0f;
@@ -54,7 +54,8 @@ ID2D1Bitmap* LyricTextEffectsCache::bitmap(ID2D1RenderTarget* rt, UINT dpi,
                 entry->target->DrawTextLayout(D2D1::Point2F(pad + d[0] * 1.2f, pad + d[1] * 1.2f),
                                               layout, outline);
         }
-        entry->target->DrawTextLayout(D2D1::Point2F(pad, pad), layout, brush);
+        if (brush)
+            entry->target->DrawTextLayout(D2D1::Point2F(pad, pad), layout, brush);
         if (FAILED(entry->target->EndDraw())) {
             entry->target->Release();
             *entry = {};

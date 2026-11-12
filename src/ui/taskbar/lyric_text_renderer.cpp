@@ -1,5 +1,6 @@
 #include "ui/taskbar/lyric_text_renderer.h"
 #include "ui/taskbar/layout.h"
+#include "ui/spectrum_effects.h"
 #include <algorithm>
 #include <cmath>
 #include <array>
@@ -9,6 +10,40 @@ using taskbar_detail::kVerticalLyricGap;
 namespace {
 constexpr float kLyricEdgeFadeDip = 18.0f;
 }
+ID2D1Brush* LyricTextRenderer::playedBrush(const LyricTextDrawContext& context,
+                                         ID2D1Brush* solid, D2D1_POINT_2F bottom,
+                                         D2D1_POINT_2F top) {
+    if (!context.playedGradient || !solid)
+        return solid;
+    if (!playedGradientBrush_ || playedGradientColor_ != context.playedColor) {
+        playedGradientBrush_.Reset();
+        const auto base = D2D1::ColorF(GetRValue(context.playedColor) / 255.0f,
+                                       GetGValue(context.playedColor) / 255.0f,
+                                       GetBValue(context.playedColor) / 255.0f);
+        const D2D1_GRADIENT_STOP stops[] = {
+            {0.0f, D2D1::ColorF(base.r * kSpectrumBarGradientDarkFactor,
+                                base.g * kSpectrumBarGradientDarkFactor,
+                                base.b * kSpectrumBarGradientDarkFactor)},
+            {1.0f, D2D1::ColorF(base.r + (1.0f - base.r) * kSpectrumBarGradientLightMix,
+                                base.g + (1.0f - base.g) * kSpectrumBarGradientLightMix,
+                                base.b + (1.0f - base.b) * kSpectrumBarGradientLightMix)}};
+        Microsoft::WRL::ComPtr<ID2D1GradientStopCollection> collection;
+        if (SUCCEEDED(context.target->CreateGradientStopCollection(
+                stops, _countof(stops), collection.GetAddressOf()))) {
+            context.target->CreateLinearGradientBrush(
+                D2D1::LinearGradientBrushProperties(bottom, top), collection.Get(),
+                playedGradientBrush_.ReleaseAndGetAddressOf());
+        }
+        if (!playedGradientBrush_)
+            return solid;
+        playedGradientColor_ = context.playedColor;
+    }
+    playedGradientBrush_->SetStartPoint(bottom);
+    playedGradientBrush_->SetEndPoint(top);
+    playedGradientBrush_->SetOpacity(solid->GetOpacity());
+    return playedGradientBrush_.Get();
+}
+
 ID2D1Bitmap* LyricTextRenderer::textFxBitmap(const LyricTextDrawContext& context,
                                              IDWriteTextLayout* layout, float textW, float textH,
                                              ID2D1Brush* brush, ID2D1Brush* outline,
@@ -140,11 +175,14 @@ void LyricTextRenderer::drawScrollingText(const LyricTextDrawContext& context,
     opacity = std::clamp(opacity, 0.0f, 1.0f);
     if (opacity >= 0.999f)
         opacity = 1.0f;
-    // 光晕/描边走离屏缓存：三层合成一次，之后滚动/淡变只 DrawImage；
+    // 光晕/描边走离屏缓存；整行渐变时只缓存效果，填充单独绘制，避免重复叠色。
     // 失败时 fxBmp 为空，回落到逐层直接绘制
+    const bool fullGradient = context.playedGradient && !karaokeBrush &&
+                              brush == context.playedTextBrush;
     ID2D1Bitmap* fxBmp = nullptr;
     if ((glow || outline) && !wave)
-        fxBmp = textFxBitmap(context, layout, textW, textH, brush, outline, glow);
+        fxBmp = textFxBitmap(context, layout, textW, textH,
+                             fullGradient ? nullptr : brush, outline, glow);
     ID2D1Brush* brushes[4] = {fxBmp ? nullptr : brush, fxBmp ? nullptr : outline,
                               fxBmp ? nullptr : glow, karaokeBrush};
     ID2D1Brush* changed[4] = {};
@@ -265,15 +303,29 @@ void LyricTextRenderer::drawScrollingText(const LyricTextDrawContext& context,
                 }
             }
         }
+        if (!fullGradient)
+            for (int i = 0; i < n; ++i)
+                drawText(D2D1::Point2F(bases[i], y), brush);
+    }
+    // 无逐字时间轴的演唱行及退场行也使用已播放色，预览与辅助歌词保持原色。
+    if (fullGradient) {
+        auto* gradient = playedBrush(context, brush, D2D1::Point2F(0.0f, y + textH),
+                                     D2D1::Point2F(0.0f, y));
+        const float previous = gradient->GetOpacity();
+        if (fxBmp)
+            gradient->SetOpacity(previous * opacity);
         for (int i = 0; i < n; ++i)
-            drawText(D2D1::Point2F(bases[i], y), brush);
+            drawText(D2D1::Point2F(bases[i], y), gradient);
+        gradient->SetOpacity(previous);
     }
     // 逐字高亮层：裁剪到填充进度
     if (karaokeBrush && karaokeX > 0.0f) {
         rt->PushAxisAlignedClip(D2D1::RectF(bases[0], y - wavePad, bases[0] + karaokeX,
                                           y + textH + wavePad),
                                 D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-        drawText(D2D1::Point2F(bases[0], y), karaokeBrush);
+        drawText(D2D1::Point2F(bases[0], y),
+                 playedBrush(context, karaokeBrush, D2D1::Point2F(0.0f, y + textH),
+                              D2D1::Point2F(0.0f, y)));
         rt->PopAxisAlignedClip();
     }
     drawOverlay(true);
@@ -317,11 +369,14 @@ void LyricTextRenderer::drawVerticalScrollingText(
 
     // rotated 布局保存的是整句横向文字：左右侧共用截图中的固定角度，
     // 再映射到同一个竖向滚动槽；中文逐字布局则保持字形正向。
+    const bool fullGradient = context.playedGradient && !karaokeBrush &&
+                              brush == context.playedTextBrush;
     ID2D1Bitmap* fxBmp = nullptr;
     // 离屏缓存按横向布局的原始尺寸创建；旋转文字直接绘制，避免把
     // “横向宽高”交换后再交给未旋转的缓存目标而截断英文句子。
     if (!rotated && (glow || outline))
-        fxBmp = textFxBitmap(context, layout, textW, textH, brush, outline, glow);
+        fxBmp = textFxBitmap(context, layout, textW, textH,
+                             fullGradient ? nullptr : brush, outline, glow);
     ID2D1Brush* brushes[4] = {fxBmp ? nullptr : brush, fxBmp ? nullptr : outline,
                               fxBmp ? nullptr : glow, karaokeBrush};
     ID2D1Brush* changed[4] = {};
@@ -475,13 +530,31 @@ void LyricTextRenderer::drawVerticalScrollingText(
                 }
             }
         }
-        for (int i = 0; i < count; ++i) {
+        for (int i = 0; !fullGradient && i < count; ++i) {
             if (rotated)
                 drawRotatedLayout(x, bases[i], brush);
             else
                 rt->DrawTextLayout(D2D1::Point2F(x, bases[i]), layout, brush);
         }
     }
+
+    auto drawPlayed = [&](float top, ID2D1Brush* solid) {
+        // 旋转英文在原始横排坐标中设置画刷，随文字一起旋转。
+        auto* gradient = rotated
+            ? playedBrush(context, solid, D2D1::Point2F(0.0f, textW), D2D1::Point2F(0.0f, 0.0f))
+            : playedBrush(context, solid, D2D1::Point2F(x, 0.0f), D2D1::Point2F(x + textW, 0.0f));
+        const float previous = gradient->GetOpacity();
+        if (fxBmp && fullGradient)
+            gradient->SetOpacity(previous * opacity);
+        if (rotated)
+            drawRotatedLayout(x, top, gradient);
+        else
+            rt->DrawTextLayout(D2D1::Point2F(x, top), layout, gradient);
+        gradient->SetOpacity(previous);
+    };
+    if (fullGradient)
+        for (int i = 0; i < count; ++i)
+            drawPlayed(bases[i], brush);
 
     // karaokeX 在竖排路径中统一从上向下填充；旋转英文也按最终可见的
     // 竖向顺序裁剪，避免左右任务栏出现相反的高亮方向。
@@ -492,10 +565,7 @@ void LyricTextRenderer::drawVerticalScrollingText(
         if (bottom > top) {
             rt->PushAxisAlignedClip(D2D1::RectF(x, top, x + textW, bottom),
                                     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-            if (rotated)
-                drawRotatedLayout(x, bases[0], karaokeBrush);
-            else
-                rt->DrawTextLayout(D2D1::Point2F(x, bases[0]), layout, karaokeBrush);
+            drawPlayed(bases[0], karaokeBrush);
             rt->PopAxisAlignedClip();
         }
     }
@@ -609,6 +679,7 @@ void LyricTextRenderer::createDeviceResources(ID2D1DeviceContext* target) {
 }
 void LyricTextRenderer::discardDeviceResources() {
     textEffectsCache_.clear();
+    playedGradientBrush_.Reset();
     lyricEdgeFadeBrush_.Reset();
     lyricRightFadeBrush_.Reset();
     lyricEdgeFadeLayer_.Reset();

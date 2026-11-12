@@ -11,6 +11,7 @@ struct TaskbarAppearance {
     } secondaryLyricMode;
     bool doubleLineLyrics{};
     uint32_t lyricEffects{};
+    bool lyricPlayedGradient{};
     LyricAlignment lyricAlignment{};
     LyricAlignment idleQuoteAlignment{};
     bool songInfoVisible{};
