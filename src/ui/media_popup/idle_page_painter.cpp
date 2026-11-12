@@ -9,10 +9,12 @@ void drawIdleQuickHeader(const PagePaintContext& context, ID2D1DeviceContext* rt
                          float headerTop, const IdlePresentation& content, bool updateHitTest) {
     if (!content.hasQuickPanel())
         return;
+    drawIdleQuickExpandButton(context, rt, w, headerTop, content, updateHitTest);
+    if (!content.showText)
+        return;
     auto& brushSecondary = context.resources.brushSecondary;
     auto& fmtIdleHeader = context.resources.fmtIdleHeader;
 
-    drawIdleQuickExpandButton(context, rt, w, headerTop, content, updateHitTest);
     const D2D1_RECT_F expandButton =
         layoutFor(context, content).idleQuickExpandLocalRect(w, headerTop, content);
     const float headerRight =

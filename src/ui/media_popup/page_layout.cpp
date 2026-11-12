@@ -111,7 +111,7 @@ IdleLayout IdlePageLayout::idleLayout(const IdlePresentation& content, float quo
     layout.headerTop = idleQuickHeaderTop(layout.collapsedHeaderTop, content);
     layout.expandButtonTop = idleQuickExpandButtonTop(layout.headerTop);
     const float progress = idleQuickExpandProgress(content);
-    layout.tabTop = idleQuickListTop(layout.headerTop);
+    layout.tabTop = content.showText ? idleQuickListTop(layout.headerTop) : layout.headerTop;
     layout.listTop = layout.tabTop + idleQuickTabContentOffset(progress, content);
     return layout;
 }
