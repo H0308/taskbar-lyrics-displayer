@@ -525,7 +525,7 @@ bool DockPet::ensureAtlas(ID2D1DeviceContext* target) {
             releaseCom(bitmap);
     }
 
-    if (atlas_ && width >= 686 && height >= 170) {
+    if (walkMirrorEnabled_ && atlas_ && width >= 686 && height >= 170) {
         // 生成左向行走用的镜像位图：右向帧 1/2 逐帧水平翻转（见
         // kWalkMirrorFrames）。失败时左向回退到原帧，只是步态偏弱。
         const struct {

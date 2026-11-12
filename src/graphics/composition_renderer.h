@@ -24,7 +24,7 @@ public:
     void setDrawingDeviceSource(CompositionRenderer* source);
     void setDpi(UINT dpi);
 
-    // 设备上下文，作为 ID2D1RenderTarget 使用；调用前必须先 bind()。
+    // 设备上下文，作为 ID2D1RenderTarget 使用；调用前必须先 bind() 或 bindSurface()。
     ID2D1DeviceContext* renderTarget();
     ID2D1Factory* d2d() const;
     IDWriteFactory* dwrite() const;
@@ -39,6 +39,7 @@ public:
 
     // 合成表面绘制：返回的上下文已开始绘制，初始变换包含表面分配偏移。
     // 与 bind()/present() 二选一；结束绘制后调用方更新视觉属性，再统一 commit()。
+    bool bindSurface(HWND hwnd, int width, int height, BindTimings* timings = nullptr);
     ID2D1DeviceContext* beginSurfaceDraw(HWND hwnd, int width, int height);
     bool endSurfaceDraw(ID2D1DeviceContext* dc);
 

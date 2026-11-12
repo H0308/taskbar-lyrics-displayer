@@ -411,16 +411,23 @@ bool CompositionRenderer::bind(HWND hwnd, int width, int height, BindTimings* ti
     return true;
 }
 
-ID2D1DeviceContext* CompositionRenderer::beginSurfaceDraw(HWND hwnd, int width, int height) {
-    if (!hwnd || width <= 0 || height <= 0 || !createFactories() || !createDevice())
-        return nullptr;
+bool CompositionRenderer::bindSurface(HWND hwnd, int width, int height, BindTimings* timings) {
+    const auto started = timings ? runtime_log::uiTimeMs() : 0;
+    if (timings)
+        *timings = {};
+    if (!hwnd || width <= 0 || height <= 0 || !createFactories())
+        return false;
+    const auto factoriesReady = timings ? runtime_log::uiTimeMs() : 0;
+    if (!createDevice())
+        return false;
+    const auto deviceReady = timings ? runtime_log::uiTimeMs() : 0;
     if (swapchain_ || (hwnd_ && hwnd_ != hwnd))
         releaseWindowResources();
 
-    const auto fail = [this](HRESULT hr) -> ID2D1DeviceContext* {
+    const auto fail = [this](HRESULT hr) {
         runtime_log::writef(L"[dcomp] surface draw failed: 0x%08X", static_cast<unsigned>(hr));
         discard();
-        return nullptr;
+        return false;
     };
     if (!target_) {
         HRESULT hr = dcomp_->CreateTargetForHwnd(hwnd, contentAboveChildren_ ? TRUE : FALSE,
@@ -453,6 +460,17 @@ ID2D1DeviceContext* CompositionRenderer::beginSurfaceDraw(HWND hwnd, int width, 
         width_ = width;
         height_ = height;
     }
+    if (timings) {
+        timings->factoriesMs = factoriesReady - started;
+        timings->deviceMs = deviceReady - factoriesReady;
+        timings->surfaceMs = runtime_log::uiTimeMs() - deviceReady;
+    }
+    return true;
+}
+
+ID2D1DeviceContext* CompositionRenderer::beginSurfaceDraw(HWND hwnd, int width, int height) {
+    if (!bindSurface(hwnd, width, height))
+        return nullptr;
     POINT offset{};
     ID2D1DeviceContext* dc = nullptr;
     const HRESULT hr = surface_->BeginDraw(nullptr, __uuidof(ID2D1DeviceContext),
@@ -460,7 +478,9 @@ ID2D1DeviceContext* CompositionRenderer::beginSurfaceDraw(HWND hwnd, int width, 
     if (FAILED(hr)) {
         if (dc)
             dc->Release();
-        return fail(hr);
+        runtime_log::writef(L"[dcomp] surface BeginDraw failed: 0x%08X", static_cast<unsigned>(hr));
+        discard();
+        return nullptr;
     }
     const float scale = static_cast<float>(dpi_) / 96.0f;
     dc->SetDpi(static_cast<float>(dpi_), static_cast<float>(dpi_));
@@ -474,7 +494,11 @@ bool CompositionRenderer::endSurfaceDraw(ID2D1DeviceContext* dc) {
         return false;
     const HRESULT hr = surface_ ? surface_->EndDraw() : E_UNEXPECTED;
     dc->Release();
-    return SUCCEEDED(hr) && SUCCEEDED(visual_->SetContent(surface_));
+    if (FAILED(hr)) {
+        discard();
+        return false;
+    }
+    return visual_ && SUCCEEDED(visual_->SetContent(surface_));
 }
 
 bool CompositionRenderer::setWindowContent(HWND source) {

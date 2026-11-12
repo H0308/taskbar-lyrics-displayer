@@ -19,6 +19,10 @@ enum class DockPetMode {
 
 class DockPet {
 public:
+    enum class WalkMirror { Enabled, Disabled };
+
+    explicit DockPet(WalkMirror walkMirror = WalkMirror::Enabled)
+        : walkMirrorEnabled_(walkMirror == WalkMirror::Enabled) {}
     ~DockPet();
 
     void setMode(DockPetMode mode, std::uint64_t nowMs);
@@ -100,6 +104,7 @@ private:
     // 右向行走帧的水平镜像，用作左向行走帧（左向原帧的亮爪不前后交替，
     // 迈步感弱；镜像右向帧后两个方向步态一致）。ensureAtlas 时生成。
     ID2D1Bitmap* walkMirror_ = nullptr;
+    const bool walkMirrorEnabled_;
     bool atlasLoadAttempted_ = false;
 
     // Zzz 文本：DWrite 工厂与文字格式与设备无关，一直保留到析构；

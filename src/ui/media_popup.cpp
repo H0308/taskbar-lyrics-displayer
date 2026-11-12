@@ -212,7 +212,7 @@ struct MediaPopup::Impl {
     CompositionRenderer renderer{false};
     fluent::CompositedScrollView idleScrollView;
     uint64_t deviceGeneration = 0;
-    DockPet pet;
+    DockPet pet{DockPet::WalkMirror::Disabled};
     ID2D1SolidColorBrush* brushBackground = nullptr;
     ID2D1SolidColorBrush* brushStroke = nullptr;
     ID2D1SolidColorBrush* brushText = nullptr;
@@ -614,7 +614,7 @@ struct MediaPopup::Impl {
     }
 
     // 结束 DComp 层转场（页面互切或快速打开展开/收起）：撤掉合成层并停掉
-    // 收尾定时器。多次调用安全；调用方负责在必要时把最终交换链帧提交后，
+    // 收尾定时器。多次调用安全；调用方负责在必要时把最终主表面帧提交后，
     // 再提交层的移除。两个转场共用同一组临时合成层，不会同时激活（切换按钮
     // 在页面互切期间禁点，setPage 也会先停掉另一个转场）。
     void stopLayerTransition(media_popup_detail::LayerTransition& transition, UINT_PTR timer) {
@@ -659,7 +659,7 @@ struct MediaPopup::Impl {
             return;
 
         // 这个窗口使用 WS_EX_NOREDIRECTIONBITMAP，卡片圆角、边框和背景全部
-        // 在同一个 D2D 交换链里绘制。不要再给 HWND 设置 DWM 圆角/边框/材质，
+        // 在同一个 D2D 合成表面里绘制。不要再给 HWND 设置 DWM 圆角/边框/材质，
         // 否则系统会保留一层窗口级底板，根视觉位移动画时就会和内容错开。
         // 这里只关闭系统自己的显示/隐藏过渡，动画由 DirectComposition 统一负责。
         BOOL disableTransitions = TRUE;
@@ -797,48 +797,76 @@ struct MediaPopup::Impl {
                                              &brushTaskPriorityNone)) ||
             !createTextFormat(fluent::font_sizes::mediaPopup::source, DWRITE_FONT_WEIGHT_NORMAL, &fmtSource) ||
             !createTextFormat(fluent::font_sizes::mediaPopup::time, DWRITE_FONT_WEIGHT_NORMAL, &fmtTimeRight) ||
-            !createTextFormat(fluent::font_sizes::mediaPopup::title, DWRITE_FONT_WEIGHT_SEMI_BOLD, &fmtTitle) ||
-            !createTextFormat(fluent::font_sizes::mediaPopup::artist, DWRITE_FONT_WEIGHT_NORMAL, &fmtArtist) ||
-            !createTextFormat(fluent::font_sizes::mediaPopup::icon, DWRITE_FONT_WEIGHT_SEMI_BOLD, &fmtIcon) ||
-            !createTextFormat(fluent::font_sizes::mediaPopup::idleHeader, DWRITE_FONT_WEIGHT_NORMAL, &fmtIdleHeader) ||
-            !createTextFormat(fluent::font_sizes::mediaPopup::idleQuote, DWRITE_FONT_WEIGHT_NORMAL, &fmtIdleQuote,
-                               DWRITE_PARAGRAPH_ALIGNMENT_NEAR) ||
-            !createTextFormat(fluent::font_sizes::mediaPopup::idleSource, DWRITE_FONT_WEIGHT_NORMAL, &fmtIdleSource) ||
-            !createTextFormat(fluent::font_sizes::mediaPopup::idleApp, DWRITE_FONT_WEIGHT_NORMAL, &fmtIdleApp)) {
+            !createTextFormat(fluent::font_sizes::mediaPopup::icon, DWRITE_FONT_WEIGHT_SEMI_BOLD, &fmtIcon)) {
             releaseDrawingResources();
             return false;
         }
-        if (FAILED(fmtTimeRight->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING)) ||
-            FAILED(fmtIdleQuote->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING)) ||
-            FAILED(fmtIdleApp->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER))) {
-            releaseDrawingResources();
-            return false;
-        }
-        DWRITE_TRIMMING idleAppTrimming{
-            DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
-        if (!renderer.dwrite() ||
-            FAILED(renderer.dwrite()->CreateEllipsisTrimmingSign(
-                fmtIdleApp, &idleAppTrimmingSign)) ||
-            FAILED(fmtIdleApp->SetTrimming(&idleAppTrimming, idleAppTrimmingSign))) {
+        if (FAILED(fmtTimeRight->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING))) {
             releaseDrawingResources();
             return false;
         }
 
         auto* factory = renderer.d2d();
         if (!factory || FAILED(factory->CreateRoundedRectangleGeometry(
-                                 D2D1::RoundedRect(D2D1::RectF(0.0f, 0.0f, kCoverSizeDip,
-                                                               kCoverSizeDip),
-                                                   8.0f, 8.0f),
-                                 &coverClip)) ||
-            FAILED(rt->CreateLayer(&coverLayer)) ||
-            FAILED(factory->CreateRoundedRectangleGeometry(
                 D2D1::RoundedRect(D2D1::RectF(0.0f, 0.0f, kPopupWidthDip, popupHeightDip()),
                                   kPopupCornerDip, kPopupCornerDip),
                 &backdropClip)) ||
-            FAILED(rt->CreateLayer(&backdropLayer)) ||
-            !media_control::create(factory, controlGeometry)) {
+            FAILED(rt->CreateLayer(&backdropLayer))) {
             releaseDrawingResources();
             return false;
+        }
+
+        if (backdropBmp && lastBackdropLuminance >= 0.0f)
+            applyBackdropTextContrast(lastBackdropLuminance);
+        themeDirty = false;
+        return true;
+    }
+
+    bool createPageResources(bool needsMedia, bool needsIdle) {
+        auto* rt = renderer.renderTarget();
+        auto* factory = renderer.d2d();
+        if (!rt || !factory)
+            return false;
+
+        const bool createMedia = needsMedia && !fmtTitle;
+        const bool createIdle = needsIdle && !fmtIdleApp;
+        if (createMedia &&
+            (!createTextFormat(fluent::font_sizes::mediaPopup::title,
+                               DWRITE_FONT_WEIGHT_SEMI_BOLD, &fmtTitle) ||
+             !createTextFormat(fluent::font_sizes::mediaPopup::artist,
+                               DWRITE_FONT_WEIGHT_NORMAL, &fmtArtist) ||
+             FAILED(factory->CreateRoundedRectangleGeometry(
+                 D2D1::RoundedRect(D2D1::RectF(0.0f, 0.0f, kCoverSizeDip, kCoverSizeDip),
+                                  8.0f, 8.0f), &coverClip)) ||
+             FAILED(rt->CreateLayer(&coverLayer)) ||
+             !media_control::create(factory, controlGeometry))) {
+            releaseDrawingResources();
+            return false;
+        }
+        if (createIdle) {
+            if (!createTextFormat(fluent::font_sizes::mediaPopup::idleHeader,
+                                  DWRITE_FONT_WEIGHT_NORMAL, &fmtIdleHeader) ||
+                !createTextFormat(fluent::font_sizes::mediaPopup::idleQuote,
+                                  DWRITE_FONT_WEIGHT_NORMAL, &fmtIdleQuote,
+                                  DWRITE_PARAGRAPH_ALIGNMENT_NEAR) ||
+                !createTextFormat(fluent::font_sizes::mediaPopup::idleSource,
+                                  DWRITE_FONT_WEIGHT_NORMAL, &fmtIdleSource) ||
+                !createTextFormat(fluent::font_sizes::mediaPopup::idleApp,
+                                  DWRITE_FONT_WEIGHT_NORMAL, &fmtIdleApp) ||
+                FAILED(fmtIdleQuote->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING)) ||
+                FAILED(fmtIdleApp->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER))) {
+                releaseDrawingResources();
+                return false;
+            }
+            DWRITE_TRIMMING idleAppTrimming{
+                DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+            if (!renderer.dwrite() ||
+                FAILED(renderer.dwrite()->CreateEllipsisTrimmingSign(
+                    fmtIdleApp, &idleAppTrimmingSign)) ||
+                FAILED(fmtIdleApp->SetTrimming(&idleAppTrimming, idleAppTrimmingSign))) {
+                releaseDrawingResources();
+                return false;
+            }
         }
 
         // 歌曲标题、艺术家和每日一言滚动时，左右各 8 DIP 逐渐淡出；
@@ -868,21 +896,17 @@ struct MediaPopup::Impl {
             collection->Release();
             return SUCCEEDED(hr) && *out;
         };
-        const bool mediaFadeReady = createTextEdgeFade(
+        const bool mediaFadeReady = createMedia && createTextEdgeFade(
             kPopupTextLeftDip, kPopupWidthDip - kMediaTextRightReserveDip,
             &brushMediaTextEdgeFade);
-        const bool idleFadeReady = createTextEdgeFade(
+        const bool idleFadeReady = createIdle && createTextEdgeFade(
             20.0f, kPopupWidthDip - 20.0f, &brushIdleTextEdgeFade);
-        if ((mediaFadeReady || idleFadeReady) && FAILED(rt->CreateLayer(&textEdgeFadeLayer))) {
+        if ((mediaFadeReady || idleFadeReady) && !textEdgeFadeLayer &&
+            FAILED(rt->CreateLayer(&textEdgeFadeLayer))) {
             releaseCom(brushMediaTextEdgeFade);
             releaseCom(brushIdleTextEdgeFade);
         }
 
-        // 画笔按调色板重建后，如果背景快照仍然有效，沿用之前采样的亮度恢复
-        // 文字对比色，避免为重新采样而隐藏窗口造成可见闪烁。
-        if (backdropBmp && lastBackdropLuminance >= 0.0f)
-            applyBackdropTextContrast(lastBackdropLuminance);
-        themeDirty = false;
         return true;
     }
 
@@ -1558,6 +1582,8 @@ struct MediaPopup::Impl {
     void drawIdle(ID2D1DeviceContext* rt, float w, bool updateHitTest) {
         if (!rt)
             return;
+        D2D1_MATRIX_3X2_F contentTransform{};
+        rt->GetTransform(&contentTransform);
         if (updateHitTest) {
             copyRect = {};
             idleQuickExpandRect = {};
@@ -1588,11 +1614,11 @@ struct MediaPopup::Impl {
                         rt->PushAxisAlignedClip(D2D1::RectF(8.0f, kIdleHeaderBottomDip,
                                                             w - 8.0f, transitionBottom),
                                                 D2D1_ANTIALIAS_MODE_ALIASED);
-                        rt->SetTransform(D2D1::Matrix3x2F::Translation(oldOffset, cardOriginDip));
+                        rt->SetTransform(D2D1::Matrix3x2F::Translation(oldOffset, 0.0f) * contentTransform);
                         drawIdleQuoteUnit(rt, w, idleContentTransition.from, false);
-                        rt->SetTransform(D2D1::Matrix3x2F::Translation(newOffset, cardOriginDip));
+                        rt->SetTransform(D2D1::Matrix3x2F::Translation(newOffset, 0.0f) * contentTransform);
                         drawIdleQuoteUnit(rt, w, idle, true);
-                        rt->SetTransform(D2D1::Matrix3x2F::Translation(0.0f, cardOriginDip));
+                        rt->SetTransform(contentTransform);
                         rt->PopAxisAlignedClip();
                     }
                 }
@@ -1648,7 +1674,7 @@ struct MediaPopup::Impl {
             pageArrowRect = D2D1::RectF(local.left, cardOriginDip + local.top,
                                         local.right, cardOriginDip + local.bottom);
         // 高亮跟随视觉状态而不是命中测试标志：合成层路径（updateHitTest=false）
-        // 必须画出与交换链一致的高亮，否则点击箭头触发转场时，按下/悬停高亮
+        // 必须画出与主表面一致的高亮，否则点击箭头触发转场时，按下/悬停高亮
         // 会在层挂载与撤层瞬间凭空消失/出现。
         if (hoverPageArrow || pressedPageArrow)
             drawAdaptiveControlSurface(rt, local, 8.0f, pressedPageArrow, page);
@@ -1892,7 +1918,7 @@ struct MediaPopup::Impl {
             D2D1::RectF(inset, inset, w - inset, h - inset),
             kPopupCornerDip, kPopupCornerDip), brushStroke, 1.0f / scale());
 
-        // 页面切换不再重建画笔；目标页的文字对比色要在普通交换链接管前
+        // 页面切换不再重建画笔；目标页的文字对比色要在主表面接管前
         // 由当前页面显式恢复，避免复用上一页画笔颜色。
         if (hasBackdropTextContrastForPage(page)) {
             applyBackdropTextContrastForPage(lastBackdropLuminance, page);
@@ -1926,10 +1952,10 @@ struct MediaPopup::Impl {
         }
 
         // 内容层随卡片横向移动。内容不经过外层几何裁剪：各元素均够不到圆角
-        // 区，新页卡片背景自身已是圆角绘制（模糊图有内层裁剪），与交换链稳态
+        // 区，新页卡片背景自身已是圆角绘制（模糊图有内层裁剪），与主表面稳态
         // 渲染保持一致——避免层中间纹理重采样导致文字在交接瞬间偏移。
         // 新页背景随内容一起滑入（旧页背景由固定背景层保留到转场结束），
-        // 收尾时交换链终帧与层内终态一致，撤层不再出现背景换色。
+        // 收尾时主表面终帧与层内终态一致，撤层不再出现背景换色。
         if (!oldLayer)
             drawCardBackground(rt, w, popupHeightDip(), page, false);
         drawPageLayer(rt, w, page, oldLayer, false, false);
@@ -1944,12 +1970,12 @@ struct MediaPopup::Impl {
 
     void drawCategoryContent(ID2D1DeviceContext* rt, float w, float cardH) {
         // 页面互切期间，两页内容承载在两个 DComp 合成层上，横向滑动由合成器
-        // 按刷新率执行（BeginDraw 前统一启动）；交换链保留上一张完整卡片，不
-        // 重绘或提交透明底，UI 线程不再逐帧刷新主卡片。
+        // 按刷新率执行（BeginDraw 前统一启动）；主表面保留上一张完整卡片，
+        // UI 线程不再逐帧刷新主卡片。
         if (categoryTransition.active())
             return;
         // 快速打开展开/收起期间，一言区、标题/Tab、列表主体承载在 DComp 合成层上，
-        // 交换链只画卡片底与返回箭头，不重复绘制空闲页内容。
+        // 不重复绘制空闲页内容。
         if (quickExpandTransition.active() && currentPage() == PopupPage::Idle) {
             drawPageArrow(rt, w, PopupPage::Idle, false);
             return;
@@ -1998,8 +2024,8 @@ struct MediaPopup::Impl {
 
         // 先以挂载初始状态（内容层创建即 0 透明度、背景层同为 0 透明度）
         // 提交并等待合成器处理完，让新表面先进入合成树；再启动动画并把背景层
-        // 转可见，避免新表面首帧在合成器里显示空白底色。根交换链在整个页面
-        // 互切期间保持上一张完整卡片，不再出现空白交换链帧。
+        // 转可见，避免新表面首帧在合成器里显示空白底色。主表面在整个页面
+        // 互切期间保持上一张完整卡片。
         renderer.commit();
         renderer.waitForCommitCompletion();
         const float travel = kCategoryTransitionTravelDip * scale();
@@ -2022,9 +2048,8 @@ struct MediaPopup::Impl {
         return true;
     }
 
-    // 快速打开展开/收起：render() 先把只包含卡片背景和返回按钮的基准帧绘制到
-    // 当前交换链后备缓冲，再把固定背景、一言区和展开态的快速打开区
-    // 交给 DComp。固定背景覆盖交换链，避免背景随 Present 交接单独闪烁；内容层只
+    // 快速打开展开/收起：主表面保持上一张完整卡片，把固定背景、一言区和展开态
+    // 的快速打开区交给 DComp。固定背景覆盖主表面，避免旧内容重影；内容层只
     // 做合成器位移、裁剪和透明度。展开时快速打开区整体上移并淡入，收起时整体下移
     // 并淡出。列表视口高度通过层内矩形裁剪底边收放（该底边在层内坐标系中与位移
     // 无关，直接按两个端点值插值）。一言区原地不动，由裁剪底边扫过模拟被覆盖/显露。
@@ -2080,7 +2105,7 @@ struct MediaPopup::Impl {
             return false;
         if (auto* dc = renderer.beginTransitionBackdropDraw()) {
             drawCardBackground(dc, w, popupHeightDip(), PopupPage::Idle, false);
-            // 固定背景层位于交换链之上，因此把快速展开期间仍需可见的页面
+            // 固定背景层位于主表面之上，因此把快速展开期间仍需可见的页面
             // 返回箭头一并画进稳定层，避免它被整卡片背景覆盖。
             drawPageArrow(dc, w, PopupPage::Idle, false);
             if (!renderer.endTransitionBackdropDraw(dc))
@@ -2090,7 +2115,7 @@ struct MediaPopup::Impl {
         }
 
         // 层 0：一言区，原点即卡片原点，随裁剪底边扫过被隐藏/显露。
-        // 当前交换链后备缓冲已经绘制成无内容基准帧，不会与旧内容重影。
+        // 固定背景层覆盖主表面的旧内容，避免重影。
         if (auto* dc = renderer.beginTransitionLayerDraw(0)) {
             if (idle.showText) {
                 drawText(dc, idle.showQuote ? L"每日一言" : L"欢迎", fmtIdleHeader,
@@ -2151,7 +2176,7 @@ struct MediaPopup::Impl {
 
         // 层 3：列表主体（应用图标/任务行）。只绘制展开态主体，但把它的局部
         // 原点放在列表顶部，因此视觉层可以从收起态列表顶平滑移动到展开态列表顶，
-        // 且整个过程保持不透明，避免图标在交换链清空或层淡出时短暂消失。
+        // 且整个过程保持不透明，避免图标在画面交接或层淡出时短暂消失。
         if (auto* dc = renderer.beginTransitionLayerDraw(3)) {
             const bool savedExpanded = quickExpansion.expanded;
             const float savedT = quickExpansion.progress;
@@ -2182,7 +2207,7 @@ struct MediaPopup::Impl {
         }
 
         // 先挂载透明的背景/内容层并等待表面进入合成树，再转可见并设置动画。
-        // 这样下面交换链的基准帧无论何时 Present，背景都已经由固定层覆盖。
+        // 主表面保持旧画面，直到收尾帧准备完成后再撤除固定层。
         renderer.commit();
         renderer.waitForCommitCompletion();
         if (!renderer.showTransitionBackdrop())
@@ -2237,8 +2262,7 @@ struct MediaPopup::Impl {
             idleScrollView.stop();
             idleScrollView.setVisible(false);
         }
-        // 合成层已经覆盖卡片时，任何额外的交换链 Present 都可能把透明底单独
-        // 推给合成器；状态会在转场收尾时统一预绘制并交接。
+        // 合成层已经覆盖卡片时保留主表面；状态会在转场收尾时统一预绘制并交接。
         if ((categoryTransition.active() && categoryTransition.hasLayers()) ||
             (quickExpandTransition.active() && quickExpandTransition.hasLayers()))
             return true;
@@ -2255,7 +2279,7 @@ struct MediaPopup::Impl {
         if (pxW <= 0 || pxH <= 0)
             return false;
         CompositionRenderer::BindTimings bindTimings;
-        if (!renderer.bind(hwnd, pxW, pxH, &bindTimings))
+        if (!renderer.bindSurface(hwnd, pxW, pxH, &bindTimings))
             return false;
         const auto renderBound = runtime_log::uiTimeMs();
         if (deviceGeneration != renderer.deviceGeneration()) {
@@ -2283,6 +2307,12 @@ struct MediaPopup::Impl {
         }
         if (!createResources())
             return false;
+        const bool needsMedia = !idleMode ||
+            (categoryTransition.active() && categorySnapshot.from == PopupPage::Media);
+        const bool needsIdle = idleMode ||
+            (categoryTransition.active() && categorySnapshot.from == PopupPage::Idle);
+        if (!createPageResources(needsMedia, needsIdle))
+            return false;
         const auto resourcesReady = runtime_log::uiTimeMs();
         const bool categoryTransitionNeedsDynamicBackground =
             categoryTransition.active() &&
@@ -2302,21 +2332,20 @@ struct MediaPopup::Impl {
             captureBackdrop(!frostedBackgroundActive() &&
                             (categoryTransitionNeedsBackdrop || prewarmBackdrop));
         const auto backdropReady = runtime_log::uiTimeMs();
-        buildTextLayouts();
-        if (coverDirty)
-            decodeCover();
-        if (sourceIconDirty)
-            decodeSourceIcon();
-        if (idleMode || (categoryTransition.active() && categorySnapshot.from == PopupPage::Idle)) {
+        if (needsMedia) {
+            buildTextLayouts();
+            if (coverDirty)
+                decodeCover();
+            if (sourceIconDirty)
+                decodeSourceIcon();
+        }
+        if (needsIdle) {
             if (idleMode)
                 buildIdleTextLayout();
             decodeIdleIcons();
         }
         const auto contentReady = runtime_log::uiTimeMs();
 
-        auto* rt = renderer.renderTarget();
-        if (!rt)
-            return false;
         const float w = dip(pxW);
         const float cardH = popupHeightDip();
         const float infoW = textAreaWidth(w);
@@ -2324,10 +2353,15 @@ struct MediaPopup::Impl {
         mediaLayout_ = media_popup_detail::mediaPageLayout(w, cardOriginDip);
 
         // 页面互切：把固定圆角底板、两页内容和横向位移动画一次性提交到
-        // DComp。主交换链保留上一张完整卡片，切换期间不再清空或 Present。
+        // DComp。主表面保留上一张完整卡片，切换期间不再重绘。
         if (categoryTransition.active() && !categoryTransition.hasLayers() &&
             !startCategoryLayerTransition(w)) {
             stopCategoryTransition();
+        }
+        if (quickExpandTransition.active() && !quickExpandTransition.hasLayers() &&
+            !startQuickExpandLayerTransition(w)) {
+            stopQuickExpandTransition();
+            return render();
         }
         const bool categoryLayersCoverCard =
             categoryTransition.active() && categoryTransition.hasLayers();
@@ -2338,20 +2372,21 @@ struct MediaPopup::Impl {
             return true;
         }
 
-        rt->BeginDraw();
-        rt->SetTransform(D2D1::Matrix3x2F::Identity());
-        rt->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
-        rt->SetTransform(D2D1::Matrix3x2F::Translation(0.0f, cardOriginDip));
+        auto* rt = renderer.beginSurfaceDraw(hwnd, pxW, pxH);
+        if (!rt) {
+            releaseDrawingResources();
+            return false;
+        }
+        D2D1_MATRIX_3X2_F surfaceTransform{};
+        rt->GetTransform(&surfaceTransform);
+        rt->SetTransform(D2D1::Matrix3x2F::Translation(0.0f, cardOriginDip) * surfaceTransform);
         drawCardBackground(rt, w, cardH, currentPage(), true);
         drawCategoryContent(rt, w, cardH);
 
-        rt->SetTransform(D2D1::Matrix3x2F::Identity());
-        const HRESULT hr = rt->EndDraw();
+        const bool drawnSuccessfully = renderer.endSurfaceDraw(rt);
         const auto renderDrawn = runtime_log::uiTimeMs();
-        if (FAILED(hr)) {
-            runtime_log::writef(
-                L"[media-popup] EndDraw failed: 0x%08X, releasing drawing resources",
-                static_cast<unsigned>(hr));
+        if (!drawnSuccessfully) {
+            runtime_log::writef(L"[media-popup] surface draw failed, releasing drawing resources");
             releaseDrawingResources();
             return false;
         }
@@ -2364,15 +2399,7 @@ struct MediaPopup::Impl {
                 renderer.resetRoot();
         }
 
-        // 快速展开的固定背景和内容层已在 startQuickExpandLayerTransition() 中完成
-        // 两段提交并等待表面进入合成树；这里直接 Present 基准帧，避免再插入一批
-        // 背景/内容交接命令。
-        if (quickExpandTransition.active() && !quickExpandTransition.hasLayers() &&
-            !startQuickExpandLayerTransition(w)) {
-            stopQuickExpandTransition();
-            return render();
-        }
-        if (!renderer.present()) {
+        if (!renderer.commit()) {
             releaseDrawingResources();
             return false;
         }
@@ -2418,7 +2445,7 @@ struct MediaPopup::Impl {
     }
 
     // 层转场收尾（页面互切与快速打开展开/收起共用）：先保留终点层并把最终页面
-    // 送入交换链，等待目标帧进入合成器后再撤层，避免撤层与交换链帧交接时闪烁。
+    // 送入主表面，等待目标帧进入合成器后再撤层，避免撤层与主表面交接时闪烁。
     void finishLayerTransition(media_popup_detail::LayerTransition& transition, UINT_PTR timer) {
         if (!transition.active())
             return;
@@ -2428,7 +2455,7 @@ struct MediaPopup::Impl {
         const bool canPrimeTarget = visibility.visible() && !visibility.animating();
         if (canPrimeTarget) {
             // 先保留终点层，只结束“转场中”状态，让 render() 把最终卡片画到
-            // 交换链。转场层仍在合成树中时，Present/Commit 的交接不会露出空白
+            // 主表面。转场层仍在合成树中时，提交画面不会露出空白
             // 的图标区域；等待目标帧真正进入合成器后再撤层。
             transition.retainFinal();
             if (render())
@@ -2707,9 +2734,6 @@ struct MediaPopup::Impl {
             KillTimer(hwnd, kCopyFeedbackTimer);
         resetPageInteractionState();
         idleMode = target != PopupPage::Media;
-        // 两页共用同一套尺寸和绘制资源；页面背景、文字对比色和内容差异由
-        // drawCategoryContentLayer()/drawCardBackground() 按 page 参数处理，
-        // 不在转场起点拆掉画笔、文字格式和裁剪层，避免动画开始前出现同步卡顿。
         renderer.resetRoot();
         // 两个页面的外层尺寸已经统一；切换时保持 HWND 的位置和大小，
         // 避免 SetWindowPos 在内容转场之外再触发一次窗口级重绘。
@@ -2998,8 +3022,8 @@ struct MediaPopup::Impl {
     }
 
     void renderOrDefer() {
-        // DComp 正在独立驱动内容层时，交换链重绘既不能更新层内快照，
-        // 又会制造额外 Present；最终收尾帧会统一提交最新状态。
+        // DComp 正在独立驱动内容层时，主表面重绘不能更新层内快照；
+        // 最终收尾帧会统一提交最新状态。
         if (categoryTransition.active() || quickExpandTransition.active())
             return;
         if (visibility.animating()) {
