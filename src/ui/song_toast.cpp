@@ -29,6 +29,8 @@ constexpr UINT_PTR kAutoHideTimer = 2;
 constexpr UINT_PTR kCloseTimer = 3;
 constexpr UINT_PTR kScrollTimer = 4;
 constexpr UINT_PTR kContentTimer = 5;
+constexpr UINT_PTR kDeviceIdleTimer = 6;
+constexpr UINT kDeviceIdleMs = 5000;
 constexpr UINT kContentAnimationMs = 160;
 constexpr UINT kEnterAnimationMs = 240;
 constexpr UINT kCloseAnimationMs = 180;
@@ -95,6 +97,7 @@ struct SongToast::Impl {
     float toastWidthDip = kToastMinWidthDip;
     ULONGLONG contentStartMs = 0;
     ULONGLONG scrollReadyMs = 0;
+    ULONGLONG deviceReleaseAt = 0;
 
     CompositionRenderer renderer;
     uint64_t deviceGeneration = 0;
@@ -155,6 +158,8 @@ struct SongToast::Impl {
         KillTimer(hwnd, kCloseTimer);
         KillTimer(hwnd, kScrollTimer);
         KillTimer(hwnd, kContentTimer);
+        KillTimer(hwnd, kDeviceIdleTimer);
+        deviceReleaseAt = 0;
         contentStartMs = 0;
         scrollTimerRunning = false;
         entering = false;
@@ -912,6 +917,8 @@ struct SongToast::Impl {
         const HMONITOR nextMonitor = selectedMonitor();
         if (!nextMonitor)
             return;
+        KillTimer(hwnd, kDeviceIdleTimer);
+        deviceReleaseAt = 0;
         const bool monitorChanged = targetMonitor != nextMonitor;
         targetMonitor = nextMonitor;
         if (monitorChanged) {
@@ -993,15 +1000,25 @@ struct SongToast::Impl {
     }
 
     void hideImmediate() {
+        // 无播放状态可能重复请求隐藏，不延后已经安排的设备回收。
+        if (!visible && deviceReleaseAt != 0)
+            return;
         visible = false;
         if (!hwnd)
             return;
         killTimers();
         ShowWindow(hwnd, SW_HIDE);
-        // 提示窗隐藏后不保留画面缓冲；设备及字体格式继续复用。
+        // 画面立即回收；短时间连续切歌复用设备，闲置后再释放设备链。
         releaseDeviceResources();
         renderer.releaseWindowResources();
         renderer.commit();
+        if (deviceGeneration != 0) {
+            deviceReleaseAt = GetTickCount64() + kDeviceIdleMs;
+            if (!SetTimer(hwnd, kDeviceIdleTimer, kDeviceIdleMs, nullptr)) {
+                deviceReleaseAt = 0;
+                releaseDrawingResources();
+            }
+        }
     }
 
     void setMedia(const OverlayMediaInfo& info) {
@@ -1034,7 +1051,14 @@ struct SongToast::Impl {
         case WM_MOUSEACTIVATE:
             return MA_NOACTIVATE;
         case WM_TIMER:
-            if (wp == kContentTimer) {
+            if (wp == kDeviceIdleTimer) {
+                if (!visible && deviceReleaseAt != 0 && GetTickCount64() >= deviceReleaseAt) {
+                    KillTimer(hwnd, kDeviceIdleTimer);
+                    deviceReleaseAt = 0;
+                    releaseDrawingResources();
+                    runtime_log::writef(L"[ui][song-toast] idle device released");
+                }
+            } else if (wp == kContentTimer) {
                 if (GetTickCount64() - contentStartMs >= kContentAnimationMs || !clientAnimations) {
                     KillTimer(hwnd, kContentTimer);
                     contentStartMs = 0;

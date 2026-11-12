@@ -2,7 +2,7 @@
 #include "ui/font_sizes.h"
 
 #include "ui/fluent_theme.h"
-#include "graphics/composition_renderer.h"
+#include "graphics/bitmap_renderer.h"
 #include "ui/platform_icon.h"
 #include "logging/runtime_logger.h"
 #include "logging/ui_timing.h"
@@ -51,8 +51,7 @@ struct MenuWnd {
     int parentRow = -1;
     MenuWnd* child = nullptr;
     FluentMenu::Callback cb; // 仅根菜单持有
-    CompositionRenderer renderer;
-    uint64_t deviceGeneration = 0;
+    BitmapRenderer renderer;
     ID2D1SolidColorBrush* brush = nullptr;
     IDWriteTextFormat* fmt = nullptr;
     std::vector<ID2D1Bitmap*> nativeIconBitmaps;
@@ -230,6 +229,16 @@ struct MenuWnd {
     void render() {
         if (!hwnd)
             return;
+        HDC hdc = GetDC(hwnd);
+        if (!hdc)
+            return;
+        paint(hdc);
+        ReleaseDC(hwnd, hdc);
+    }
+
+    void paint(HDC hdc) {
+        if (!hwnd || !hdc)
+            return;
         const auto started = runtime_log::uiTimeMs();
         frameReady = false;
         RECT rc;
@@ -242,17 +251,15 @@ struct MenuWnd {
             return;
         UINT dpi = GetDpiForWindow(hwnd);
         renderer.setDpi(dpi);
-        if (!renderer.bind(hwnd, w, h)) {
-            releaseDrawingResources();
-            return;
-        }
-        if (deviceGeneration != renderer.deviceGeneration()) {
-            releaseDrawingResources();
-            deviceGeneration = renderer.deviceGeneration();
-        }
         auto* rt = renderer.renderTarget();
         if (!rt)
             return;
+        // 和普通 Mica 对话框一致，直接绑定窗口 DC，避免为小菜单创建 GPU 设备链。
+        if (FAILED(rt->BindDC(hdc, &rc))) {
+            releaseDrawingResources();
+            renderer.discard();
+            return;
+        }
         float s = dipScale(dpi);
         float wDip = w / s;
 
@@ -356,11 +363,8 @@ struct MenuWnd {
         if (FAILED(hr)) {
             releaseDrawingResources();
             renderer.discard();
-        } else if (renderer.present()) {
-            frameReady = true;
         } else {
-            releaseDrawingResources();
-            renderer.discard();
+            frameReady = true;
         }
         const auto elapsed = runtime_log::uiTimeMs() - started;
         if (elapsed >= 24) {
@@ -501,7 +505,7 @@ MenuWnd* createMenuLevel(HWND owner, MenuWnd* parent, std::vector<FluentMenuItem
 
     // Mica 保留普通窗口的 caption 样式，由 WM_NCCALCSIZE 隐藏标题栏。
     // 不使用 TOOLWINDOW；已有 owner 关系负责隐藏任务栏入口。
-    mw->hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP,
+    mw->hwnd = CreateWindowExW(WS_EX_TOPMOST,
                                kMenuClass, L"", WS_POPUP | WS_CAPTION, x, y, w,
                                h, owner, nullptr, GetModuleHandleW(nullptr), mw);
     if (!mw->hwnd) {
@@ -569,11 +573,8 @@ LRESULT MenuWnd::handleMsg(UINT msg, WPARAM wp, LPARAM lp) {
         return DefWindowProcW(hwnd, msg, backdrop ? TRUE : wp, -1);
     case WM_PAINT: {
         PAINTSTRUCT ps;
-        BeginPaint(hwnd, &ps);
-        // 已提交的透明合成表面由 DWM 保留，不再通过 GDI 位图复制覆盖材质。
-        if (!frameReady) {
-            render();
-        }
+        HDC hdc = BeginPaint(hwnd, &ps);
+        paint(hdc);
         EndPaint(hwnd, &ps);
         return 0;
     }
