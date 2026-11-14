@@ -123,7 +123,7 @@ CMake 在 configure 阶段会通过 `vcpkg.json` 自动检查并安装缺失依�
 
 ## CI/CD 与发布
 
-GitHub Actions 会在提交到 `main` 或向 `main` 提交 Pull Request 时执行 Windows x64 Release 构建、运行发布构建校验并生成安装包。构建产物可在对应的 Actions 运行记录中下载。
+GitHub Actions 仅在推送 `v*` 版本标签时执行 Windows x64 Release 构建、测试和发布构建校验，生成安装包并发布 GitHub Release。普通分支推送和 Pull Request 不触发软件构建，也不提供手动构建入口。构建产物可在对应的 Actions 运行记录中下载；网站仍由独立的 Pages 工作流部署。
 
 创建 GitHub Release 时，先同步修改 `src/app_info.h` 与 `installer/QQMusicLyric.iss` 中的版本号，然后推送同版本标签：
 
@@ -132,7 +132,7 @@ git tag v2.7.0
 git push origin v2.7.0
 ```
 
-标签中的核心版本必须与源码版本一致。带后缀的标签（例如 `v2.7.0-fork.1`）会自动发布为 prerelease，适合在 fork 仓库验证；不带后缀的标签会发布为正式版本。也可以在 Actions 页面手动运行 **Build and Release**，选择是否发布；手动发布未填写标签时会自动使用唯一的 `v<版本>-fork.<运行编号>` 预发布标签。
+标签中的核心版本必须与源码版本一致。带后缀的标签（例如 `v2.7.0-fork.1`）会自动发布为 prerelease，适合在 fork 仓库验证；不带后缀的标签会发布为正式版本。
 
 ## 安装包
 
