@@ -1,13 +1,15 @@
 #include "app/presentation_model.h"
 #include "settings/app_settings.h"
 #include "media/playback_controller.h"
+#include "media/player_source.h"
 
 namespace {
 constexpr int64_t kLyricTransitionLeadMs = 100;
 
 int64_t lyricSelectionPosition(const SmtcSnapshot& snap, const std::vector<LyricLine>& lines) {
-    // 汽水首句前显示歌曲信息，到真实行起点才交接；后续行继续使用既有提前量。
-    if (snap.player == SmtcPlayerType::Soda && !lines.empty() && snap.positionMs < lines.front().ms)
+    // 前奏文案显示到首句的真实起点；后续行继续使用既有提前量。
+    if (player_source::showsTrackInfoBeforeLyrics(snap.player) &&
+        !lines.empty() && snap.positionMs < lines.front().ms)
         return snap.positionMs;
     return snap.positionMs + kLyricTransitionLeadMs;
 }
@@ -15,6 +17,8 @@ int64_t lyricSelectionPosition(const SmtcSnapshot& snap, const std::vector<Lyric
 const wchar_t* notRunningStatus(const PlaybackState& playback) {
     if (playback.lastPlayer_ == SmtcPlayerType::Soda)
         return L"汽水音乐未运行";
+    if (playback.lastPlayer_ == SmtcPlayerType::Spotify)
+        return L"Spotify 未运行";
     return playback.lastPlayer_ == SmtcPlayerType::NetEase ? L"网易云音乐未运行" : L"QQ 音乐未运行";
 }
 
@@ -105,16 +109,18 @@ void fillPresentationFrame(PresentationFrame& frame, const SmtcSnapshot& snap,
             frame.statusText.clear();
     } else if (!snap.sessionAlive)
         frame.statusText = notRunningStatus(playback);
-    else if (playback.lyricLoading_)
+    else if (playback.lyricLoading_ && snap.player != SmtcPlayerType::Spotify)
         frame.statusText = L"歌词加载中…";
-    else if (playback.currentLyrics_.empty())
-        frame.statusText = playback.currentKey.empty() ? L"等待播放…" : L"暂无歌词";
-    else if (snap.player == SmtcPlayerType::Soda) {
-        // 独立保留前奏展示文案，不向歌词插入伪造行，也不混入专辑字段。
+    else if (snap.player == SmtcPlayerType::Spotify ||
+             (snap.player == SmtcPlayerType::Soda && !playback.currentLyrics_.empty())) {
         frame.statusText = snap.title.empty() ? playback.currentTitle : snap.title;
         const auto& artist = snap.artist.empty() ? playback.currentArtist : snap.artist;
         if (!artist.empty())
             frame.statusText += L" - " + artist;
+        if (snap.player == SmtcPlayerType::Spotify && frame.statusText.empty())
+            frame.statusText = L"等待播放…";
+    } else if (playback.currentLyrics_.empty()) {
+        frame.statusText = playback.currentKey.empty() ? L"等待播放…" : L"暂无歌词";
     } else
         frame.statusText.clear();
 }

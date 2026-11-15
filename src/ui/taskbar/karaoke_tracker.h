@@ -16,7 +16,8 @@ public:
     void finishTransition(int line, IDWriteTextLayout* layout, int64_t position, bool hasKaraoke,
                           ULONGLONG now);
     void cancelEntry() { entering_ = false; }
-    void invalidateProgress() { settled_ = false; }
+    void holdProgress();
+    void invalidateProgress();
     bool settled() const { return settled_; }
     float progressForLine(int line) const { return line_ == line ? progress_ : 0.0f; }
 
@@ -31,5 +32,6 @@ private:
     float progress_ = 0.0f, smooth_ = 0.0f;
     int line_ = -1;
     bool entering_ = false, settled_ = true;
+    bool holdingProgress_ = false;
     ULONGLONG tick_ = 0;
 };

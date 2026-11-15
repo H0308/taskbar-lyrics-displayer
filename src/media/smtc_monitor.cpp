@@ -3,7 +3,7 @@
 
 #include "media/smtc/netease_smtc_adapter.h"
 #include "media/smtc/qq_music_smtc_adapter.h"
-#include "media/smtc/soda_music_smtc_adapter.h"
+#include "media/smtc/sampled_smtc_adapter.h"
 #include "media/smtc/smtc_common.h"
 #include "logging/runtime_logger.h"
 
@@ -66,6 +66,8 @@ const wchar_t* playerName(SmtcPlayerType player) noexcept {
         return L"NetEase";
     case SmtcPlayerType::Soda:
         return L"Soda Music";
+    case SmtcPlayerType::Spotify:
+        return L"Spotify";
     default:
         return L"Unknown";
     }
@@ -190,7 +192,8 @@ struct SmtcMonitor::Impl {
     Impl() {
         adapters.emplace_back(std::make_unique<smtc::QqMusicSmtcAdapter>());
         adapters.emplace_back(std::make_unique<smtc::NeteaseSmtcAdapter>());
-        adapters.emplace_back(std::make_unique<smtc::SodaMusicSmtcAdapter>());
+        adapters.emplace_back(std::make_unique<smtc::SampledSmtcAdapter>(SmtcPlayerType::Soda));
+        adapters.emplace_back(std::make_unique<smtc::SampledSmtcAdapter>(SmtcPlayerType::Spotify));
     }
 
     ~Impl() {
@@ -564,6 +567,8 @@ struct SmtcMonitor::Impl {
                 next.title = props.Title().c_str();
                 next.artist = props.Artist().c_str();
                 next.album = props.AlbumTitle().c_str();
+                if (next.player == SmtcPlayerType::Spotify)
+                    next.albumArtist = props.AlbumArtist().c_str();
                 if (next.player == SmtcPlayerType::NetEase) {
                     for (const auto& genre : props.Genres()) {
                         const std::wstring value = genre.c_str();
@@ -630,6 +635,7 @@ struct SmtcMonitor::Impl {
             changed = next.sessionAlive != snap.sessionAlive ||
                       next.player != snap.player || next.title != snap.title ||
                       next.artist != snap.artist || next.album != snap.album ||
+                      next.albumArtist != snap.albumArtist ||
                       next.neteaseSongId != snap.neteaseSongId ||
                       next.status != snap.status || next.durationMs != snap.durationMs ||
                       next.positionMs != snap.positionMs || next.anchorUtcMs != snap.anchorUtcMs ||
@@ -881,9 +887,10 @@ struct SmtcMonitor::Impl {
         }
 
         if (!found && selectedSessionAlive && selectedSession) {
-            // Soda 退出后主进程可能继续驻留；会话消失时不能仅凭进程存在保留歌词。
+            // 汽水和 Spotify 的展示以 SMTC 会话为准，会话消失后不能仅凭进程维持展示。
             // 仍经过下面的稳定窗口，短暂的会话重建不会立即清空展示。
-            if (selectedPlayer != SmtcPlayerType::Soda && playerProcessAlive(selectedPlayer)) {
+            if (selectedPlayer != SmtcPlayerType::Soda && selectedPlayer != SmtcPlayerType::Spotify &&
+                playerProcessAlive(selectedPlayer)) {
                 sessionLossCandidateSince = {};
                 return;
             }

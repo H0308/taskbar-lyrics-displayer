@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-// 专辑封面下载：当 SMTC 没有提供有效缩略图时，通过播放器接口兜底
+// 专辑封面下载：当 SMTC 没有提供有效缩略图时，从在线来源获取。
 class CoverProvider {
 public:
     using ReadyCallback = std::function<void(std::shared_ptr<const std::vector<uint8_t>>)>;
@@ -22,6 +22,9 @@ public:
 
     // 网易云：按增强 SMTC 提供的歌曲 ID 查询歌曲详情并异步下载专辑封面
     void requestNeteaseAsync(const std::wstring& songId, ReadyCallback cb);
+
+    void requestMusicBrainzAsync(const std::wstring& album, const std::wstring& albumArtist,
+                                 ReadyCallback cb);
 
 private:
     struct Impl;

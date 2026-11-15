@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-// 逐字时间轴（QRC/KRC/YRC 解析结果）；text 为歌词时间轴 token，英文常为整词
+// 逐字时间轴；text 为对应时间段的文本，英文常为整词。
 struct LyricChar {
     int64_t startMs = 0;
     int64_t endMs = 0;

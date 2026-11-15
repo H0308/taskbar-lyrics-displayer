@@ -174,9 +174,8 @@ void App::onSmtcChanged() {
     if (manualSearchDialog && manualSearchDialog->isOpen() && !snap.title.empty()) {
         manualSearchDialog->setTargetSong(
             snap.title, snap.artist, snap.timelineStale ? 0 : snap.durationMs,
-            snap.player == SmtcPlayerType::NetEase,
-            snap.player == SmtcPlayerType::NetEase ? snap.neteaseSongId : L"",
-            snap.player == SmtcPlayerType::Soda);
+            snap.player, snap.player == SmtcPlayerType::NetEase ? snap.neteaseSongId : L"",
+            snap.album);
         manualSearchTrackKey = key;
     }
     const TrackChange change =

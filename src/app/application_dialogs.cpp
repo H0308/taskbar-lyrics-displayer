@@ -188,18 +188,20 @@ void App::showManualSearch(HINSTANCE inst) {
     if (!manualSearchDialog->create(
             inst, trayHwnd, &playback_.lyricProvider(), playback_.state().currentTitle,
             playback_.state().currentArtist, playback_.state().currentDurationMs,
-            manualTarget.player == SmtcPlayerType::NetEase, targetNeteaseSongId,
-            manualTarget.player == SmtcPlayerType::Soda)) {
+            manualTarget.player, targetNeteaseSongId, manualTarget.album)) {
         manualSearchDialog.reset();
         return;
     }
     manualSearchDialog->setApplyCallback([this](LyricResult result) {
         SmtcSnapshot snap = monitor.snapshot();
-        if (manualSearchTrackKey.empty() || !snap.sessionAlive ||
+        if (manualSearchTrackKey.empty() || !snap.sessionAlive || snap.title.empty() ||
             playback_.state().currentKey != manualSearchTrackKey ||
             makeTrackKey(snap) != manualSearchTrackKey)
             return;
 
+        playback_.lyricProvider().setManualOverride(
+            snap.title, snap.artist, snap.timelineStale ? 0 : snap.durationMs,
+            result.lines, result.info, snap.player, snap.album);
         playback_.applyManualLyrics(std::move(result), snap);
     });
     manualSearchDialog->show();

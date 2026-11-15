@@ -4,6 +4,7 @@
   "dependencies": [
     "curl",
     "nlohmann-json",
-    "zlib"
+    "zlib",
+    "yaml-cpp"
   ]
 }

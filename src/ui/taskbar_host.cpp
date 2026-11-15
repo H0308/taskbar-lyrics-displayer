@@ -2423,17 +2423,26 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         applyPlaybackPatch(patch);
     }
 
+    void syncKaraokePlayback(int64_t position, bool playing) {
+        if (playing != media.playing) {
+            if (playing)
+                karaoke_.invalidateProgress();
+            else
+                karaoke_.holdProgress();
+        } else if (!playing && position != positionMs_) {
+            // 已暂停时收到的位置变化属于暂停中的跳转。
+            karaoke_.invalidateProgress();
+        }
+    }
+
     void applyPlaybackPatch(const PlaybackPatch& patch) {
         // 高频补丁必须属于当前已经应用的完整帧；旧曲目或旧帧的位置不能回写。
         if (patch.frameRevision != frameRevision_ || patch.requestGeneration != requestGeneration_)
             return;
 
         syncLyricEffectClock(patch.actualPositionMs, patch.playing);
-        if (patch.actualPositionMs != positionMs_) {
-            positionMs_ = patch.actualPositionMs;
-            if (!patch.playing)
-                karaoke_.invalidateProgress(); // 暂停中 seek：逐字高亮需要重新收敛
-        }
+        syncKaraokePlayback(patch.actualPositionMs, patch.playing);
+        positionMs_ = patch.actualPositionMs;
         mediaPopup.beginPresentationUpdate();
         mediaPopup.setProgress(patch.actualPositionMs);
         const bool playingChanged = media.playing != patch.playing;
@@ -2528,6 +2537,10 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const bool songChanged = trackChanged && !trackKey_.empty() && !frame.trackKey.empty() &&
                                  !durationOnlyMediaUpdate &&
                                  (mediaIdentityChanged || confirmedDurationChange);
+        if (trackChanged || lyricsChanged)
+            karaoke_.invalidateProgress();
+        else
+            syncKaraokePlayback(frame.actualPositionMs, frame.media.playing);
         const bool mediaChanged = updateMediaInfo(frame.media);
         const bool popupAvailable = mediaPopupAvailable(frame.visible);
         mediaPopup.beginPresentationUpdate();
@@ -2586,8 +2599,6 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             }
         }
         idle = frame.idle;
-        if (frame.actualPositionMs != positionMs_ && !media.playing)
-            karaoke_.invalidateProgress(); // 暂停中 seek：逐字高亮需要重新收敛
         positionMs_ = frame.actualPositionMs;
         if (statusOneShotChanged || (statusChanged && frame.statusTextOneShot)) {
             scroll_.setOneShot(frame.statusTextOneShot, monotonicNowMs());
@@ -3826,9 +3837,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return -1;
         if (currentLine >= 0 && (size_t)currentLine < lines.size())
             return currentLine;
-        // 汽水歌词可能省略作词、作曲等前奏行；首句未开始时使用歌曲信息文案。
+        // 支持前奏文案的来源在首句未开始时使用歌曲信息。
         const auto* source = player_source::find(media.sourceAppUserModelId);
-        if (source && source->player == SmtcPlayerType::Soda)
+        if (source && player_source::showsTrackInfoBeforeLyrics(source->player))
             return -1;
         return lines.empty() ? -1 : 0;
     }
@@ -3900,7 +3911,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const int previous = currentLine;
         const auto* source = previous == -1 && newLine == 0
                                  ? player_source::find(media.sourceAppUserModelId) : nullptr;
-        const bool fromPrelude = source && source->player == SmtcPlayerType::Soda &&
+        const bool fromPrelude = source && player_source::showsTrackInfoBeforeLyrics(source->player) &&
                                  scene_ == DisplayScene::Lyrics && media.playing &&
                                  !statusText.empty() && lastLyric_ == statusText &&
                                  typesetter_.resources().lyricLayout_.Get();
@@ -4259,10 +4270,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     // 平滑步进：过渡时间常数取当前字时长的 1/4（40~200ms），指数趋近目标，
     // 每个字的过渡快慢随其时长自然变化，且同步误差有界（约 τ）。
     // SMTC 锚点校正造成的目标抖动经低通后不再闪烁；非自然切换或大幅 seek 直接对齐，
-    // 自然转场中的新行则从首字平滑追赶真实位置。
+    // 自然转场中的新行则从首字平滑追赶真实位置。暂停时保留已绘制的高亮。
     float karaokeSmoothStep(const LyricLine&) {
         return karaoke_.advance(currentLine, typesetter_.resources().lyricLayout_.Get(),
-                                positionMs_, clientAnimations_, isLyricTransitionActive(),
+                                positionMs_, clientAnimations_ && media.playing,
+                                isLyricTransitionActive(),
                                 monotonicNowMs());
     }
 
@@ -7002,7 +7014,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return true;
         if (scroll_.animating() && !songLayerActive)
             return true;
-        // 逐字平滑未收敛（暂停 seek 后）时渲染到收敛为止
+        // 高亮失效或播放补间未收敛时需要刷新。
         if (karaokeLine() && !karaoke_.settled() && !songLayerActive)
             return true;
         // 播放中的逐字推进和黑胶旋转每帧都在变

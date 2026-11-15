@@ -135,8 +135,12 @@ struct ManualSearchDialog::Impl {
     std::wstring targetArtist;
     int64_t targetDurationMs = 0;
     std::wstring targetNeteaseSongId;
-    bool targetIsNetease = false;
-    bool targetIsSoda = false;
+    SmtcPlayerType targetPlayer = SmtcPlayerType::Unknown;
+    std::wstring targetAlbum;
+
+    bool targetIsSoda() const { return targetPlayer == SmtcPlayerType::Soda; }
+    bool targetIsNetease() const { return targetPlayer == SmtcPlayerType::NetEase; }
+    bool targetIsSpotify() const { return targetPlayer == SmtcPlayerType::Spotify; }
 
     std::vector<SearchCandidate> candidates;
     std::vector<CandidateItem> candidateItems;
@@ -1285,7 +1289,7 @@ struct ManualSearchDialog::Impl {
     void paint(fluent::FluentDialogSurface::Painter& painter, float, float) {
         const auto& p = fluent::palette();
         painter.drawText(L"手动搜索歌词", painter.textFormat(fluent::font_sizes::title, 600), titleRect, p.text);
-        painter.drawText(targetIsSoda ? L"搜索汽水音乐并预览原生歌词" : L"从多个来源选择并预览歌词",
+        painter.drawText(targetIsSoda() ? L"搜索汽水音乐并预览原生歌词" : L"从多个来源选择并预览歌词",
                          painter.textFormat(fluent::font_sizes::label, 400), subtitleRect,
                          p.textSecondary);
         drawTextField(painter, titleEditRect, titleEdit, kIdTitleEdit);
@@ -1295,12 +1299,14 @@ struct ManualSearchDialog::Impl {
         painter.drawTrimmedText(statusText, painter.textFormat(fluent::font_sizes::label, 400, false, true), statusRect,
                                  p.text);
         painter.drawTrimmedText(
-            targetIsSoda ? L"来自汽水音乐的原生歌词，支持逐字和逐行显示。"
+            targetIsSoda() ? L"来自汽水音乐的原生歌词，支持逐字和逐行显示。"
+            : targetIsSpotify() ? L"LRCLIB 支持逐字和逐行歌词。"
                            : L"YRC/LRC 为网易云歌词；QRC 为 QQ 原生逐字歌词；KRC 为酷狗逐字歌词",
             painter.textFormat(fluent::font_sizes::caption, 400, false, true), hintRect, p.textSecondary);
         painter.drawTrimmedText(
-            targetIsSoda ? L"当前为汽水音乐，仅显示汽水音乐歌词候选。"
-            : targetIsNetease ? L"当前为网易云音乐，仅显示网易云歌词候选。"
+            targetIsSoda() ? L"当前为汽水音乐，仅显示汽水音乐歌词候选。"
+            : targetIsNetease() ? L"当前为网易云音乐，仅显示网易云歌词候选。"
+            : targetIsSpotify() ? L"搜索酷狗、QQ 音乐和 LRCLIB 的同步歌词。"
                             : L"当前仅显示酷狗和 QQ 音乐歌词候选。",
             painter.textFormat(fluent::font_sizes::label, 600, false, true), compatibilityRect, p.text);
 
@@ -1457,17 +1463,18 @@ struct ManualSearchDialog::Impl {
                 if (!PostMessageW(hwndCopy, kMsgCandidatesReady, generation,
                                   reinterpret_cast<LPARAM>(payload)))
                     delete payload;
-            }, targetIsSoda);
+            }, targetPlayer);
     }
 
     void handleCandidatesReady(const std::vector<SearchCandidate>& result) {
         candidates.clear();
         for (const auto& candidate : result) {
-            if (targetIsSoda ? candidate.source == LyricSource::Soda
-                : targetIsNetease ? candidate.source == LyricSource::Yrc
+            if (targetIsSoda() ? candidate.source == LyricSource::Soda
+                : targetIsNetease() ? candidate.source == LyricSource::Yrc
                                 : (candidate.source == LyricSource::Krc ||
                                    candidate.source == LyricSource::Qrc ||
-                                   candidate.source == LyricSource::Lrc))
+                                   candidate.source == LyricSource::Lrc ||
+                                   (targetIsSpotify() && candidate.source == LyricSource::Lrclib)))
                 candidates.push_back(candidate);
         }
         candidateItems.clear();
@@ -1495,7 +1502,7 @@ struct ManualSearchDialog::Impl {
                 ++qrcCount;
             else if (candidate.source == LyricSource::Krc)
                 ++krcCount;
-            else
+            else if (candidate.source == LyricSource::Lrc)
                 ++lrcCount;
         }
 
@@ -1504,8 +1511,30 @@ struct ManualSearchDialog::Impl {
         };
         auto addCandidate = [this](int index) {
             const auto& candidate = candidates[index];
-            candidateItems.push_back(
-                {candidate.name + L" - " + candidate.singer, index, false});
+            std::wstring label = candidate.name + L" - " + candidate.singer;
+            if (targetIsSpotify()) {
+                if (!candidate.album.empty())
+                    label += L" · " + candidate.album;
+                if (candidate.durationMs > 0) {
+                    const auto seconds = candidate.durationMs / 1000;
+                    label += L" · " + std::to_wstring(seconds / 60) + L":" +
+                             (seconds % 60 < 10 ? L"0" : L"") + std::to_wstring(seconds % 60);
+                }
+            }
+            candidateItems.push_back({std::move(label), index, false});
+        };
+        auto addLrclibGroup = [&](const wchar_t* header, bool wordSync) {
+            bool hasHeader = false;
+            for (int i = 0; i < static_cast<int>(candidates.size()); ++i) {
+                const auto& candidate = candidates[i];
+                if (candidate.source != LyricSource::Lrclib || candidate.lrclibWordSync != wordSync)
+                    continue;
+                if (!hasHeader) {
+                    addHeader(header);
+                    hasHeader = true;
+                }
+                addCandidate(i);
+            }
         };
         if (sodaCount > 0) {
             addHeader(L"汽水音乐原生歌词（逐字／LRC）");
@@ -1537,14 +1566,18 @@ struct ManualSearchDialog::Impl {
                 if (candidates[i].source == LyricSource::Lrc)
                     addCandidate(i);
         }
+        addLrclibGroup(L"LRCLIB 逐字歌词", true);
+        addLrclibGroup(L"LRCLIB 逐行歌词（LRC）", false);
 
         if (candidates.empty()) {
             statusText = L"未找到相关歌曲，请尝试更换关键词。";
         } else {
-            statusText = targetIsSoda
+            statusText = targetIsSoda()
                 ? L"找到 " + std::to_wstring(sodaCount) + L" 条汽水音乐候选，点击选择以预览歌词。"
-                : targetIsNetease
+                : targetIsNetease()
                 ? L"找到 " + std::to_wstring(yrcCount) + L" 条网易云（YRC/LRC）候选，点击选择以预览歌词。"
+                : targetIsSpotify()
+                ? L"找到 " + std::to_wstring(candidates.size()) + L" 条候选，点击选择以预览歌词。"
                 : L"找到 " + std::to_wstring(krcCount) + L" 条酷狗逐字（KRC）、 " +
                          std::to_wstring(qrcCount) + L" 条 QQ 逐字（QRC）、 " +
                          std::to_wstring(lrcCount) + L" 条 QQ 逐行（LRC）候选，点击选择以预览歌词。";
@@ -1613,10 +1646,6 @@ struct ManualSearchDialog::Impl {
         SongInfo info = previewInfo;
         if (!targetNeteaseSongId.empty())
             info.neteaseSongId = targetNeteaseSongId;
-        if (provider) {
-            provider->setManualOverride(targetTitle, targetArtist, targetDurationMs,
-                                         std::vector<LyricLine>(previewLines), info, targetIsSoda);
-        }
         if (onApply)
             onApply(LyricResult{true, previewLines, std::move(info), false, true});
         destroy();
@@ -1965,16 +1994,17 @@ ManualSearchDialog::~ManualSearchDialog() {
 bool ManualSearchDialog::create(HINSTANCE inst, HWND parent, LyricProvider* provider,
                                 const std::wstring& targetTitle,
                                 const std::wstring& targetArtist,
-                                int64_t targetDurationMs, bool targetIsNetease,
-                                const std::wstring& targetNeteaseSongId, bool targetIsSoda) {
+                                int64_t targetDurationMs, SmtcPlayerType targetPlayer,
+                                const std::wstring& targetNeteaseSongId,
+                                const std::wstring& targetAlbum) {
     impl_->notifyHwnd = parent; // 仅用于关闭通知
     impl_->provider = provider;
     impl_->targetTitle = targetTitle;
     impl_->targetArtist = targetArtist;
     impl_->targetDurationMs = targetDurationMs;
     impl_->targetNeteaseSongId = targetNeteaseSongId;
-    impl_->targetIsNetease = targetIsNetease;
-    impl_->targetIsSoda = targetIsSoda;
+    impl_->targetPlayer = targetPlayer;
+    impl_->targetAlbum = targetAlbum;
 
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
@@ -2060,20 +2090,21 @@ void ManualSearchDialog::setPlaybackPosition(int64_t positionMs) {
 }
 
 void ManualSearchDialog::setTargetSong(const std::wstring& title, const std::wstring& artist,
-                                      int64_t durationMs, bool isNetease,
-                                      const std::wstring& neteaseSongId, bool isSoda) {
+                                      int64_t durationMs, SmtcPlayerType player,
+                                      const std::wstring& neteaseSongId,
+                                      const std::wstring& album) {
     const bool changed = title != impl_->targetTitle || artist != impl_->targetArtist ||
                          neteaseSongId != impl_->targetNeteaseSongId ||
-                         isNetease != impl_->targetIsNetease ||
-                         isSoda != impl_->targetIsSoda;
+                         player != impl_->targetPlayer ||
+                         (player == SmtcPlayerType::Spotify && album != impl_->targetAlbum);
     impl_->targetDurationMs = durationMs;
     if (!changed)
         return;
     impl_->targetTitle = title;
     impl_->targetArtist = artist;
     impl_->targetNeteaseSongId = neteaseSongId;
-    impl_->targetIsNetease = isNetease;
-    impl_->targetIsSoda = isSoda;
+    impl_->targetPlayer = player;
+    impl_->targetAlbum = album;
     ++impl_->searchGeneration;
     ++impl_->previewGeneration;
     impl_->candidateItems.clear();

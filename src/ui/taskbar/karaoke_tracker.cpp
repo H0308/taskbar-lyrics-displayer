@@ -4,9 +4,7 @@
 
 void KaraokeTracker::build(const std::vector<LyricLine>& lines, int lineIndex,
                            IDWriteTextLayout* layout) {
-    spans_.clear();
-    geometryLine_ = -1;
-    geometryLayout_ = nullptr;
+    clearGeometry();
     if (lineIndex < 0 || (size_t)lineIndex >= lines.size() || !layout)
         return;
 
@@ -60,6 +58,9 @@ float KaraokeTracker::target(int currentLine, IDWriteTextLayout* layout, int64_t
 
 float KaraokeTracker::advance(int currentLine, IDWriteTextLayout* layout, int64_t positionMs,
                               bool animations, bool transitioning, ULONGLONG now) {
+    if (holdingProgress_ && line_ == currentLine && geometryLayout_ == layout)
+        return progress_;
+
     int64_t charDur = 0;
     float target = this->target(currentLine, layout, positionMs, charDur);
     if (!animations) {
@@ -97,7 +98,24 @@ void KaraokeTracker::clearGeometry() {
     spans_.clear();
     geometryLine_ = -1;
     geometryLayout_ = nullptr;
+    holdingProgress_ = false;
 }
+
+void KaraokeTracker::holdProgress() {
+    holdingProgress_ = line_ >= 0 && geometryLine_ == line_ && geometryLayout_ != nullptr;
+    if (holdingProgress_) {
+        settled_ = true;
+        entering_ = false;
+    }
+}
+
+void KaraokeTracker::invalidateProgress() {
+    if (holdingProgress_)
+        tick_ = 0;
+    holdingProgress_ = false;
+    settled_ = false;
+}
+
 void KaraokeTracker::reset() {
     clearGeometry();
     progress_ = smooth_ = 0.0f;
@@ -108,6 +126,7 @@ void KaraokeTracker::reset() {
 }
 void KaraokeTracker::retarget(ULONGLONG now) {
     line_ = -1;
+    holdingProgress_ = false;
     settled_ = false;
     tick_ = now;
     entering_ = false;
@@ -115,6 +134,9 @@ void KaraokeTracker::retarget(ULONGLONG now) {
 void KaraokeTracker::finishTransition(int line, IDWriteTextLayout* layout, int64_t position,
                                       bool hasKaraoke, ULONGLONG now) {
     tick_ = now;
+    if (holdingProgress_ && hasKaraoke && line_ == line && geometryLayout_ == layout)
+        return;
+    holdingProgress_ = false;
     const bool preserve = entering_ && line_ == line;
     line_ = line;
     if (hasKaraoke) {

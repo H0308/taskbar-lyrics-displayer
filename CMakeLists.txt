@@ -40,6 +40,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(CURL REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(yaml-cpp CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
 
 # 生成资源脚本（嵌入深浅主题 ICO 图标）
@@ -113,7 +114,7 @@ add_executable(QQMusicLyric
     src/media/smtc/smtc_common.cpp
     src/media/smtc/qq_music_smtc_adapter.cpp
     src/media/smtc/netease_smtc_adapter.cpp
-    src/media/smtc/soda_music_smtc_adapter.cpp
+    src/media/smtc/sampled_smtc_adapter.cpp
     src/media/audio_spectrum.cpp
     src/media/app_volume.cpp
     src/monitor/resource_monitor.cpp
@@ -121,6 +122,7 @@ add_executable(QQMusicLyric
     src/idle/ticktick_provider.cpp
     src/lyric/lyric_provider.cpp
     src/lyric/lrc_parser.cpp
+    src/lyric/lyricsfile_parser.cpp
     src/lyric/qrc_decoder.cpp
     src/lyric/qrc_des.cpp
     src/lyric/cover_provider.cpp
@@ -171,6 +173,7 @@ target_compile_options(QQMusicLyric PRIVATE /utf-8 /EHsc)
 target_link_libraries(QQMusicLyric PRIVATE
     CURL::libcurl
     nlohmann_json::nlohmann_json
+    yaml-cpp::yaml-cpp
     ZLIB::ZLIB
     windowsapp
     winhttp
@@ -216,6 +219,7 @@ if(BUILD_TESTING)
         src/logging/runtime_logger.cpp
         src/lyric/cover_provider.cpp
         src/lyric/lrc_parser.cpp
+        src/lyric/lyricsfile_parser.cpp
         src/lyric/lyric_provider.cpp
         src/lyric/qrc_decoder.cpp
         src/lyric/qrc_des.cpp
@@ -252,6 +256,7 @@ if(BUILD_TESTING)
     target_link_libraries(QQMusicLyricParserTests PRIVATE
         CURL::libcurl
         nlohmann_json::nlohmann_json
+        yaml-cpp::yaml-cpp
         ZLIB::ZLIB
         windowsapp
         d2d1
@@ -280,3 +285,7 @@ install(TARGETS QQMusicLyric
             ".*[\\\\/][Ss]ystem32[\\\\/].*"
     RUNTIME DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" DESTINATION .)
+if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
+    install(FILES "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/yaml-cpp/copyright"
+            DESTINATION . RENAME LICENSE-yaml-cpp OPTIONAL)
+endif()

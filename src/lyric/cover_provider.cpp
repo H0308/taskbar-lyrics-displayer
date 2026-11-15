@@ -1,5 +1,6 @@
 #include "cover_provider.h"
 
+#include "app_info.h"
 #include "logging/runtime_logger.h"
 
 #include <curl/curl.h>
@@ -7,7 +8,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -43,7 +46,8 @@ size_t curlWrite(char* ptr, size_t size, size_t nmemb, void* userdata) {
 int curlXferAbort(void*, curl_off_t, curl_off_t, curl_off_t, curl_off_t);
 
 bool httpGet(CURL* curl, const std::string& url, const char* referer,
-             std::vector<uint8_t>& data, long& code, std::string& contentType) {
+             std::vector<uint8_t>& data, long& code, std::string& contentType,
+             const char* userAgent = kUserAgent) {
     data.clear();
     code = 0;
     contentType.clear();
@@ -51,7 +55,7 @@ bool httpGet(CURL* curl, const std::string& url, const char* referer,
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWrite);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &data);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, kUserAgent);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, userAgent);
     curl_easy_setopt(curl, CURLOPT_REFERER, referer);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 5000L);
@@ -118,6 +122,96 @@ int curlXferAbort(void*, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
     return g_shutdown.load() ? 1 : 0; // 返回非 0：curl 以 CURLE_ABORTED_BY_CALLBACK 立即返回
 }
 
+std::string lucenePhrase(const std::wstring& text) {
+    std::string phrase = "\"";
+    for (char ch : toUtf8(text)) {
+        if (ch == '\\' || ch == '"')
+            phrase += '\\';
+        phrase += ch;
+    }
+    return phrase + '"';
+}
+
+bool sameName(const std::string& utf8, const std::wstring& expected) {
+    if (utf8.empty() || expected.empty())
+        return false;
+    const int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(),
+                                           static_cast<int>(utf8.size()), nullptr, 0);
+    if (length <= 0)
+        return false;
+    std::wstring name(length, L'\0');
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(),
+                        static_cast<int>(utf8.size()), name.data(), length);
+    return CompareStringOrdinal(name.data(), length, expected.data(),
+                                static_cast<int>(expected.size()), TRUE) == CSTR_EQUAL;
+}
+
+std::string jsonText(const nlohmann::json& object, const char* key) {
+    const auto it = object.find(key);
+    return it != object.end() && it->is_string() ? it->get<std::string>() : std::string();
+}
+
+std::string musicBrainzReleaseGroup(CURL* curl, const std::wstring& album,
+                                   const std::wstring& albumArtist) {
+    const std::string query = "releasegroup:" + lucenePhrase(album) +
+                              " AND artist:" + lucenePhrase(albumArtist);
+    const std::unique_ptr<char, decltype(&curl_free)> escaped(
+        curl_easy_escape(curl, query.c_str(), static_cast<int>(query.size())), curl_free);
+    if (!escaped)
+        return {};
+    const std::string url = "https://musicbrainz.org/ws/2/release-group/?fmt=json&limit=10&query=" +
+                            std::string(escaped.get());
+    static const std::string userAgent = "QQMusicLyric/" + toUtf8(app_info::kVersion) +
+        " (https://github.com/H0308/qq-music-lyrics-displayer)";
+    std::vector<uint8_t> data;
+    long code = 0;
+    std::string contentType;
+    {
+        // MusicBrainz 公共 API 要求同一客户端平均每秒至多一次请求。
+        static std::mutex mutex;
+        using Clock = std::chrono::steady_clock;
+        static Clock::time_point nextRequest;
+        std::lock_guard<std::mutex> lock(mutex);
+        if (g_shutdown.load())
+            return {};
+        std::this_thread::sleep_until(nextRequest);
+        if (g_shutdown.load())
+            return {};
+        nextRequest = Clock::now() + std::chrono::seconds(1);
+        if (!httpGet(curl, url, nullptr, data, code, contentType, userAgent.c_str())) {
+            runtime_log::writef(L"[cover][MusicBrainz] search failed: http=%ld", code);
+            return {};
+        }
+    }
+
+    const auto root = nlohmann::json::parse(data.begin(), data.end(), nullptr, false);
+    const auto groups = root.find("release-groups");
+    if (groups == root.end() || !groups->is_array())
+        return {};
+    std::string matchedId;
+    for (const auto& group : *groups) {
+        if (!sameName(jsonText(group, "title"), album))
+            continue;
+        const auto credits = group.find("artist-credit");
+        if (credits == group.end() || !credits->is_array())
+            continue;
+        std::string artist;
+        for (const auto& credit : *credits)
+            artist += jsonText(credit, "name") + jsonText(credit, "joinphrase");
+        if (!sameName(artist, albumArtist))
+            continue;
+
+        const auto id = jsonText(group, "id");
+        if (id.size() != 36 || id.find_first_not_of("0123456789abcdef-") != std::string::npos)
+            continue;
+        // 同名同艺人的发行组可能对应不同专辑，例如单曲与录音室专辑。
+        if (!matchedId.empty() && matchedId != id)
+            return {};
+        matchedId = id;
+    }
+    return matchedId;
+}
+
 } // namespace
 
 struct CoverProvider::Impl {
@@ -165,10 +259,9 @@ struct CoverProvider::Impl {
                 auto cover = fetch ? fetch() : nullptr;
                 {
                     std::lock_guard<std::mutex> lk(impl->mtx);
-                    if (impl->generation != gen) {
-                        if (cb) cb(nullptr);
+                    // 被替换的请求已取消，不能把它当成下载失败继续查询下一来源。
+                    if (impl->generation != gen)
                         return;
-                    }
                 }
                 if (cb) cb(std::move(cover));
             });
@@ -252,5 +345,23 @@ void CoverProvider::requestNeteaseAsync(const std::wstring& songId, ReadyCallbac
         auto cover = downloadImage(curl, imageUrl, kNeteaseReferer);
         curl_easy_cleanup(curl);
         return cover;
+    }, std::move(cb));
+}
+
+void CoverProvider::requestMusicBrainzAsync(const std::wstring& album,
+                                          const std::wstring& albumArtist,
+                                          ReadyCallback cb) {
+    if (album.empty() || albumArtist.empty())
+        return;
+    impl_->request([album, albumArtist] {
+        const std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl(curl_easy_init(),
+                                                                     curl_easy_cleanup);
+        if (!curl)
+            return std::shared_ptr<const std::vector<uint8_t>>{};
+        const auto id = musicBrainzReleaseGroup(curl.get(), album, albumArtist);
+        if (id.empty() || g_shutdown.load())
+            return std::shared_ptr<const std::vector<uint8_t>>{};
+        return downloadImage(curl.get(), "https://coverartarchive.org/release-group/" +
+                                         id + "/front-250", nullptr);
     }, std::move(cb));
 }

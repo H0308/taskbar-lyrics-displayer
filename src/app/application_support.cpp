@@ -90,6 +90,8 @@ const wchar_t* coverSourceDisplayName(CoverSource source) {
         return L"QQ 音乐接口";
     case CoverSource::NeteaseApi:
         return L"网易云音乐接口";
+    case CoverSource::MusicBrainz:
+        return L"MusicBrainz / Cover Art Archive";
     default:
         return L"";
     }

@@ -1,12 +1,13 @@
 #pragma once
 
 #include "media/smtc/smtc_player_adapter.h"
-#include "media/smtc/soda_music_timeline.h"
+#include "media/smtc/sampled_timeline.h"
 
 namespace smtc {
 
-class SodaMusicSmtcAdapter final : public SmtcPlayerAdapter {
+class SampledSmtcAdapter final : public SmtcPlayerAdapter {
 public:
+    explicit SampledSmtcAdapter(SmtcPlayerType player) : player_(player) {}
     SmtcPlayerType playerType() const noexcept override;
     SmtcSessionIdentity identifySession(const Session& session) const override;
     void prepareInitialSnapshot(SmtcSnapshot& snapshot) const override;
@@ -18,7 +19,8 @@ public:
     void reset() override;
 
 private:
-    mutable SodaMusicTimeline timeline_;
+    const SmtcPlayerType player_;
+    mutable SampledTimeline timeline_;
 };
 
 } // namespace smtc

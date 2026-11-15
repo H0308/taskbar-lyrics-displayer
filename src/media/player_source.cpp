@@ -11,11 +11,14 @@ constexpr const wchar_t* kNeteaseSessionIds[] = {L"cloudmusic.exe", L"NeteaseBri
 constexpr const wchar_t* kNeteaseProcesses[] = {L"cloudmusic.exe", L"NeteaseBridge.exe"};
 constexpr const wchar_t* kSodaSessionIds[] = {L"汽水音乐"};
 constexpr const wchar_t* kSodaProcesses[] = {L"SodaMusic.exe"};
+constexpr const wchar_t* kSpotifySessionIds[] = {L"SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify"};
+constexpr const wchar_t* kSpotifyProcesses[] = {L"Spotify.exe"};
 
 constexpr Definition kDefinitions[] = {
     {SmtcPlayerType::QQMusic, L"QQ音乐", kQqSessionIds, false, kQqProcesses},
     {SmtcPlayerType::NetEase, L"网易云音乐", kNeteaseSessionIds, true, kNeteaseProcesses},
     {SmtcPlayerType::Soda, L"汽水音乐", kSodaSessionIds, false, kSodaProcesses},
+    {SmtcPlayerType::Spotify, L"Spotify", kSpotifySessionIds, true, kSpotifyProcesses},
 };
 
 } // namespace

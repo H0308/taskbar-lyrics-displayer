@@ -18,6 +18,8 @@ const wchar_t* coverSourceName(CoverSource source) {
         return L"qq-api";
     case CoverSource::NeteaseApi:
         return L"netease-api";
+    case CoverSource::MusicBrainz:
+        return L"musicbrainz";
     default:
         return L"unknown";
     }
@@ -31,6 +33,8 @@ const wchar_t* playerName(SmtcPlayerType player) {
         return L"NetEase Music";
     case SmtcPlayerType::Soda:
         return L"Soda Music";
+    case SmtcPlayerType::Spotify:
+        return L"Spotify";
     default:
         return L"Unknown";
     }
@@ -77,13 +81,19 @@ TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap,
     const SmtcPlayerType previousPlayer = state_.lastPlayer_;
     state_.lastPlayer_ = snap.player;
     const std::wstring key = makeTrackKey(snap);
-    const bool trackChanged = key != state_.currentKey && !snap.title.empty();
-    // QQ 会从未知时长补齐；Soda 还可能先携带上一首的有效时长，再修正。
-    // 同一播放器、来源和歌曲文案下的这些时长更新不是换歌，不能清掉封面和
-    // 专辑色；歌词仍按新时长重新建立匹配键。其他播放器保留未知时长补齐规则。
+    // 切入 Spotify 时即使曲目文案还没到，也要释放前一个播放器的歌词和封面。
+    const bool enteringSpotify = snap.player == SmtcPlayerType::Spotify &&
+                                 snap.player != previousPlayer;
+    const bool trackChanged = key != state_.currentKey && (!snap.title.empty() || enteringSpotify);
+    // 同一播放器、来源和歌曲文案下的时长补齐保留封面及专辑色。
+    // 汽水和 Spotify 的曲目与时间线分别更新，已知时长也可能需要修正。
     const bool durationOnlyTrackUpdate =
         trackChanged && snap.player == previousPlayer && !snap.timelineStale &&
-        (state_.currentDurationMs <= 0 || snap.player == SmtcPlayerType::Soda) &&
+        (state_.currentDurationMs <= 0 || snap.player == SmtcPlayerType::Soda ||
+         snap.player == SmtcPlayerType::Spotify) &&
+        (snap.player != SmtcPlayerType::Spotify ||
+         state_.currentKey == LyricProvider::makeSpotifyKey(snap.title, snap.artist, snap.album,
+                                                            state_.currentDurationMs)) &&
         snap.durationMs > 0 && snap.title == state_.currentTitle &&
         snap.artist == state_.currentArtist && snap.sourceAppUserModelId == previousSourceAppId;
     // QQ 的曲目键包含时长，切歌后时间线更新会让 trackChanged 再触发一次；
@@ -93,10 +103,10 @@ TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap,
     const bool newSmtcThumbnail =
         snap.thumbnail && !snap.thumbnail->empty() &&
         (!state_.lastSmtcThumbnail || state_.lastSmtcThumbnail != snap.thumbnail);
-    // Soda 会先给出旧封面，再通过同曲属性事件补齐新图。取色结果应随图片内容
-    // 失效，而不是只在换歌时失效；相同图片重新读取不需要重复取色。
-    const bool sodaCoverChanged =
-        snap.player == SmtcPlayerType::Soda && newSmtcThumbnail &&
+    // 同曲属性事件补齐的新封面也需要重新取色，相同图片无需重复取色。
+    const bool nativeCoverChanged =
+        (snap.player == SmtcPlayerType::Soda || snap.player == SmtcPlayerType::Spotify) &&
+        newSmtcThumbnail &&
         (!state_.lastCover_ || (snap.thumbnail != state_.lastCover_ &&
                                 *snap.thumbnail != *state_.lastCover_));
     if (snap.status != state_.lastStatus) {
@@ -130,8 +140,16 @@ TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap,
             state_.hasAlbumColor_ = false;
         // 跟随专辑开启时不回退配置色：沿用上一首的专辑色直到新封面取色完成，
         // 避免歌词加载窗口期配置色闪一下再切回专辑色
-        state_.lyricLoading_ = true;
-        if (snap.player == SmtcPlayerType::NetEase) {
+        state_.lyricLoading_ = snap.player != SmtcPlayerType::Spotify;
+        if (snap.player == SmtcPlayerType::Spotify) {
+            cancelLyricDebounce();
+            if (!snap.title.empty()) {
+                startLyricRequest(snap);
+            } else {
+                state_.lyricRequestStale_ = false;
+                ++state_.requestGeneration_;
+            }
+        } else if (snap.player == SmtcPlayerType::NetEase) {
             cancelLyricDebounce();
             startLyricRequest(snap);
             if (!snap.thumbnail || snap.thumbnail->empty())
@@ -173,7 +191,7 @@ TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap,
         }
     }
     state_.lastSmtcThumbnail = snap.thumbnail;
-    if (sodaCoverChanged)
+    if (nativeCoverChanged)
         state_.hasAlbumColor_ = false;
     // 时间线从残留恢复可信（stale 1→0）：若当前歌词请求是在不可信期间发出的
     // （等待超时被迫发出），用可信时长立即重发，覆盖可能已被时长过滤淘汰的结果。
@@ -204,10 +222,12 @@ void PlaybackController::applyManualLyrics(LyricResult result, const SmtcSnapsho
     if (!state_.lastSmtcThumbnail || state_.lastSmtcThumbnail->empty()) {
         if (snap.player == SmtcPlayerType::NetEase)
             requestNeteaseCoverFallback(snap.neteaseSongId);
-        else if (snap.player == SmtcPlayerType::QQMusic && !result.info.albummid.empty())
-            requestQqCoverFallback(result.info.albummid);
-        else if (snap.player == SmtcPlayerType::QQMusic)
-            requestQqCoverInfoFallback(snap);
+        else if (snap.player == SmtcPlayerType::QQMusic || snap.player == SmtcPlayerType::Spotify) {
+            if (!result.info.albummid.empty())
+                requestQqCoverFallback(result.info.albummid, snap.player);
+            else
+                requestQqCoverInfoFallback(snap);
+        }
     }
 }
 
@@ -255,21 +275,34 @@ void PlaybackController::logCoverCreated(CoverSource source,
                         state_.currentKey.c_str(), cover->size());
 }
 
-CoverProvider::ReadyCallback PlaybackController::coverReadyCallback(CoverSource source) {
+CoverProvider::ReadyCallback PlaybackController::coverReadyCallback(CoverSource source,
+                                                                   bool reportFailure) {
     const std::wstring key = state_.currentKey;
     const uint64_t generation = state_.requestGeneration_;
-    return [this, key, generation, source](std::shared_ptr<const std::vector<uint8_t>> cover) {
-        if (!cover || cover->empty())
+    const DWORD thread = mainThread_;
+    return [thread, key, generation, source, reportFailure](
+               std::shared_ptr<const std::vector<uint8_t>> cover) {
+        if ((!cover || cover->empty()) && !reportFailure)
             return;
         auto* payload = new CoverPayload{key, generation, source, std::move(cover)};
-        if (!PostThreadMessageW(mainThread_, kMsgCoverReady, 1, reinterpret_cast<LPARAM>(payload)))
+        if (!PostThreadMessageW(thread, kMsgCoverReady, 1, reinterpret_cast<LPARAM>(payload)))
             delete payload;
     };
 }
 
-void PlaybackController::requestQqCoverFallback(const std::wstring& albummid) {
+void PlaybackController::requestQqCoverFallback(const std::wstring& albummid,
+                                                SmtcPlayerType player) {
     if (!albummid.empty())
-        coverProvider.requestAsync(albummid, coverReadyCallback(CoverSource::QqApi));
+        coverProvider.requestAsync(albummid, coverReadyCallback(CoverSource::QqApi,
+                                                               player == SmtcPlayerType::Spotify));
+}
+
+void PlaybackController::requestMusicBrainzCover(const SmtcSnapshot& snap) {
+    if (snap.player != SmtcPlayerType::Spotify)
+        return;
+    const auto& artist = snap.albumArtist.empty() ? snap.artist : snap.albumArtist;
+    coverProvider.requestMusicBrainzAsync(snap.album, artist,
+                                         coverReadyCallback(CoverSource::MusicBrainz));
 }
 
 void PlaybackController::requestQqCoverInfoFallback(const SmtcSnapshot& snap) {
@@ -340,8 +373,13 @@ void PlaybackController::startLyricRequest(const SmtcSnapshot& snap, bool forceO
     } else if (snap.player == SmtcPlayerType::Soda) {
         provider.requestSodaAsync(snap.title, snap.artist, durationMs, postLyricResult);
     } else {
-        provider.requestAsync(snap.title, snap.artist, durationMs, postLyricResult, forceOnline,
-                              forceLocal, persistOrder);
+        using Source = LyricProvider::RequestSource;
+        const Source source = snap.player == SmtcPlayerType::Spotify ? Source::Spotify
+                              : forceLocal ? Source::PreferLocal
+                              : forceOnline ? Source::PreferOnline
+                                            : Source::Default;
+        provider.requestAsync(snap.title, snap.artist, durationMs, postLyricResult, source,
+                              persistOrder, snap.album);
     }
 }
 
@@ -404,13 +442,13 @@ void PlaybackController::onLyricReady(std::unique_ptr<LyricPayload> payload) {
         releaseCurrentLyrics();
         runtime_log::writef(L"[lyric] not found: %s", state_.currentKey.c_str());
     }
-    // QQ 封面标识与歌词来源解耦：在线歌词已带 albummid 时直接使用；本地歌词或
-    // 歌词未命中时单独复用 QQ 匹配规则查询，不替换当前歌词。
-    if (snap.player == SmtcPlayerType::QQMusic &&
+    // SMTC 没有封面时，使用已匹配的专辑标识或单独查询曲目信息。
+    if ((snap.player == SmtcPlayerType::QQMusic || snap.player == SmtcPlayerType::Spotify) &&
+        (!snap.thumbnail || snap.thumbnail->empty()) &&
         (!state_.lastSmtcThumbnail || state_.lastSmtcThumbnail->empty()) &&
         (!state_.lastCover_ || state_.lastCover_->empty())) {
         if (!coverAlbummid.empty())
-            requestQqCoverFallback(coverAlbummid);
+            requestQqCoverFallback(coverAlbummid, snap.player);
         else
             requestQqCoverInfoFallback(snap);
     }
@@ -424,26 +462,36 @@ void PlaybackController::onQqCoverInfoReady(std::unique_ptr<QqCoverInfoPayload> 
         return;
     SmtcSnapshot snap = snapshot_();
     if (!snapshotMatchesTrackKey(snap, state_.currentKey) ||
+        (snap.thumbnail && !snap.thumbnail->empty()) ||
         (state_.lastSmtcThumbnail && !state_.lastSmtcThumbnail->empty()) ||
         (state_.lastCover_ && !state_.lastCover_->empty()))
         return;
     if (payload->albummid.empty()) {
         runtime_log::writef(L"[cover][QQ] no albummid from song-info: %s",
                             state_.currentKey.c_str());
+        requestMusicBrainzCover(snap);
         return;
     }
-    requestQqCoverFallback(payload->albummid);
+    requestQqCoverFallback(payload->albummid, snap.player);
 }
 
 void PlaybackController::onCoverReady(std::unique_ptr<CoverPayload> payload) {
-    if (!payload || !payload->cover || payload->key != state_.currentKey ||
+    if (!payload || payload->key != state_.currentKey ||
         payload->requestGeneration != state_.requestGeneration_)
         return; // 已切歌或重新加载，丢弃过期封面
     SmtcSnapshot snap = snapshot_();
     if (!snapshotMatchesTrackKey(snap, state_.currentKey))
         return;
-    if (state_.lastSmtcThumbnail && !state_.lastSmtcThumbnail->empty())
+    if ((snap.thumbnail && !snap.thumbnail->empty()) ||
+        (state_.lastSmtcThumbnail && !state_.lastSmtcThumbnail->empty()))
         return; // SMTC 已提供有效封面，优先使用
+    if (!payload->cover || payload->cover->empty()) {
+        if (payload->source == CoverSource::QqApi && !state_.lastCover_)
+            requestMusicBrainzCover(snap);
+        return;
+    }
+    if (payload->source == CoverSource::MusicBrainz && state_.lastCover_)
+        return;
     state_.lastCover_ = payload->cover;
     state_.lastCoverSource_ = payload->source;
     logCoverCreated(payload->source, state_.lastCover_);

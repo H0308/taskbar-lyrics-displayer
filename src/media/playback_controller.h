@@ -6,7 +6,7 @@
 #include "lyric/lyric_provider.h"
 #include <functional>
 
-enum class CoverSource { None, Smtc, QqApi, NeteaseApi };
+enum class CoverSource { None, Smtc, QqApi, NeteaseApi, MusicBrainz };
 
 struct CoverPayload {
     std::wstring key;
@@ -76,10 +76,6 @@ public:
     void releaseCurrentLyrics();
     void logCoverCreated(CoverSource source,
                          const std::shared_ptr<const std::vector<uint8_t>>& cover);
-    CoverProvider::ReadyCallback coverReadyCallback(CoverSource source);
-    void requestQqCoverFallback(const std::wstring& albummid);
-    void requestQqCoverInfoFallback(const SmtcSnapshot& snap);
-    void requestNeteaseCoverFallback(const std::wstring& songId);
     void releaseCurrentCover();
     void releaseCurrentResources();
     void updateLyricCapabilities(const std::vector<LyricLine>& lines);
@@ -94,6 +90,12 @@ public:
                                bool persistOrder = false);
 
 private:
+    CoverProvider::ReadyCallback coverReadyCallback(CoverSource source, bool reportFailure = false);
+    void requestQqCoverFallback(const std::wstring& albummid, SmtcPlayerType player);
+    void requestQqCoverInfoFallback(const SmtcSnapshot& snap);
+    void requestNeteaseCoverFallback(const std::wstring& songId);
+    void requestMusicBrainzCover(const SmtcSnapshot& snap);
+
     PlaybackState state_;
     DWORD mainThread_ = GetCurrentThreadId();
     HWND timerWindow_ = nullptr;

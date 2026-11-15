@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include "lyric/lyric_types.h"
+#include "media/smtc_monitor.h"
 #include <functional>
 #include <memory>
 #include <string>
@@ -29,7 +30,8 @@ enum class LyricSource {
     Krc, // 酷狗逐字歌词
     Lrc, // QQ 音乐整行歌词
     Yrc, // 网易云音乐逐字歌词
-    Soda // 汽水原生歌词（逐字或 LRC，由歌词接口确定）
+    Soda, // 汽水原生歌词（逐字或 LRC，由歌词接口确定）
+    Lrclib // LRCLIB 词级／逐行歌词
 };
 
 // 手动搜索返回的候选歌曲
@@ -46,6 +48,9 @@ struct SearchCandidate {
     std::wstring sodaSongId;
     int64_t previewStartMs = 0;
     int64_t previewDurationMs = 0;
+    std::wstring album;
+    int64_t lrclibId = 0;
+    bool lrclibWordSync = false;
 };
 
 // 歌词获取：QQ 匹配 QRC/KRC/LRC；汽水取原生逐字/LRC；网易云按歌曲 ID 取 YRC/LRC。
@@ -64,13 +69,13 @@ public:
     LyricProvider(const LyricProvider&) = delete;
     LyricProvider& operator=(const LyricProvider&) = delete;
 
-    // 异步请求歌词；优先按版本标注匹配（本地有版本则候选必须有相同版本，
-    // 本地无版本则候选优先不带版本），无合适结果时回退到加权模糊匹配
-    // forceOnline/forceLocal 仅用于右键切换；手动保存的歌词仍然优先。
+    enum class RequestSource { Default, PreferOnline, PreferLocal, Spotify };
+
+    // 异步请求歌词；优先按版本标注匹配，无合适结果时按匹配分排序。
     // persistOrder 在后台保存单曲的本地/在线顺序标记，不阻塞调用线程。
     void requestAsync(const std::wstring& title, const std::wstring& artist, int64_t durationMs,
-                      ReadyCallback cb, bool forceOnline = false, bool forceLocal = false,
-                      bool persistOrder = false);
+                      ReadyCallback cb, RequestSource source = RequestSource::Default,
+                      bool persistOrder = false, const std::wstring& album = {});
 
     // 按网易云歌曲 ID 异步取歌词：优先 YRC，失败后回退网易云 LRC。
     // 同时传入当前元数据，用于读取按歌曲 ID 保存的手动歌词覆盖。
@@ -88,18 +93,18 @@ public:
     void requestQqSongInfoAsync(const std::wstring& title, const std::wstring& artist,
                                 int64_t durationMs, SongInfoCallback cb);
 
-    // 手动搜索候选；汽水目标仅搜索汽水曲库，其他目标保留既有来源。
+    // 手动搜索候选按播放源决定可查询的曲库。
     void searchCandidatesAsync(const std::wstring& title, const std::wstring& artist,
-                               SearchCallback cb, bool sodaOnly = false);
+                               SearchCallback cb, SmtcPlayerType player);
 
     // 按候选歌曲异步取歌词，不修改当前播放内容。
     void fetchLyricAsync(const SearchCandidate& cand, FetchCallback cb,
                          int64_t playbackDurationMs = 0);
 
-    // 保存手动选择；QQ、汽水分别按标题/歌手/时长复用，网易云按歌曲 ID 复用。
+    // 手动选择按播放源和曲目标识保存。
     void setManualOverride(const std::wstring& title, const std::wstring& artist,
                            int64_t durationMs, std::vector<LyricLine> lines, SongInfo info,
-                           bool soda = false);
+                           SmtcPlayerType player, const std::wstring& album);
 
     // 设置手动歌词的持久化目录；每首歌保存为独立文件，请求歌词时按 key 查找对应文件
     void setManualOverrideDir(const std::wstring& dir);
@@ -113,6 +118,8 @@ public:
     // 缓存/覆盖键：标题 + 歌手 + 时长（5 秒分桶），区分同名不同版本
     static std::wstring makeKey(const std::wstring& title, const std::wstring& artist,
                                 int64_t durationMs);
+    static std::wstring makeSpotifyKey(const std::wstring& title, const std::wstring& artist,
+                                       const std::wstring& album, int64_t durationMs);
     // 二分定位：最后一个 ms <= positionMs 的行号；无则 -1
     static int findLine(const std::vector<LyricLine>& lines, int64_t positionMs);
 

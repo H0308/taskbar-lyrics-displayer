@@ -4,8 +4,8 @@
 
 namespace smtc {
 
-// 汽水时间线只处理已读取的采样；会话访问仍由适配器负责。
-class SodaMusicTimeline {
+// 根据离散的 SMTC 时间线采样推进播放进度。
+class SampledTimeline {
 public:
     void initialize(SmtcSnapshot& snapshot, int64_t nowMs) {
         initialized_ = true;
@@ -32,22 +32,26 @@ public:
         SmtcSnapshot currentAtEvent = snapshot;
         advancePlayingPosition(currentAtEvent, nowMs, true);
         snapshot.durationMs = duration;
-        const bool changed = !initialized_ || position != sampledPositionMs_ ||
-                             anchor != sampledAnchorMs_;
+        const bool positionChanged = !initialized_ || position != sampledPositionMs_;
+        const bool changed = positionChanged || anchor != sampledAnchorMs_;
         const bool older = initialized_ && anchor > 0 && sampledAnchorMs_ > 0 &&
                            anchor < sampledAnchorMs_;
-        if (changed && !older) {
+        const bool accepted = changed && !older;
+        const bool paused = snapshot.status == PlaybackStatus::Paused;
+        if (accepted)
+            sampledAnchorMs_ = anchor;
+        // 暂停时只更新时间戳的采样不改变冻结位置；位置变化仍按暂停 seek 处理。
+        if (accepted && (!paused || positionChanged)) {
             // 小幅校时保持展示连续，真实 seek 则允许进度跳变。
             constexpr int64_t kPositionDiscontinuityMs = 250;
             int64_t incomingAtEventMs = std::max<int64_t>(0, position);
             if (snapshot.status == PlaybackStatus::Playing && anchor > 0)
                 incomingAtEventMs += std::max<int64_t>(0, nowMs - anchor);
             const int64_t deltaMs = incomingAtEventMs - currentAtEvent.positionMs;
-            if (!initialized_ || position < sampledPositionMs_ ||
+            if (paused || !initialized_ || position < sampledPositionMs_ ||
                 deltaMs < -kPositionDiscontinuityMs || deltaMs > kPositionDiscontinuityMs)
                 resetPresentedPosition_ = true;
             sampledPositionMs_ = position;
-            sampledAnchorMs_ = anchor;
             initialized_ = true;
             snapshot.positionMs = std::max<int64_t>(0, position);
             snapshot.anchorUtcMs = anchor > 0 ? anchor : nowMs;
@@ -69,7 +73,7 @@ public:
         return result;
     }
 
-    void reset() { *this = SodaMusicTimeline{}; }
+    void reset() { *this = SampledTimeline{}; }
 
 private:
     bool initialized_ = false;

@@ -2,7 +2,7 @@
 
 #include "lyric/soda_lyric_timing.h"
 #include "media/player_source.h"
-#include "media/smtc/soda_music_timeline.h"
+#include "media/smtc/sampled_timeline.h"
 
 namespace {
 SmtcSnapshot playingSnapshot(int64_t position = 10000, int64_t anchor = 100000) {
@@ -18,7 +18,7 @@ SmtcSnapshot playingSnapshot(int64_t position = 10000, int64_t anchor = 100000) 
 } // namespace
 
 TEST_CASE("soda_timeline.join_preserves_old_anchor_and_missing_anchor_uses_now") {
-    smtc::SodaMusicTimeline timeline;
+    smtc::SampledTimeline timeline;
     auto source = playingSnapshot();
     source.timelineStale = true;
     timeline.initialize(source, 160000);
@@ -34,7 +34,7 @@ TEST_CASE("soda_timeline.join_preserves_old_anchor_and_missing_anchor_uses_now")
 }
 
 TEST_CASE("soda_timeline.pause_and_resume_do_not_reuse_pause_duration") {
-    smtc::SodaMusicTimeline timeline;
+    smtc::SampledTimeline timeline;
     auto source = playingSnapshot();
     timeline.initialize(source, 100000);
     EXPECT_EQ(timeline.snapshot(source, 105000).positionMs, 15000);
@@ -53,7 +53,7 @@ TEST_CASE("soda_timeline.pause_and_resume_do_not_reuse_pause_duration") {
 }
 
 TEST_CASE("soda_timeline.pause_seek_and_resume_use_the_new_paused_position") {
-    smtc::SodaMusicTimeline timeline;
+    smtc::SampledTimeline timeline;
     auto source = playingSnapshot();
     timeline.initialize(source, 100000);
     timeline.updatePlayback(source, PlaybackStatus::Paused, 105000);
@@ -67,7 +67,7 @@ TEST_CASE("soda_timeline.pause_seek_and_resume_use_the_new_paused_position") {
 }
 
 TEST_CASE("soda_timeline.repeated_and_older_samples_do_not_rewind") {
-    smtc::SodaMusicTimeline timeline;
+    smtc::SampledTimeline timeline;
     auto source = playingSnapshot();
     timeline.initialize(source, 100000);
     EXPECT_EQ(timeline.snapshot(source, 105000).positionMs, 15000);
@@ -79,7 +79,7 @@ TEST_CASE("soda_timeline.repeated_and_older_samples_do_not_rewind") {
 }
 
 TEST_CASE("soda_timeline.small_clock_correction_stays_continuous_but_seek_can_rewind") {
-    smtc::SodaMusicTimeline timeline;
+    smtc::SampledTimeline timeline;
     auto source = playingSnapshot();
     timeline.initialize(source, 100000);
     EXPECT_EQ(timeline.snapshot(source, 105000).positionMs, 15000);
@@ -96,7 +96,7 @@ TEST_CASE("soda_timeline.small_clock_correction_stays_continuous_but_seek_can_re
 }
 
 TEST_CASE("soda_timeline.duration_clamp_and_reset_release_previous_song_progress") {
-    smtc::SodaMusicTimeline timeline;
+    smtc::SampledTimeline timeline;
     auto source = playingSnapshot(179000);
     timeline.initialize(source, 100000);
     EXPECT_EQ(timeline.snapshot(source, 105000).positionMs, 180000);
