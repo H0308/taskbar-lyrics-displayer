@@ -2508,6 +2508,12 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const bool statusOneShotChanged = frame.statusTextOneShot != scroll_.oneShot();
         const DisplayScene previousScene = scene_;
         const bool sceneChanged = frame.scene != scene_;
+        const auto* incomingSource = player_source::find(frame.media.sourceAppUserModelId);
+        const bool loadedLyricsFromPrelude = !trackChanged && lyricsChanged && lines.empty() &&
+            incomingSource && incomingSource->player == SmtcPlayerType::Spotify &&
+            isTaskbarMediaScene(scene_) && frame.scene == DisplayScene::Lyrics &&
+            frame.currentLine >= 0 && frame.media.playing && frame.animateTransition &&
+            !statusText.empty() && lastLyric_ == statusText;
         if (sceneChanged)
             resetSpectrumEffectHistory();
         const bool sceneWidthChanged = sceneWidthPolicyDiffers(scene_, frame.scene);
@@ -2521,7 +2527,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const bool wasVisible = isWindowVisible();
         const bool shouldAnimateScene = isWindowVisible() && frame.visible && clientAnimations_ &&
                                         !isMinimalMode() && !isStoppedMode() &&
-                                        isTaskbarSceneTransition(scene_, frame.scene) &&
+                                        (isTaskbarSceneTransition(scene_, frame.scene) ||
+                                         loadedLyricsFromPrelude) &&
                                         typesetter_.resources().lyricLayout_.Get();
         const bool continueSceneTransition =
             sceneChanged && transition_.kind() == LyricTransitionKind::Scene &&
@@ -2558,7 +2565,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         frameRevision_ = frame.frameRevision;
         requestGeneration_ = frame.requestGeneration;
         trackKey_ = frame.trackKey;
-        if (sceneChanged) {
+        if (sceneChanged || (loadedLyricsFromPrelude && shouldAnimateScene)) {
             // 类别切换拥有最高优先级：先结束可能正在进行的歌词行转场，
             // 再把旧场景布局交给新的内容块上下翻页。
             if (continueSceneTransition) {
