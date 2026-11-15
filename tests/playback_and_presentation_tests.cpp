@@ -129,6 +129,7 @@ TEST_CASE("playback_controller.platform_switch_rejects_inflight_qq_results_befor
     controller.updateTrack(current, current.sourceAppUserModelId);
     controller.cancelLyricDebounce(); // 不触发网络请求，仅验证已有在途结果的接收规则。
     controller.releaseCurrentCover(); // 不让 SMTC 封面优先规则掩盖跨平台结果校验。
+    current.thumbnail.reset();
     const auto key = controller.state().currentKey;
     const auto generation = controller.state().requestGeneration_;
     const auto previousCover = controller.state().lastCover_;
@@ -165,6 +166,13 @@ TEST_CASE("playback_controller.platform_switch_rejects_inflight_qq_results_befor
     const auto validCover =
         std::make_shared<const std::vector<uint8_t>>(std::vector<uint8_t>{3});
     cover->cover = validCover;
+    current.thumbnail = std::make_shared<const std::vector<uint8_t>>(std::vector<uint8_t>{4});
+    auto blockedCover = std::make_unique<CoverPayload>(*cover);
+    controller.onCoverReady(std::move(blockedCover));
+    EXPECT_EQ(controller.state().lastCover_, previousCover);
+    EXPECT_EQ(covers, 0);
+    EXPECT_EQ(publishes, beforePublishes);
+    current.thumbnail.reset();
     controller.onCoverReady(std::move(cover));
     EXPECT_EQ(controller.state().lastCover_, validCover);
     EXPECT_EQ(covers, 1);
@@ -222,7 +230,11 @@ TEST_CASE("presentation_model.scene_resolution_lead_time_and_transition_retentio
     snap.positionMs = 500;
     const PlaybackPatch patch = model.updatePlayback(snap);
     EXPECT_EQ(patch.currentLine, -1);
-    EXPECT_EQ(patch.lineSelectionPositionMs, 600);
+    EXPECT_EQ(patch.lineSelectionPositionMs, 500);
+    snap.positionMs = 1000;
+    const PlaybackPatch firstLine = model.updatePlayback(snap);
+    EXPECT_EQ(firstLine.currentLine, 0);
+    EXPECT_EQ(firstLine.lineSelectionPositionMs, 1100);
 
     const auto& colored = model.updateAlbumColor(RGB(120, 104, 88));
     EXPECT_TRUE(colored.media.hasDominantColor);

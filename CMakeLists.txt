@@ -206,7 +206,7 @@ target_link_libraries(QQMusicLyric PRIVATE
 )
 
 if(BUILD_TESTING)
-    add_executable(QQMusicLyricParserTests
+    add_executable(WindowsTaskbarLyricsParserTests
         tests/test_main.cpp
         tests/lrc_parser_tests.cpp
         tests/settings_logic_tests.cpp
@@ -250,11 +250,11 @@ if(BUILD_TESTING)
         src/util/base64.cpp
         src/util/dominant_color.cpp
     )
-    target_include_directories(QQMusicLyricParserTests PRIVATE src)
-    target_compile_definitions(QQMusicLyricParserTests PRIVATE
+    target_include_directories(WindowsTaskbarLyricsParserTests PRIVATE src)
+    target_compile_definitions(WindowsTaskbarLyricsParserTests PRIVATE
         UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
-    target_compile_options(QQMusicLyricParserTests PRIVATE /utf-8 /EHsc)
-    target_link_libraries(QQMusicLyricParserTests PRIVATE
+    target_compile_options(WindowsTaskbarLyricsParserTests PRIVATE /utf-8 /EHsc)
+    target_link_libraries(WindowsTaskbarLyricsParserTests PRIVATE
         CURL::libcurl
         nlohmann_json::nlohmann_json
         yaml-cpp::yaml-cpp
@@ -272,7 +272,7 @@ if(BUILD_TESTING)
         pdh
         psapi
     )
-    add_test(NAME QQMusicLyricParserTests COMMAND QQMusicLyricParserTests)
+    add_test(NAME WindowsTaskbarLyricsParserTests COMMAND WindowsTaskbarLyricsParserTests)
 endif()
 
 # CMake owns the deployable application layout. Packaging tools consume this
