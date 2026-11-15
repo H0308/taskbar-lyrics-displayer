@@ -25,6 +25,7 @@
 #include <fstream>
 #include <initializer_list>
 #include <list>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -198,6 +199,21 @@ std::vector<LyricLine> parseLrclibLyrics(const nlohmann::json& record) {
                : std::vector<LyricLine>{};
 }
 
+std::wstring simplifiedChinese(const std::wstring& text) {
+    if (text.empty() || text.size() > static_cast<size_t>((std::numeric_limits<int>::max)()))
+        return text;
+    const int length = static_cast<int>(text.size());
+    const int size = LCMapStringEx(L"zh-CN", LCMAP_SIMPLIFIED_CHINESE, text.data(), length,
+                                   nullptr, 0, nullptr, nullptr, 0);
+    if (size <= 0)
+        return text;
+    std::wstring result(static_cast<size_t>(size), L'\0');
+    if (LCMapStringEx(L"zh-CN", LCMAP_SIMPLIFIED_CHINESE, text.data(), length,
+                      result.data(), size, nullptr, nullptr, 0) != size)
+        return text;
+    return result;
+}
+
 std::vector<LyricLine> fetchLrclib(const std::wstring& title, const std::wstring& artist,
                                    const std::wstring& album, int64_t durationMs,
                                    const LyricRequest& request) {
@@ -206,11 +222,24 @@ std::vector<LyricLine> fetchLrclib(const std::wstring& title, const std::wstring
     std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl(curl_easy_init(), curl_easy_cleanup);
     if (!curl)
         return {};
-    std::string resource = "get" + lrclibQuery(curl.get(), title, artist) +
-                           "&duration=" + std::to_string((durationMs + 500) / 1000);
-    if (!album.empty())
-        resource += "&album_name=" + lrclibEscape(curl.get(), album);
-    return parseLrclibLyrics(getLrclib(curl.get(), resource, &request));
+    const auto simpleTitle = simplifiedChinese(title);
+    const auto simpleArtist = simplifiedChinese(artist);
+    const auto simpleAlbum = simplifiedChinese(album);
+    const bool changed = simpleTitle != title || simpleArtist != artist || simpleAlbum != album;
+    for (int attempt = 0; attempt < (changed ? 2 : 1); ++attempt) {
+        if (request.cancelled())
+            return {};
+        const auto& queryAlbum = attempt == 0 ? album : simpleAlbum;
+        std::string resource = "get" + lrclibQuery(curl.get(), attempt == 0 ? title : simpleTitle,
+                                                  attempt == 0 ? artist : simpleArtist) +
+                               "&duration=" + std::to_string((durationMs + 500) / 1000);
+        if (!queryAlbum.empty())
+            resource += "&album_name=" + lrclibEscape(curl.get(), queryAlbum);
+        auto lines = parseLrclibLyrics(getLrclib(curl.get(), resource, &request));
+        if (!lines.empty())
+            return lines;
+    }
+    return {};
 }
 
 void searchLrclib(CURL* curl, const std::wstring& title, const std::wstring& artist,
@@ -341,7 +370,7 @@ std::wstring lowerW(std::wstring value) {
 }
 
 bool containsVersionWord(const std::wstring& raw, const wchar_t* needle) {
-    const std::wstring text = lowerW(raw);
+    const std::wstring text = lowerW(simplifiedChinese(raw));
     const std::wstring word = lowerW(needle);
     if (text.empty() || word.empty())
         return false;
@@ -491,7 +520,7 @@ bool isMatchSeparator(wchar_t ch) {
 
 // 规范化：保留普通括号内容，仅去除明确的平台噪声、特征艺人后缀、大小写和标点差异。
 std::wstring normalizeTitle(const std::wstring& s) {
-    const std::wstring source = stripFeatureSuffix(s);
+    const std::wstring source = stripFeatureSuffix(simplifiedChinese(s));
     std::wstring out;
     out.reserve(source.size());
     bool prevSpace = true;
@@ -861,10 +890,17 @@ std::wstring primaryArtist(const std::wstring& artist) {
 std::vector<SearchVariant> buildSearchVariants(const MatchQuery& q) {
     std::vector<SearchVariant> variants;
     addSearchVariant(variants, q.title, q.artist); // exact
+    addSearchVariant(variants, simplifiedChinese(q.title), simplifiedChinese(q.artist));
     addSearchVariant(variants, normalizeTitle(q.title), normalizeTitle(q.artist));
     addSearchVariant(variants, q.title, primaryArtist(q.artist));
     addSearchVariant(variants, stripVersionSuffix(q.title), q.artist);
     addSearchVariant(variants, stripDelimitedVersionSuffix(q.title), q.artist);
+    const size_t count = variants.size();
+    for (size_t index = 0; index < count; ++index) {
+        auto title = simplifiedChinese(variants[index].title);
+        auto artist = simplifiedChinese(variants[index].artist);
+        addSearchVariant(variants, std::move(title), std::move(artist));
+    }
     return variants;
 }
 
@@ -3022,74 +3058,107 @@ void LyricProvider::searchCandidatesAsync(const std::wstring& title, const std::
         DoneFlag flag{done};
         CURL* curl = curl_easy_init();
         std::vector<SearchCandidate> result;
-        auto appendSodaCandidates = [&] {
-            std::vector<SodaSong> songs;
-            if (searchSodaSongs(curl, title, artist, songs)) {
-                for (const auto& song : songs) {
-                    SearchCandidate candidate;
-                    candidate.name = song.title;
-                    candidate.singer = song.artist;
-                    candidate.durationMs = song.durationMs;
-                    candidate.source = LyricSource::Soda;
-                    candidate.sodaSongId = toWide(song.id);
-                    candidate.previewStartMs = song.previewStartMs;
-                    candidate.previewDurationMs = song.previewDurationMs;
-                    result.push_back(std::move(candidate));
-                }
-            }
-        };
-        if (curl) {
-            std::wstring queryTitle = stripVersionSuffix(title);
-            std::wstring query = queryTitle;
-            if (!artist.empty() && !titleEndsWithArtist(title, artist))
-                query += L' ' + artist;
-
-            // 网易云候选按歌曲 ID 获取歌词；同一响应内优先 YRC，不可用时由歌词接口回退 LRC。
-            auto appendNeteaseCandidates = [&] {
-                std::vector<NeteaseSong> neteaseSongs;
-                bool neteaseSearchOk = searchNeteaseSongs(curl, query, 5, neteaseSongs);
-                if (neteaseSongs.empty())
-                    neteaseSearchOk = searchNeteaseSongs(curl, queryTitle, 5, neteaseSongs);
-                if (neteaseSearchOk) {
-                    for (const auto& s : neteaseSongs) {
-                        result.push_back({{}, {}, {}, {}, s.name, s.singer, s.durationMs,
-                                          LyricSource::Yrc, toWide(s.id)});
+        std::vector<SearchVariant> queries;
+        addSearchVariant(queries, title, artist);
+        addSearchVariant(queries, simplifiedChinese(title), simplifiedChinese(artist));
+        for (const auto& search : queries) {
+            const auto& searchTitle = search.title;
+            const auto& searchArtist = search.artist;
+            auto appendSodaCandidates = [&] {
+                std::vector<SodaSong> songs;
+                if (searchSodaSongs(curl, searchTitle, searchArtist, songs)) {
+                    for (const auto& song : songs) {
+                        SearchCandidate candidate;
+                        candidate.name = song.title;
+                        candidate.singer = song.artist;
+                        candidate.durationMs = song.durationMs;
+                        candidate.source = LyricSource::Soda;
+                        candidate.sodaSongId = toWide(song.id);
+                        candidate.previewStartMs = song.previewStartMs;
+                        candidate.previewDurationMs = song.previewDurationMs;
+                        result.push_back(std::move(candidate));
                     }
                 }
             };
-            if (player == SmtcPlayerType::Soda)
-                appendSodaCandidates();
-            if (player == SmtcPlayerType::NetEase)
-                appendNeteaseCandidates();
+            if (curl) {
+                std::wstring queryTitle = stripVersionSuffix(searchTitle);
+                std::wstring query = queryTitle;
+                if (!searchArtist.empty() && !titleEndsWithArtist(searchTitle, searchArtist))
+                    query += L' ' + searchArtist;
 
-            std::vector<KugouSong> kugouSongs;
-            if (kugouSearchSongs(curl, queryTitle, artist, 5, kugouSongs)) {
-                for (const auto& s : kugouSongs) {
-                    result.push_back({{}, {}, {}, toWide(s.hash), s.name, s.singer, s.durationMs,
-                                      LyricSource::Krc});
+                auto appendNeteaseCandidates = [&] {
+                    std::vector<NeteaseSong> neteaseSongs;
+                    bool neteaseSearchOk = searchNeteaseSongs(curl, query, 5, neteaseSongs);
+                    if (neteaseSongs.empty())
+                        neteaseSearchOk = searchNeteaseSongs(curl, queryTitle, 5, neteaseSongs);
+                    if (neteaseSearchOk) {
+                        for (const auto& song : neteaseSongs) {
+                            result.push_back({{}, {}, {}, {}, song.name, song.singer, song.durationMs,
+                                              LyricSource::Yrc, toWide(song.id)});
+                        }
+                    }
+                };
+                if (player == SmtcPlayerType::Soda)
+                    appendSodaCandidates();
+                if (player == SmtcPlayerType::NetEase)
+                    appendNeteaseCandidates();
+
+                std::vector<KugouSong> kugouSongs;
+                if (kugouSearchSongs(curl, queryTitle, searchArtist, 5, kugouSongs)) {
+                    for (const auto& song : kugouSongs) {
+                        result.push_back({{}, {}, {}, toWide(song.hash), song.name, song.singer,
+                                          song.durationMs, LyricSource::Krc});
+                    }
                 }
-            }
 
-            // QQ 候选同时提供 QRC 逐字与 LRC 整行入口。
-            std::vector<Candidate> cands;
-            searchSongs(curl, query, cands);
-            if (cands.empty())
-                searchSongs(curl, queryTitle, cands);
-            for (size_t i = 0; i < cands.size() && i < 5; ++i) {
-                const auto& c = cands[i];
-                if (!c.songid.empty())
-                    result.push_back({toWide(c.songmid), toWide(c.songid), toWide(c.albummid), {},
-                                      c.name, c.singer, c.intervalMs, LyricSource::Qrc});
-                if (!c.songmid.empty())
-                    result.push_back({toWide(c.songmid), toWide(c.songid), toWide(c.albummid), {},
-                                      c.name, c.singer, c.intervalMs, LyricSource::Lrc});
+                std::vector<Candidate> cands;
+                searchSongs(curl, query, cands);
+                if (cands.empty())
+                    searchSongs(curl, queryTitle, cands);
+                for (size_t index = 0; index < cands.size() && index < 5; ++index) {
+                    const auto& candidate = cands[index];
+                    if (!candidate.songid.empty())
+                        result.push_back({toWide(candidate.songmid), toWide(candidate.songid),
+                                          toWide(candidate.albummid), {}, candidate.name,
+                                          candidate.singer, candidate.intervalMs, LyricSource::Qrc});
+                    if (!candidate.songmid.empty())
+                        result.push_back({toWide(candidate.songmid), toWide(candidate.songid),
+                                          toWide(candidate.albummid), {}, candidate.name,
+                                          candidate.singer, candidate.intervalMs, LyricSource::Lrc});
+                }
+                searchLrclib(curl, searchTitle, searchArtist, result);
+                if (player != SmtcPlayerType::NetEase)
+                    appendNeteaseCandidates();
+                if (player != SmtcPlayerType::Soda)
+                    appendSodaCandidates();
             }
-            searchLrclib(curl, title, artist, result);
-            if (player != SmtcPlayerType::NetEase)
-                appendNeteaseCandidates();
-            if (player != SmtcPlayerType::Soda)
-                appendSodaCandidates();
         }
+
+        std::unordered_set<std::wstring> seen;
+        std::erase_if(result, [&](const SearchCandidate& candidate) {
+            std::wstring id;
+            switch (candidate.source) {
+            case LyricSource::Krc:
+                id = candidate.kugouHash;
+                break;
+            case LyricSource::Qrc:
+                id = candidate.songid;
+                break;
+            case LyricSource::Lrc:
+                id = candidate.songmid;
+                break;
+            case LyricSource::Yrc:
+                id = candidate.neteaseSongId;
+                break;
+            case LyricSource::Soda:
+                id = candidate.sodaSongId;
+                break;
+            case LyricSource::Lrclib:
+                id = std::to_wstring(candidate.lrclibId);
+                break;
+            }
+            return !seen.insert(std::to_wstring(static_cast<int>(candidate.source)) + L"|" + id).second;
+        });
         if (curl)
             curl_easy_cleanup(curl);
         runtime_log::writef(L"[action][manual-search] candidates title=\"%ls\" artist=\"%ls\" "
