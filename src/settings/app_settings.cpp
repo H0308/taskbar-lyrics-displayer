@@ -220,6 +220,7 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
     else if (!configuredLogDirectory.empty())
         logDirectory_ = configuredLogDirectory;
     logRetentionDays_ = std::clamp(j.value("logRetentionDays", 30), 0, 3650);
+    frameRate_ = std::clamp(j.value("frameRate", 1), 0, 2);
     hasUserFont_ = j.value("hasUserFont", false);
     std::wstring fam = wideOf(j.value("fontFamily", std::string()));
     if (!fam.empty())
@@ -598,6 +599,7 @@ nlohmann::json AppSettings::toJson() const {
     j["qqLocalLyricsPath"] = utf8Of(qqLocalLyricsPath_);
     j["logDirectory"] = utf8Of(logDirectory_);
     j["logRetentionDays"] = logRetentionDays_;
+    j["frameRate"] = frameRate_;
 
     return j;
 }

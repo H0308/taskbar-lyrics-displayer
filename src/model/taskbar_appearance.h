@@ -4,6 +4,7 @@
 
 // 每次提交包含完整的低频外观；播放进度、频谱采样与窗口生命周期独立更新。
 struct TaskbarAppearance {
+    int frameRate = 1;
     struct SecondaryLyricMode {
         bool translation{};
         bool romanization{};

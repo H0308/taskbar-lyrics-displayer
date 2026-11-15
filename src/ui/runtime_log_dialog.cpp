@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <thread>
@@ -26,6 +27,8 @@ namespace {
 
 constexpr UINT kMsgDirectoryPicked = WM_APP + 240;
 constexpr UINT_PTR kRefreshTimer = 1;
+constexpr UINT_PTR kScrollTimer = 2;
+constexpr float kScrollFrequency = 28.0f;
 constexpr UINT64 kInitialPickerGeneration = 1;
 
 constexpr float kWindowW = 780.0f;
@@ -186,7 +189,11 @@ struct RuntimeLogDialog::Impl {
     bool focusVisible = false;
     bool showCover = false;
     bool showDiagnostics = false;
-    int scrollY = 0;
+    float scrollY = 0;
+    float scrollTarget = 0;
+    float scrollVelocity = 0;
+    bool scrollAnimating = false;
+    std::chrono::steady_clock::time_point scrollStarted;
     int maxScroll = 0;
     bool scrollDragging = false;
     float scrollGrabY = 0.0f;
@@ -200,13 +207,51 @@ struct RuntimeLogDialog::Impl {
     D2D1_RECT_F retentionRect{};
     D2D1_RECT_F coverToggleRect{};
     D2D1_RECT_F diagnosticsRect{};
+    float frameDetailsHeight = 0;
 
     float contentHeight(float height) const {
-        return std::max(height, showDiagnostics ? 970.0f : 800.0f);
+        return std::max(height, (showDiagnostics ? 970.0f : 800.0f) + frameDetailsHeight);
     }
 
-    void scrollTo(int position) {
-        scrollY = std::clamp(position, 0, maxScroll);
+    void sampleScroll() {
+        if (!scrollAnimating)
+            return;
+        const auto now = std::chrono::steady_clock::now();
+        const float elapsed = std::chrono::duration<float>(now - scrollStarted).count();
+        const float displacement = scrollY - scrollTarget;
+        const float coefficient = scrollVelocity + kScrollFrequency * displacement;
+        const float decay = std::exp(-kScrollFrequency * elapsed);
+        scrollY = std::clamp(scrollTarget + (displacement + coefficient * elapsed) * decay,
+                              0.0f, static_cast<float>(maxScroll));
+        scrollVelocity = (scrollVelocity - kScrollFrequency * coefficient * elapsed) * decay;
+        scrollStarted = now;
+        if (std::fabs(scrollY - scrollTarget) < 0.1f && std::fabs(scrollVelocity) < 2.0f) {
+            scrollY = scrollTarget;
+            scrollVelocity = 0;
+            scrollAnimating = false;
+            KillTimer(hwnd, kScrollTimer);
+        }
+    }
+
+    void scrollTo(float position, bool smooth = false) {
+        sampleScroll();
+        const float target = std::clamp(position, 0.0f, static_cast<float>(maxScroll));
+        BOOL animations = TRUE;
+        SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations, 0);
+        if (smooth && animations && std::fabs(target - scrollY) > 0.1f) {
+            if ((target - scrollY) * scrollVelocity < 0)
+                scrollVelocity = 0;
+            scrollTarget = target;
+            scrollStarted = std::chrono::steady_clock::now();
+            scrollAnimating = SetTimer(hwnd, kScrollTimer, USER_TIMER_MINIMUM, nullptr) != 0;
+        } else {
+            scrollAnimating = false;
+        }
+        if (!scrollAnimating) {
+            KillTimer(hwnd, kScrollTimer);
+            scrollY = scrollTarget = target;
+            scrollVelocity = 0;
+        }
         layout();
         surface.invalidate();
     }
@@ -252,10 +297,12 @@ struct RuntimeLogDialog::Impl {
         const auto content = fluent::centeredDialogLayout(
             static_cast<float>(client.right - client.left) / s);
         const float width = content.width;
+        frameDetailsHeight = logger ? static_cast<float>(logger->snapshot().taskbarFrameRates.size()) * 26.0f : 0.0f;
         viewHeight = static_cast<float>(client.bottom - client.top) / s;
         const float height = contentHeight(viewHeight);
         maxScroll = static_cast<int>(std::ceil(height - viewHeight));
-        scrollY = std::clamp(scrollY, 0, maxScroll);
+        scrollY = std::clamp(scrollY, 0.0f, static_cast<float>(maxScroll));
+        scrollTarget = std::clamp(scrollTarget, 0.0f, static_cast<float>(maxScroll));
         const float clientWidth = static_cast<float>(client.right - client.left) / s;
         scrollTrack = D2D1::RectF(clientWidth - 14.0f, 8.0f, clientWidth - 4.0f,
                                   std::max(8.0f, viewHeight - 8.0f));
@@ -265,7 +312,8 @@ struct RuntimeLogDialog::Impl {
             ? static_cast<float>(scrollY) / maxScroll * (trackHeight - thumbHeight) : 0.0f);
         scrollThumb = D2D1::RectF(clientWidth - 9.0f, thumbTop, clientWidth - 6.0f,
                                    thumbTop + thumbHeight);
-        diagnosticsRect = D2D1::RectF(kPagePadding, 562.0f, width - kPagePadding, 594.0f);
+        diagnosticsRect = D2D1::RectF(kPagePadding, 562.0f + frameDetailsHeight,
+                                      width - kPagePadding, 594.0f + frameDetailsHeight);
 
         const float statusTop = 82.0f;
         const float songH = 68.0f;
@@ -506,11 +554,11 @@ struct RuntimeLogDialog::Impl {
         drawCard(painter, card(1, 1), L"GPU", percentText(snapshot.gpuPercent));
         drawCard(painter, card(2, 1), L"专用内存", memoryText(snapshot.memoryBytes));
 
-        const D2D1_RECT_F detailsRect = D2D1::RectF(contentLeft, 338.0f, contentRight, 550.0f);
+        const D2D1_RECT_F detailsRect = D2D1::RectF(contentLeft, 338.0f, contentRight,
+                                                   550.0f + frameDetailsHeight);
         painter.fillRoundRect(p.cardFill, detailsRect, kCardRadius);
         painter.strokeRoundRect(p.cardStroke, detailsRect, 1.0f, kCardRadius);
-        std::wstring rendering = snapshot.renderMode + L" · " +
-            std::to_wstring(static_cast<int>(std::lround(snapshot.taskbarFps))) + L" FPS（任务栏提交合计）";
+        const std::wstring rendering = snapshot.renderMode;
         painter.drawText(L"播放与匹配", painter.textFormat(fluent::font_sizes::body, 600, false, true),
                          D2D1::RectF(contentLeft + 14.0f, 348.0f, contentLeft + 150.0f, 374.0f), p.text);
         painter.drawTrimmedText(rendering, painter.textFormat(fluent::font_sizes::caption, 400, false, true),
@@ -526,10 +574,26 @@ struct RuntimeLogDialog::Impl {
                                     p.text);
             detailY += 26.0f;
         }
+        for (const auto& rate : snapshot.taskbarFrameRates) {
+            std::wstring display = rate.display;
+            const auto separator = display.find_last_of(L"\\");
+            if (separator != std::wstring::npos)
+                display.erase(0, separator + 1);
+            const std::wstring value = display + L" · " + std::to_wstring(rate.refreshHz) +
+                L" Hz · " + std::to_wstring(static_cast<int>(std::lround(rate.fps))) + L" FPS";
+            painter.drawText(L"显示器帧率", painter.textFormat(fluent::font_sizes::caption, 500, false, true),
+                             D2D1::RectF(contentLeft + 14.0f, detailY, contentLeft + 116.0f, detailY + 26.0f),
+                             p.textSecondary);
+            painter.drawTrimmedText(value, painter.textFormat(fluent::font_sizes::caption, 400, false, true),
+                                    D2D1::RectF(contentLeft + 120.0f, detailY, contentRight - 14.0f, detailY + 26.0f),
+                                    p.text);
+            detailY += 26.0f;
+        }
         drawButton(painter, diagnosticsRect, showDiagnostics ? L"收起诊断详情" : L"展开诊断详情",
                    kHitDiagnostics);
         if (showDiagnostics) {
-            const auto rect = D2D1::RectF(contentLeft + 14.0f, 602.0f, contentRight - 14.0f, 770.0f);
+            const auto rect = D2D1::RectF(contentLeft + 14.0f, 602.0f + frameDetailsHeight,
+                                          contentRight - 14.0f, 770.0f + frameDetailsHeight);
             auto* format = painter.textFormat(fluent::font_sizes::caption, 400);
             if (auto* text = painter.textLayout(snapshot.diagnosticText, format,
                                                rect.right - rect.left, rect.bottom - rect.top)) {
@@ -681,13 +745,21 @@ struct RuntimeLogDialog::Impl {
             layout();
             return 0;
         case WM_TIMER:
+            if (wp == kScrollTimer) {
+                sampleScroll();
+                layout();
+                surface.invalidate();
+                return 0;
+            }
             if (wp == kRefreshTimer) {
+                layout();
                 surface.invalidate();
                 return 0;
             }
             break;
         case WM_MOUSEWHEEL:
-            scrollTo(scrollY - GET_WHEEL_DELTA_WPARAM(wp) * 48 / WHEEL_DELTA);
+            scrollTo((scrollAnimating ? scrollTarget : scrollY) -
+                     static_cast<float>(GET_WHEEL_DELTA_WPARAM(wp)) * 48.0f / WHEEL_DELTA, true);
             return 0;
         case WM_SIZE:
             layout();
@@ -712,6 +784,7 @@ struct RuntimeLogDialog::Impl {
         }
         case WM_SETTINGCHANGE:
         case WM_THEMECHANGED:
+            scrollTo(scrollY);
             backdrop = fluent::restyleDialogWindow(hwnd, backdrop, false);
             surface.setBackdrop(backdrop);
             surface.invalidate();
@@ -761,11 +834,12 @@ struct RuntimeLogDialog::Impl {
             const float y = GET_Y_LPARAM(lp) / s;
             if (maxScroll > 0 && contains(scrollTrack, x, y)) {
                 if (y >= scrollThumb.top && y <= scrollThumb.bottom) {
+                    scrollTo(scrollY);
                     scrollDragging = true;
                     scrollGrabY = y - scrollThumb.top;
                     SetCapture(hwnd);
                 } else {
-                    scrollTo(scrollY + static_cast<int>(y < scrollThumb.top ? -viewHeight : viewHeight));
+                    scrollTo(scrollY + (y < scrollThumb.top ? -viewHeight : viewHeight), true);
                 }
                 return 0;
             }
@@ -841,6 +915,7 @@ struct RuntimeLogDialog::Impl {
             return 0;
         case WM_DESTROY:
             KillTimer(hwnd, kRefreshTimer);
+            KillTimer(hwnd, kScrollTimer);
             ++pickerGeneration;
             pickerOpen = false;
             surface.discard();

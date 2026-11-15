@@ -35,6 +35,7 @@ inline constexpr int kIdTaskbarBackground = 444;
 inline constexpr int kIdCoverBackgroundOpacity = 445;
 inline constexpr int kIdHoverControls = 415;
 inline constexpr int kIdRenderMode = 416;
+inline constexpr int kIdFrameRate = 4920;
 inline constexpr int kIdHoverControlStyle = 417;
 inline constexpr int kIdFloatingCardTrigger = 437;
 inline constexpr int kIdFloatingCardBackground = 418;

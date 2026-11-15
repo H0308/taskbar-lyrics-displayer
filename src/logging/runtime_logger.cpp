@@ -21,6 +21,7 @@
 #include <fstream>
 #include <exception>
 #include <mutex>
+#include <map>
 #include <sstream>
 #include <thread>
 #include <utility>
@@ -44,7 +45,13 @@ constexpr auto kCleanupInterval = std::chrono::hours(1);
 constexpr uint64_t kResourceMemoryDeltaBytes = 1024ull * 1024ull;
 
 std::atomic<RuntimeLogger*> g_activeLogger{nullptr};
-std::atomic<uint64_t> taskbarFrames{0};
+struct FrameSample {
+    TaskbarFrameRate rate;
+    uint64_t frames = 0;
+    std::chrono::steady_clock::time_point sampledAt = std::chrono::steady_clock::now();
+};
+std::mutex frameSamplesMutex;
+std::map<uintptr_t, FrameSample> frameSamples;
 
 std::string utf8Of(const std::wstring& value) {
     if (value.empty())
@@ -333,9 +340,6 @@ struct RuntimeLogger::Impl {
     bool cleanupRequested = false;
     std::thread worker;
     RuntimeLogSnapshot snapshot;
-    std::chrono::steady_clock::time_point frameSampledAt = std::chrono::steady_clock::now();
-    uint64_t sampledTaskbarFrames = taskbarFrames.load(std::memory_order_relaxed);
-    double taskbarFps = 0.0;
 
     // 调用方持有 ioMutex；状态锁只用于复制路径，不能覆盖文件系统操作。
     void openFileLocked() {
@@ -789,23 +793,38 @@ RuntimeLogSnapshot RuntimeLogger::snapshot() const {
         return {};
     std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     RuntimeLogSnapshot result = impl_->snapshot;
-    const auto now = std::chrono::steady_clock::now();
-    const double elapsed = std::chrono::duration<double>(now - impl_->frameSampledAt).count();
-    if (elapsed >= 0.5) {
-        const auto frames = taskbarFrames.load(std::memory_order_relaxed);
-        impl_->taskbarFps = static_cast<double>(frames - impl_->sampledTaskbarFrames) / elapsed;
-        impl_->sampledTaskbarFrames = frames;
-        impl_->frameSampledAt = now;
+    {
+        std::lock_guard<std::mutex> frameLock(frameSamplesMutex);
+        const auto now = std::chrono::steady_clock::now();
+        for (auto& [window, sample] : frameSamples) {
+            const double elapsed = std::chrono::duration<double>(now - sample.sampledAt).count();
+            if (elapsed >= 0.5) {
+                sample.rate.fps = static_cast<double>(sample.frames) / elapsed;
+                sample.frames = 0;
+                sample.sampledAt = now;
+            }
+            result.taskbarFrameRates.push_back(sample.rate);
+        }
     }
-    result.taskbarFps = impl_->taskbarFps;
     result.logDirectory = impl_->directory;
     result.sessionFileName = impl_->sessionFileName;
     result.retentionDays = impl_->retentionDays;
     return result;
 }
 
-void recordTaskbarFrame() noexcept {
-    taskbarFrames.fetch_add(1, std::memory_order_relaxed);
+void recordTaskbarFrame(uintptr_t window, const std::wstring& display, unsigned displayHz) {
+    std::lock_guard<std::mutex> lock(frameSamplesMutex);
+    auto& sample = frameSamples[window];
+    if (sample.rate.display != display || sample.rate.refreshHz != displayHz)
+        sample = {};
+    sample.rate.display = display;
+    sample.rate.refreshHz = displayHz;
+    ++sample.frames;
+}
+
+void removeTaskbarFrameRate(uintptr_t window) {
+    std::lock_guard<std::mutex> lock(frameSamplesMutex);
+    frameSamples.erase(window);
 }
 
 std::wstring RuntimeLogger::defaultDirectory() {

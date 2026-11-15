@@ -320,6 +320,11 @@ void SettingsSections::createSongToastRows() {
 
 void SettingsSections::createPerformanceRows() {
     addHeader(kPerformancePage, L"渲染与资源占用");
+    addRadio(kPerformancePage, kIdFrameRate, L"动画帧率",
+             L"高刷新率跟随当前显示器；低渲染模式固定约 30 FPS。选择会保存。",
+             {L"30 Hz", L"60 Hz", L"高刷新率"}, std::clamp(state.frameRate, 0, 2),
+             state.renderMode != static_cast<int>(RenderMode::Low) &&
+                 state.renderMode != static_cast<int>(RenderMode::Stopped), kRowTallH);
     addModeGrid(kPerformancePage, kIdRenderMode, L"性能模式",
                 L"模式仅本次运行有效，重启软件后恢复正常模式",
                 {L"正常", L"低渲染", L"完全停止", L"极简"},

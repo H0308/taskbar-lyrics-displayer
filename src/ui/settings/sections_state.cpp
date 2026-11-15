@@ -425,6 +425,11 @@ void SettingsSections::syncThemeFontRows(const SettingsState& s) {
         row->selected = themeModeIndex(s.windowThemeMode);
     if (auto* row = findRow(kIdRenderMode))
         row->selected = std::clamp(s.renderMode, 0, kRenderModeMinimal);
+    if (auto* row = findRow(kIdFrameRate)) {
+        row->selected = std::clamp(s.frameRate, 0, 2);
+        row->enabled = s.renderMode != static_cast<int>(RenderMode::Low) &&
+                       s.renderMode != static_cast<int>(RenderMode::Stopped);
+    }
     if (auto* row = findRow(kIdPickFont)) {
         row->valueText = s.fontDesc;
         row->hint = kFontSettingNotice;

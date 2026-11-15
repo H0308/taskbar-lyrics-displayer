@@ -17,6 +17,7 @@
 using taskbar_detail::WindowPlacement;
 #include "ui/taskbar/spectrum_renderer.h"
 #include "ui/taskbar/animation_clock.h"
+#include "ui/taskbar/frame_scheduler.h"
 using taskbar_detail::kImmersiveSpectrumBarCount;
 using taskbar_detail::kImmersiveSpectrumWideBarCount;
 using taskbar_detail::kImmersiveSpectrumWideZoneThreshold;
@@ -97,10 +98,8 @@ using taskbar_detail::VerticalLayout;
 
 namespace {
 
-constexpr UINT_PTR kTimerId = 2;
+constexpr UINT kFrameMessage = WM_APP + 41;
 constexpr UINT_PTR kTaskbarAttachTimerId = 3;
-constexpr UINT kTimerMs = 16;       // 活动帧最大间隔：60Hz 基准
-constexpr UINT kTimerMinMs = 8;     // 活动帧最小间隔：高刷封顶 ~125Hz，避免过度唤醒
 constexpr UINT kTimerPausedMs = 33; // 暂停时 ~30fps：超长文本继续滚动，任务栏合成开销减半
 constexpr UINT kTaskbarAttachRetryMs = 250;
 constexpr UINT_PTR kPlacementTimerId = 4;
@@ -316,6 +315,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         applyBackgroundAppearance(value);
         applyCoverAndFontAppearance(value);
         appearance_ = value;
+        refreshFrameTimer();
     }
 
     void applyTextAppearance(const TaskbarAppearance& value) {
@@ -425,9 +425,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     HINSTANCE inst = nullptr;
     HWND hwnd = nullptr;
     bool timerRunning_ = false;
-    UINT timerMs_ = 0; // 当前定时器实际间隔（活动/暂停档位切换用）
+    double timerMs_ = 0;
+    taskbar_detail::FrameScheduler frameScheduler_;
     bool placementTimerRunning_ = false;
     UINT displayRefreshHz_ = 60;
+    std::wstring frameDisplayName_;
     bool allowOverlap_ = false;
     bool probeReady_ = false;
     TaskbarPlacementStatus placementStatus_ = TaskbarPlacementStatus::Unavailable;
@@ -3461,6 +3463,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         // 旧窗口未收到 WM_DESTROY 时也要停止旧探测，避免迟到结果进入新窗口。
         stopProbe();
         dockBackdrop_.reset();
+        runtime_log::removeTaskbarFrameRate(reinterpret_cast<uintptr_t>(hwnd));
         hwnd = nullptr;
         coverTip_.reset();
         pressedCoverSource_.clear();
@@ -3472,6 +3475,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         // 旧窗口被系统侧销毁时不一定投递 WM_DESTROY（Explorer 被强杀），
         // timerRunning_ 可能残留为 true，但定时器已随旧窗口消失；重建时同样
         // 等待新任务栏的首个探测结果，避免按旧矩形先显示一帧。
+        frameScheduler_.stop();
         timerRunning_ = false;
         timerMs_ = 0;
         renderState_.setVisibilitySuppressed(true);
@@ -6167,7 +6171,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 discardDeviceResources();
                 return false;
             }
-            runtime_log::recordTaskbarFrame();
+            runtime_log::recordTaskbarFrame(reinterpret_cast<uintptr_t>(hwnd), frameDisplayName_, displayRefreshHz_);
             // 只有真正 Present 成功后才消费该阶段；设备丢失时保留 Pending，
             // 下一次资源重建仍会以同一首歌的完整帧启动转场。
             if (startSongTransition) {
@@ -6830,29 +6834,38 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         info.cbSize = sizeof(info);
         if (!GetMonitorInfoW(monitor, &info))
             return;
+        frameDisplayName_ = info.szDevice;
         DEVMODEW mode{};
         mode.dmSize = sizeof(mode);
         if (EnumDisplaySettingsW(info.szDevice, ENUM_CURRENT_SETTINGS, &mode) &&
-            (mode.dmFields & DM_DISPLAYFREQUENCY) && mode.dmDisplayFrequency >= 24)
+            (mode.dmFields & DM_DISPLAYFREQUENCY) && mode.dmDisplayFrequency >= 24 &&
+            displayRefreshHz_ != mode.dmDisplayFrequency) {
             displayRefreshHz_ = mode.dmDisplayFrequency;
+            runtime_log::writef(L"[ui][frame-scheduler] monitor=%s refresh=%uHz",
+                                info.szDevice, displayRefreshHz_);
+            refreshFrameTimer();
+        }
     }
 
     void refreshFrameTimer() {
         if (!timerRunning_ || !hwnd)
             return;
-        const UINT wantMs = desiredFrameMs();
+        const double wantMs = desiredFrameMs();
         if (wantMs == timerMs_)
             return;
-        SetTimer(hwnd, kTimerId, wantMs, nullptr);
+        frameScheduler_.setInterval(wantMs);
         timerMs_ = wantMs;
     }
 
-    UINT activeFrameMs() const {
+    double activeFrameMs() const {
         // 只有低渲染模式固定 ~30fps；极简模式仍使用正常刷新率，歌词帧率不变。
         if (isRenderMode(RenderMode::Low))
             return kTimerPausedMs;
         const UINT hz = displayRefreshHz_ ? displayRefreshHz_ : 60;
-        return std::clamp(1000 / hz, kTimerMinMs, kTimerMs);
+        const int preference = appearance_ ? appearance_->frameRate : 1;
+        const UINT targetHz = preference == 0 ? std::min(hz, 30u)
+                              : preference == 1 ? std::min(hz, 60u) : hz;
+        return 1000.0 / targetHz;
     }
 
     bool hasHighFrequencyAnimation() const {
@@ -6890,7 +6903,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return false;
     }
 
-    UINT desiredFrameMs() const {
+    double desiredFrameMs() const {
         return hasHighFrequencyAnimation() ? activeFrameMs() : kTimerPausedMs;
     }
 
@@ -6900,16 +6913,21 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (!timerRunning_ && hwnd) {
             lastFrameTick_ = 0;
             updateDisplayRefresh();
-            const UINT initialMs = desiredFrameMs();
-            SetTimer(hwnd, kTimerId, initialMs, nullptr);
-            timerRunning_ = true;
-            timerMs_ = initialMs;
+            const double initialMs = desiredFrameMs();
+            timerRunning_ = frameScheduler_.start(hwnd, kFrameMessage, initialMs);
+            timerMs_ = timerRunning_ ? initialMs : 0.0;
+            if (!timerRunning_)
+                runtime_log::writef(L"[ui][frame-scheduler] start failed error=%lu", GetLastError());
         }
     }
 
     void stopFrameTimer() {
-        if (timerRunning_ && hwnd) {
-            KillTimer(hwnd, kTimerId);
+        runtime_log::removeTaskbarFrameRate(reinterpret_cast<uintptr_t>(hwnd));
+        if (timerRunning_) {
+            frameScheduler_.stop();
+            MSG message{};
+            while (hwnd && PeekMessageW(&message, hwnd, kFrameMessage, kFrameMessage, PM_REMOVE)) {
+            }
             timerRunning_ = false;
             timerMs_ = 0;
             lastFrameTick_ = 0;
@@ -6980,9 +6998,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         }
         // 帧定时器运行中则立即按新档位调整间隔（正常/极简=跟随刷新率，低渲染=~30fps）
         if (timerRunning_) {
-            const UINT wantMs = desiredFrameMs();
+            const double wantMs = desiredFrameMs();
             if (wantMs != timerMs_) {
-                SetTimer(hwnd, kTimerId, wantMs, nullptr);
+                frameScheduler_.setInterval(wantMs);
                 timerMs_ = wantMs;
             }
         }
@@ -7060,8 +7078,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
     void onTimer() {
         const auto tickNow = monotonicNowMs();
-        if (lastFrameTick_ != 0 && tickNow - lastFrameTick_ > std::max<ULONGLONG>(64, timerMs_ * 3)) {
-            runtime_log::writef(L"[ui][taskbar-frame-gap] elapsed=%llums interval=%ums thread=%lu",
+        if (lastFrameTick_ != 0 && tickNow - lastFrameTick_ > std::max(64.0, timerMs_ * 3)) {
+            runtime_log::writef(L"[ui][taskbar-frame-gap] elapsed=%llums interval=%.3fms thread=%lu",
                                 static_cast<unsigned long long>(tickNow - lastFrameTick_),
                                 timerMs_, GetCurrentThreadId());
         }
@@ -7075,12 +7093,12 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         // TrafficMonitor 可能在两次渲染之间调整自己的任务栏子窗口 Z 序；
         // 即使当前画面静止，也要及时把沉浸宿主恢复到最上层。
         ensureImmersiveZOrder();
-        // 只有可见动画源跟随当前显示器刷新率（封顶 ~125fps）；静态播放降到 ~30fps，
+        // 只有可见动画源跟随当前显示器刷新率；静态播放降到 ~30fps，
         // 避免歌词没有动画时仍高频轮询和提交。状态事件（悬停、恢复播放、seek）走同步
         // render 路径，不依赖定时器，低档位下也不会延迟显示。
-        const UINT wantMs = desiredFrameMs();
+        const double wantMs = desiredFrameMs();
         if (timerRunning_ && wantMs != timerMs_) {
-            SetTimer(hwnd, kTimerId, wantMs, nullptr);
+            frameScheduler_.setInterval(wantMs);
             timerMs_ = wantMs;
         }
         frameNowMs_ = monotonicNowMs();
@@ -7135,10 +7153,13 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             // 普通创建保持不可见；若正在等待首次避让探测，定时器会由
             // createWindow() 启动，但仍禁止提交可见窗口。
             return 0;
-        case WM_TIMER:
-            if (wp == kTimerId)
+        case kFrameMessage:
+            frameScheduler_.acknowledge();
+            if (timerRunning_)
                 onTimer();
-            else if (wp == kPlacementTimerId)
+            return 0;
+        case WM_TIMER:
+            if (wp == kPlacementTimerId)
                 onPlacementTimer();
             else if (wp == kTaskbarAttachTimerId)
                 retryTaskbarAttach();

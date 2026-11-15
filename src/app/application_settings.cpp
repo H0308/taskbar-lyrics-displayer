@@ -1045,6 +1045,7 @@ SettingsState App::currentSettingsState() const {
     st.taskbarBackground = settings_.taskbarBackground_;
     st.coverBackgroundOpacity = settings_.coverBackgroundOpacity_;
     st.renderMode = renderMode_;
+    st.frameRate = settings_.frameRate_;
     st.taskbarContextMenu = settings_.taskbarContextMenuEnabled_;
     st.hoverControls = settings_.hoverPlaybackControls_;
     st.hoverControlStyle = settings_.hoverControlStyle_ == HoverControlStyle::Popup ? 1 : 0;
@@ -1161,6 +1162,12 @@ SettingsActions App::buildSettingsActions() {
     act.onTaskbarBackground = [this](int mode) { applyTaskbarBackground(mode); };
     act.onCoverBackgroundOpacity = [this](int percent) { applyCoverBackgroundOpacity(percent); };
     act.onRenderMode = [this](int mode) { applyRenderMode(mode); };
+    act.onFrameRate = [this](int value) {
+        settings_.frameRate_ = std::clamp(value, 0, 2);
+        publishTaskbarAppearance();
+        logSettingInt(L"frame-rate", settings_.frameRate_);
+        saveSettings();
+    };
     act.onTaskbarContextMenu = [this](bool on) { applyTaskbarContextMenu(on); };
     act.onHoverControls = [this](bool on) { applyHoverControls(on); };
     act.onHoverControlStyle = [this](int style) { applyHoverControlStyle(style); };

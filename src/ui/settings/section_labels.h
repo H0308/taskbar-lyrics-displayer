@@ -85,6 +85,8 @@ inline settings_icon::Kind iconForRow(int id) {
         return settings_icon::Kind::Scope;
     case kIdRenderMode:
         return settings_icon::Kind::RenderMode;
+    case kIdFrameRate:
+        return settings_icon::Kind::Refresh;
     case kIdTaskbarContextMenu:
     case kIdTaskbarViewMode:
     case kIdTaskbarMonitor:

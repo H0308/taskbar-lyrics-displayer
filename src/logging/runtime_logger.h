@@ -8,6 +8,12 @@
 
 namespace runtime_log {
 
+struct TaskbarFrameRate {
+    std::wstring display;
+    unsigned refreshHz = 0;
+    double fps = 0.0;
+};
+
 // 运行日志窗口读取的低频状态快照。日志正文与可视化状态分开，避免 UI 刷新
 // 把资源采样或高频播放事件直接写入磁盘。
 struct RuntimeLogSnapshot {
@@ -19,7 +25,7 @@ struct RuntimeLogSnapshot {
     std::vector<std::pair<std::wstring, std::wstring>> playbackDetails;
     std::wstring diagnosticText;
     std::wstring renderMode;
-    double taskbarFps = 0.0;
+    std::vector<TaskbarFrameRate> taskbarFrameRates;
     bool coverLoaded = false;
     std::wstring coverSource;
     std::shared_ptr<const std::vector<uint8_t>> coverImage;
@@ -81,6 +87,7 @@ private:
 // 供已有模块把原来的控制台诊断输出统一写入当前运行日志。
 // logger 尚未启动时仍会输出到调试器，不会阻塞启动流程。
 void writef(const wchar_t* format, ...);
-void recordTaskbarFrame() noexcept;
+void recordTaskbarFrame(uintptr_t window, const std::wstring& display, unsigned displayHz);
+void removeTaskbarFrameRate(uintptr_t window);
 
 } // namespace runtime_log

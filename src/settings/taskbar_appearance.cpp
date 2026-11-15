@@ -9,6 +9,7 @@ TaskbarAppearance resolveTaskbarAppearance(const AppSettings& settings,
     const bool vertical = constraints.vertical;
     const bool minimal = constraints.minimal;
     TaskbarAppearance result;
+    result.frameRate = settings.frameRate_;
     result.secondaryLyricMode = {
         vertical ? false : (settings.secondaryLyricEnabled_ && !settings.preferRomanization_),
         vertical ? false : (settings.secondaryLyricEnabled_ && settings.preferRomanization_)};

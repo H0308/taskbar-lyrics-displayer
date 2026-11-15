@@ -443,6 +443,10 @@ void SettingsSections::onCommand(int id, int option) {
         if (actions.onRenderMode)
             actions.onRenderMode(row->selected);
         break;
+    case kIdFrameRate:
+        if (actions.onFrameRate)
+            actions.onFrameRate(row->selected);
+        break;
     case kIdPickFont:
         if (actions.onPickFont)
             actions.onPickFont();
