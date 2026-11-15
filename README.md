@@ -129,6 +129,8 @@ CMake 在 configure 阶段会通过 `vcpkg.json` 自动检查并安装缺失依�
 
 GitHub Actions 仅在推送 `v*` 版本标签时执行 Windows x64 Release 构建、测试和发布构建校验，生成安装包并发布 GitHub Release。普通分支推送和 Pull Request 不触发软件构建，也不提供手动构建入口。构建产物可在对应的 Actions 运行记录中下载；网站仍由独立的 Pages 工作流部署。
 
+Release 正文来自仓库中的 `.github/release-notes.md`。每次发版前，将更新说明写入该文件并随版本修改一起提交，再推送对应标签。Actions 会将文件中的 Markdown 原文用作 Release 内容，不再自动生成默认发布说明。应用内关于页的更新日志也读取同一份 Release 内容。
+
 创建 GitHub Release 时，先同步修改 `src/app_info.h` 与 `installer/QQMusicLyric.iss` 中的版本号，然后推送同版本标签：
 
 ```powershell

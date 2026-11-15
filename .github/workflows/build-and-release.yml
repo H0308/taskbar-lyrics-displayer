@@ -206,6 +206,9 @@ jobs:
           name: QQMusicLyric-${{ needs.build.outputs.installer_version }}-windows-x64
           path: dist
 
+      - name: Check out release notes
+        uses: actions/checkout@v7
+
       - name: Create GitHub Release
         shell: bash
         env:
@@ -220,8 +223,8 @@ jobs:
           checksum="${installer}.sha256"
           args=(release create "$RELEASE_TAG" "$installer" "$checksum"
                 --repo "$GITHUB_REPOSITORY"
-                --title "QQMusicLyric $RELEASE_TAG"
-                --generate-notes --verify-tag)
+                --title "$RELEASE_TAG"
+                --notes-file .github/release-notes.md --verify-tag)
 
           if [[ "$IS_PRERELEASE" == "true" ]]; then
             args+=(--prerelease --latest=false)
