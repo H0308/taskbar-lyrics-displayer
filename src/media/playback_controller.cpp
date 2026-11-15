@@ -213,6 +213,7 @@ void PlaybackController::applyManualLyrics(LyricResult result, const SmtcSnapsho
     state_.currentLyricsFromLocal_ = false;
     state_.currentLyricsFromManual_ = true;
     state_.currentLyricOrigin_ = result.info.lyricOrigin;
+    state_.currentLyricInfo_ = result.info;
     state_.lyricLoading_ = false;
     updateLyricCapabilities(state_.currentLyrics_);
     logLyricsCreated(L"manual");
@@ -263,6 +264,10 @@ void PlaybackController::releaseCurrentLyrics() {
     state_.currentLyricsFromLocal_ = false;
     state_.currentLyricsFromManual_ = false;
     state_.currentLyricOrigin_ = LyricOrigin::Unknown;
+    state_.currentLyricInfo_ = {};
+    state_.currentLyricsFromCache_ = false;
+    state_.currentLyricLoadMs_ = 0;
+    state_.lyricDiagnostics_.clear();
     updateLyricCapabilities({});
 }
 
@@ -359,6 +364,8 @@ void PlaybackController::startLyricRequest(const SmtcSnapshot& snap, bool forceO
     state_.currentLyricsFromLocal_ = false;
     state_.currentLyricsFromManual_ = false;
     state_.lyricRequestStale_ = snap.timelineStale;
+    state_.lyricDiagnostics_.clear();
+    state_.currentLyricLoadMs_ = 0;
     const int64_t durationMs = snap.timelineStale ? 0 : snap.durationMs;
     ++state_.requestGeneration_;
     logState_(snap);
@@ -419,12 +426,16 @@ void PlaybackController::onLyricReady(std::unique_ptr<LyricPayload> payload) {
 
     state_.lyricLoading_ = false;
     std::wstring coverAlbummid;
+    state_.currentLyricLoadMs_ = payload->result.elapsedMs;
+    state_.lyricDiagnostics_ = payload->result.diagnostics;
     if (payload->result.ok) {
         state_.currentLyrics_ = std::move(payload->result.lines);
         state_.currentLyricsFromLocal_ =
             snap.player == SmtcPlayerType::QQMusic && payload->result.fromLocal;
         state_.currentLyricsFromManual_ = payload->result.fromManual;
         state_.currentLyricOrigin_ = payload->result.info.lyricOrigin;
+        state_.currentLyricInfo_ = payload->result.info;
+        state_.currentLyricsFromCache_ = payload->result.fromCache;
         updateLyricCapabilities(state_.currentLyrics_);
         logLyricsCreated(state_.currentLyricsFromManual_  ? L"manual"
                          : state_.currentLyricsFromLocal_ ? L"local"
@@ -443,6 +454,8 @@ void PlaybackController::onLyricReady(std::unique_ptr<LyricPayload> payload) {
             return;
         }
         releaseCurrentLyrics();
+        state_.currentLyricLoadMs_ = payload->result.elapsedMs;
+        state_.lyricDiagnostics_ = payload->result.diagnostics;
         runtime_log::writef(L"[lyric] not found: %s", state_.currentKey.c_str());
     }
     // SMTC 没有封面时，使用已匹配的专辑标识或单独查询曲目信息。

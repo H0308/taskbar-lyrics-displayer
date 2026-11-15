@@ -365,6 +365,7 @@ void App::applyRenderMode(int mode) {
         armTaskbarAutoRestore();
     refreshSettingsDialog(true);
     logSettingInt(L"render-mode", renderMode_);
+    updateRuntimeLogState(monitor.snapshot());
     saveSettings();
 }
 

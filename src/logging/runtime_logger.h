@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace runtime_log {
@@ -15,6 +16,10 @@ struct RuntimeLogSnapshot {
     std::wstring currentArtist;
     int64_t durationMs = 0;
     std::wstring lyricSource = L"未加载";
+    std::vector<std::pair<std::wstring, std::wstring>> playbackDetails;
+    std::wstring diagnosticText;
+    std::wstring renderMode;
+    double taskbarFps = 0.0;
     bool coverLoaded = false;
     std::wstring coverSource;
     std::shared_ptr<const std::vector<uint8_t>> coverImage;
@@ -57,6 +62,8 @@ public:
     void setPlayback(const std::wstring& title, const std::wstring& artist,
                      int64_t durationMs, bool active);
     void setLyricSource(const std::wstring& source);
+    void setDetails(std::vector<std::pair<std::wstring, std::wstring>> details,
+                    std::wstring diagnosticText, std::wstring renderMode);
     void setCoverImage(const std::shared_ptr<const std::vector<uint8_t>>& cover,
                        const std::wstring& source = {});
     void setCoverLoaded(bool loaded);
@@ -74,5 +81,6 @@ private:
 // 供已有模块把原来的控制台诊断输出统一写入当前运行日志。
 // logger 尚未启动时仍会输出到调试器，不会阻塞启动流程。
 void writef(const wchar_t* format, ...);
+void recordTaskbarFrame() noexcept;
 
 } // namespace runtime_log

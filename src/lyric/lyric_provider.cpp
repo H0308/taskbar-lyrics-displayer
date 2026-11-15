@@ -55,6 +55,27 @@ struct DoneFlag {
 //（单个请求最坏吃满 10s 超时，变体×来源×候选的串行链可达数分钟）。
 std::atomic<bool> g_shutdown{false};
 
+thread_local std::vector<LyricRequestDiagnostic>* requestDiagnostics = nullptr;
+
+class RequestDiagnosticsScope {
+public:
+    explicit RequestDiagnosticsScope(LyricProvider::ReadyCallback& callback) {
+        callback = [callback = std::move(callback), started = std::chrono::steady_clock::now(),
+                    records = &records_](LyricResult result) mutable {
+            result.elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - started).count();
+            result.diagnostics = *records;
+            if (callback)
+                callback(std::move(result));
+        };
+        requestDiagnostics = &records_;
+    }
+    ~RequestDiagnosticsScope() { requestDiagnostics = nullptr; }
+
+private:
+    std::vector<LyricRequestDiagnostic> records_;
+};
+
 int curlXferAbort(void*, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
     return g_shutdown.load() ? 1 : 0; // 返回非 0：curl 以 CURLE_ABORTED_BY_CALLBACK 立即返回
 }
@@ -117,9 +138,20 @@ bool httpGet(CURL* curl, const std::string& url, const char* referer, std::strin
         if (g_shutdown.load() || (request && request->cancelled()))
             return false;
         out.clear();
+        const auto started = std::chrono::steady_clock::now();
         const CURLcode rc = curl_easy_perform(curl);
         long code = 0;
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
+        if (requestDiagnostics) {
+            const wchar_t* source = url.starts_with("https://lrclib.net/") ? L"LRCLIB"
+                : url.find("music.163.com/") != std::string::npos ? L"网易云音乐"
+                : url.find("kugou.com/") != std::string::npos ? L"酷狗音乐"
+                : url.find("qishui.com/") != std::string::npos ||
+                  url.find("douyin.com/") != std::string::npos ? L"汽水音乐" : L"QQ 音乐";
+            requestDiagnostics->push_back({source,
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - started).count(), code, static_cast<int>(rc)});
+        }
         if (g_shutdown.load() || (request && request->cancelled()))
             return false;
         if (rc == CURLE_OK && code == 200)
@@ -216,7 +248,7 @@ std::wstring simplifiedChinese(const std::wstring& text) {
 
 std::vector<LyricLine> fetchLrclib(const std::wstring& title, const std::wstring& artist,
                                    const std::wstring& album, int64_t durationMs,
-                                   const LyricRequest& request) {
+                                   const LyricRequest& request, SongInfo& info) {
     if (title.empty() || artist.empty() || durationMs < 1000 || durationMs > 3600000)
         return {};
     std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl(curl_easy_init(), curl_easy_cleanup);
@@ -235,9 +267,14 @@ std::vector<LyricLine> fetchLrclib(const std::wstring& title, const std::wstring
                                "&duration=" + std::to_string((durationMs + 500) / 1000);
         if (!queryAlbum.empty())
             resource += "&album_name=" + lrclibEscape(curl.get(), queryAlbum);
-        auto lines = parseLrclibLyrics(getLrclib(curl.get(), resource, &request));
-        if (!lines.empty())
+        const auto record = getLrclib(curl.get(), resource, &request);
+        auto lines = parseLrclibLyrics(record);
+        if (!lines.empty()) {
+            info.matchedTitle = toWide(record.value("trackName", std::string()));
+            info.matchedArtist = toWide(record.value("artistName", std::string()));
+            info.matchedDurationMs = static_cast<int64_t>(record.value("duration", 0.0) * 1000.0);
             return lines;
+        }
     }
     return {};
 }
@@ -1593,10 +1630,20 @@ std::vector<size_t> findLocalLyricCandidates(const LocalLyricIndex& index,
 }
 
 bool lookupLocalLyric(const LocalLyricIndex& index, const std::wstring& title,
-                      const std::wstring& artist, std::vector<LyricLine>& out) {
+                      const std::wstring& artist, std::vector<LyricLine>& out, SongInfo& info) {
     for (size_t bundleIndex : findLocalLyricCandidates(index, title, artist)) {
-        if (loadLocalLyricBundle(index.bundles[bundleIndex], out))
+        const auto& bundle = index.bundles[bundleIndex];
+        if (loadLocalLyricBundle(bundle, out)) {
+            info = {};
+            info.lyricOrigin = LyricOrigin::QqMusic;
+            info.matchedArtist = bundle.artist;
+            const auto query = normalizeTitle(title);
+            const auto matched = std::find_if(bundle.titles.begin(), bundle.titles.end(),
+                [&](const std::wstring& candidate) { return normalizeTitle(candidate) == query; });
+            if (matched != bundle.titles.end())
+                info.matchedTitle = *matched;
             return true;
+        }
     }
     out.clear();
     return false;
@@ -1772,7 +1819,7 @@ bool downloadNeteaseLyric(CURL* curl, const std::wstring& songId,
 }
 
 bool fetchNeteaseByMetadata(CURL* curl, const MatchQuery& query,
-                            std::vector<LyricLine>& out, const LyricRequest& request) {
+                            std::vector<LyricLine>& out, const LyricRequest& request, SongInfo& info) {
     std::unordered_set<std::wstring> searched;
     std::unordered_set<std::string> attempted;
     for (const auto& variant : buildSearchVariants(query)) {
@@ -1798,6 +1845,9 @@ bool fetchNeteaseByMetadata(CURL* curl, const MatchQuery& query,
             if (!attempted.insert(song->id).second)
                 continue;
             if (downloadNeteaseLyric(curl, toWide(song->id), out, &request)) {
+                info.matchedTitle = song->name;
+                info.matchedArtist = song->singer;
+                info.matchedDurationMs = song->durationMs;
                 runtime_log::writef(L"[lyric][source=netease] matched songid=%S lines=%zu",
                                     song->id.c_str(), out.size());
                 return true;
@@ -2149,7 +2199,8 @@ bool downloadSodaLyrics(CURL* curl, const SodaSong& song, int64_t playbackDurati
 }
 
 bool fetchSodaLyrics(const std::wstring& title, const std::wstring& artist,
-                       int64_t durationMs, std::vector<LyricLine>& out, const LyricRequest& request) {
+                       int64_t durationMs, std::vector<LyricLine>& out, const LyricRequest& request,
+                       SongInfo& info) {
     out.clear();
     std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl(curl_easy_init(), &curl_easy_cleanup);
     if (!curl || request.cancelled())
@@ -2188,8 +2239,15 @@ bool fetchSodaLyrics(const std::wstring& title, const std::wstring& artist,
             if (request.cancelled())
                 return false;
             attempted.insert(ranked[i].second->id);
-            if (downloadSodaLyrics(curl.get(), *ranked[i].second, durationMs, out, &request))
+            if (downloadSodaLyrics(curl.get(), *ranked[i].second, durationMs, out, &request)) {
+                info.matchedTitle = ranked[i].second->title;
+                info.matchedArtist = ranked[i].second->artist;
+                info.matchedDurationMs = ranked[i].second->durationMs;
+                info.sourceOffsetMs = -soda_lyrics::previewOffset(
+                    ranked[i].second->durationMs, ranked[i].second->previewStartMs,
+                    ranked[i].second->previewDurationMs, durationMs);
                 return !request.cancelled();
+            }
         }
     }
     return false;
@@ -2495,15 +2553,15 @@ struct LyricProvider::Impl {
     }
 
     bool lookupLocalLyrics(const std::wstring& title, const std::wstring& artist,
-                           std::vector<LyricLine>& out) {
+                           std::vector<LyricLine>& out, SongInfo& info) {
         std::shared_ptr<const LocalLyricIndex> index;
         if (!acquireLocalIndex(index))
             return false;
-        if (lookupLocalLyric(*index, title, artist, out))
+        if (lookupLocalLyric(*index, title, artist, out, info))
             return true;
         if (!refreshLocalIndex(index))
             return false;
-        const bool hit = lookupLocalLyric(*index, title, artist, out);
+        const bool hit = lookupLocalLyric(*index, title, artist, out, info);
         if (!hit) {
             runtime_log::writef(L"[lyric][local-no-match][QQ] title=\"%ls\" artist=\"%ls\" "
                                 L"indexed-bundles=%zu",
@@ -2731,6 +2789,9 @@ struct LyricProvider::Impl {
                             attachQqSecondary(curl, toUtf8(info.songmid), out);
                         runtime_log::writef(L"[lyric][source=kugou] lines=%zu", out.size());
                         info.lyricOrigin = LyricOrigin::Kugou;
+                        info.matchedTitle = song->name;
+                        info.matchedArtist = song->singer;
+                        info.matchedDurationMs = song->durationMs;
                         return true;
                     }
                 }
@@ -2772,6 +2833,9 @@ struct LyricProvider::Impl {
                         info.songmid = toWide(candidate->songmid);
                         info.albummid = toWide(candidate->albummid);
                         info.lyricOrigin = LyricOrigin::QqMusic;
+                        info.matchedTitle = candidate->name;
+                        info.matchedArtist = candidate->singer;
+                        info.matchedDurationMs = candidate->intervalMs;
                         runtime_log::writef(L"[lyric][source=qq] format=%ls lines=%zu",
                                             source == LyricSource::Qrc ? L"QRC" : L"LRC", out.size());
                         return true;
@@ -2786,7 +2850,7 @@ struct LyricProvider::Impl {
             return false;
         if (found)
             return true;
-        out = fetchLrclib(title, artist, album, durationMs, request);
+        out = fetchLrclib(title, artist, album, durationMs, request, info);
         if (request.cancelled())
             return false;
         const bool wordSync = std::any_of(out.begin(), out.end(), [](const LyricLine& line) {
@@ -2798,12 +2862,12 @@ struct LyricProvider::Impl {
             info.lyricOrigin = LyricOrigin::Lrclib;
             return true;
         }
-        if (player != SmtcPlayerType::NetEase && fetchNeteaseByMetadata(curl, q, out, request)) {
+        if (player != SmtcPlayerType::NetEase && fetchNeteaseByMetadata(curl, q, out, request, info)) {
             info.lyricOrigin = LyricOrigin::Netease;
             return true;
         }
         if (player != SmtcPlayerType::Soda &&
-            fetchSodaLyrics(title, artist, durationMs, out, request)) {
+            fetchSodaLyrics(title, artist, durationMs, out, request, info)) {
             info.lyricOrigin = LyricOrigin::Soda;
             return true;
         }
@@ -2847,6 +2911,7 @@ void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& 
                                  cb = std::move(cb), spotify, source, persistOrder, done]() mutable {
         DoneFlag flag{done};
         const LyricRequest request{impl->generation, gen};
+        RequestDiagnosticsScope diagnostics(cb);
         const wchar_t* requestSource = spotify ? L"Spotify" : L"QQ";
         const auto player = spotify ? SmtcPlayerType::Spotify : SmtcPlayerType::QQMusic;
         runtime_log::writef(L"[lyric][request][%ls] title=\"%ls\" artist=\"%ls\" duration=%lldms",
@@ -2868,6 +2933,7 @@ void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& 
                                   !impl->qqLocalLyricsDir.empty();
                 if (!localConfigured && impl->cacheGet(key, entry)) {
                     ready = {true, std::move(entry.lines), std::move(entry.info)};
+                    ready.fromCache = true;
                     runtime_log::writef(L"[lyric][source=online-cache][%ls] title=\"%ls\" artist=\"%ls\"",
                                         requestSource, title.c_str(), artist.c_str());
                 }
@@ -2880,6 +2946,7 @@ void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& 
         }
         std::vector<LyricLine> result;
         SongInfo info;
+        bool fromCache = false;
 
         // 本地索引可能仍在构建，顺序标记的读写必须留在工作线程，不能阻塞 UI 线程。
         if (persistOrder && !spotify)
@@ -2899,6 +2966,7 @@ void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& 
                 if (impl->cacheGet(key, cached)) {
                     result = std::move(cached.lines);
                     info = std::move(cached.info);
+                    fromCache = true;
                     runtime_log::writef(
                         L"[lyric][source=online-cache][%ls] title=\"%ls\" artist=\"%ls\"",
                         requestSource, title.c_str(), artist.c_str());
@@ -2919,11 +2987,9 @@ void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& 
         bool localHit = false;
         bool ok = false;
         if (useLocalLyrics) {
-            localHit = impl->lookupLocalLyrics(title, artist, result);
+            localHit = impl->lookupLocalLyrics(title, artist, result, info);
             ok = localHit;
             if (localHit) {
-                // 本地 QRC 没有在线 songmid；不把旧歌的封面标识带到当前歌曲。
-                info = SongInfo{};
                 runtime_log::writef(L"[lyric][source=local][QQ] title=\"%ls\" artist=\"%ls\" "
                                     L"lines=%zu",
                                     title.c_str(), artist.c_str(), result.size());
@@ -2944,7 +3010,7 @@ void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& 
                 // 在线优先失败时，按“手动 -> 在线 -> 本地”继续尝试本地歌词。
                 result.clear();
                 info = SongInfo{};
-                localHit = impl->lookupLocalLyrics(title, artist, result);
+                localHit = impl->lookupLocalLyrics(title, artist, result, info);
                 ok = localHit;
                 if (localHit)
                     runtime_log::writef(
@@ -2962,7 +3028,7 @@ void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& 
                 impl->cachePut(key, CacheEntry{result, info});
         }
         if (cb)
-            cb(LyricResult{ok, std::move(result), std::move(info), localHit, false});
+            cb(LyricResult{ok, std::move(result), std::move(info), localHit, false, fromCache});
     });
     std::lock_guard<std::mutex> lk(impl_->mtx);
     impl_->sweepFinished();
@@ -2989,6 +3055,7 @@ void LyricProvider::requestNeteaseAsync(const std::wstring& songId,
                                  cb = std::move(cb), done]() mutable {
         DoneFlag flag{done};
         const LyricRequest request{impl->generation, gen};
+        RequestDiagnosticsScope diagnostics(cb);
         LyricResult ready;
         {
             std::lock_guard<std::mutex> lk(impl->mtx);
@@ -3001,6 +3068,7 @@ void LyricProvider::requestNeteaseAsync(const std::wstring& songId,
                 runtime_log::writef(L"[lyric][source=manual][Netease] songid=\"%ls\"", songId.c_str());
             } else if (impl->cacheGet(key, entry)) {
                 ready = {true, std::move(entry.lines), std::move(entry.info)};
+                ready.fromCache = true;
                 runtime_log::writef(L"[lyric][source=online-cache][Netease] songid=\"%ls\"", songId.c_str());
             }
         }
@@ -3012,6 +3080,11 @@ void LyricProvider::requestNeteaseAsync(const std::wstring& songId,
         std::vector<LyricLine> result;
         SongInfo info;
         bool ok = !songId.empty() && impl->fetchNetease(songId, result, info);
+        if (ok) {
+            info.matchedTitle = title;
+            info.matchedArtist = artist;
+            info.matchedDurationMs = durationMs;
+        }
         runtime_log::writef(L"[lyric][source=netease] result=%s songid=\"%ls\" lines=%zu",
                             ok ? L"success" : L"failed", songId.c_str(), result.size());
         if (!ok)
@@ -3253,6 +3326,12 @@ void LyricProvider::fetchLyricAsync(const SearchCandidate& cand, FetchCallback c
                             cand.name.c_str(), static_cast<int>(cand.source),
                             ok ? L"success" : L"failed", lines.size());
         SongInfo info{cand.songmid, cand.albummid, cand.neteaseSongId};
+        info.matchedTitle = cand.name;
+        info.matchedArtist = cand.singer;
+        info.matchedDurationMs = cand.durationMs;
+        if (cand.source == LyricSource::Soda)
+            info.sourceOffsetMs = -soda_lyrics::previewOffset(
+                cand.durationMs, cand.previewStartMs, cand.previewDurationMs, playbackDurationMs);
         switch (cand.source) {
         case LyricSource::Qrc:
         case LyricSource::Lrc:
@@ -3290,6 +3369,7 @@ void LyricProvider::requestSodaAsync(const std::wstring& title, const std::wstri
                                  cb = std::move(cb), done]() mutable {
         DoneFlag flag{done};
         const LyricRequest request{impl->generation, gen};
+        RequestDiagnosticsScope diagnostics(cb);
         LyricResult ready;
         {
             std::lock_guard<std::mutex> lock(impl->mtx);
@@ -3298,8 +3378,10 @@ void LyricProvider::requestSodaAsync(const std::wstring& title, const std::wstri
             CacheEntry entry;
             if (impl->manualOverrideGet(key, title, artist, SmtcPlayerType::Soda, entry))
                 ready = {true, std::move(entry.lines), std::move(entry.info), false, true};
-            else if (impl->cacheGet(key, entry))
+            else if (impl->cacheGet(key, entry)) {
                 ready = {true, std::move(entry.lines), std::move(entry.info)};
+                ready.fromCache = true;
+            }
         }
         if (!ready.ok) {
             // Soda 的歌名和真实时长通常分两批到达，合并这段事件再联网。
@@ -3309,7 +3391,7 @@ void LyricProvider::requestSodaAsync(const std::wstring& title, const std::wstri
                 return;
             runtime_log::writef(L"[lyric][request][Soda Music] title=\"%ls\" artist=\"%ls\" duration=%lldms",
                                 title.c_str(), artist.c_str(), static_cast<long long>(durationMs));
-            ready.ok = fetchSodaLyrics(title, artist, durationMs, ready.lines, request);
+            ready.ok = fetchSodaLyrics(title, artist, durationMs, ready.lines, request, ready.info);
             if (ready.ok)
                 ready.info.lyricOrigin = LyricOrigin::Soda;
             if (!ready.ok)

@@ -11,12 +11,25 @@
 
 enum class LyricOrigin { Unknown, QqMusic, Kugou, Netease, Soda, Lrclib };
 
+struct LyricRequestDiagnostic {
+    std::wstring source;
+    int64_t elapsedMs = 0;
+    long httpStatus = 0;
+    int networkError = 0;
+};
+
 // 搜索匹配到的歌曲信息（用于歌词下载，也用于封面兜底）
 struct SongInfo {
     std::wstring songmid;
     std::wstring albummid;
     std::wstring neteaseSongId;
     LyricOrigin lyricOrigin = LyricOrigin::Unknown;
+    std::wstring matchedTitle;
+    std::wstring matchedArtist;
+    int64_t matchedDurationMs = 0;
+    int64_t timingOffsetMs = 0;
+    bool timingOffsetKnown = false;
+    int64_t sourceOffsetMs = 0;
 };
 
 // 每次请求独立交付的结果，不依赖 Provider 内部的可变“当前歌词”。
@@ -26,6 +39,9 @@ struct LyricResult {
     SongInfo info;
     bool fromLocal = false;
     bool fromManual = false;
+    bool fromCache = false;
+    int64_t elapsedMs = 0;
+    std::vector<LyricRequestDiagnostic> diagnostics;
 };
 
 enum class LyricSource {

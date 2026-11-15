@@ -6167,6 +6167,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 discardDeviceResources();
                 return false;
             }
+            runtime_log::recordTaskbarFrame();
             // 只有真正 Present 成功后才消费该阶段；设备丢失时保留 Pending，
             // 下一次资源重建仍会以同一首歌的完整帧启动转场。
             if (startSongTransition) {

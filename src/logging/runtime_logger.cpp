@@ -44,6 +44,7 @@ constexpr auto kCleanupInterval = std::chrono::hours(1);
 constexpr uint64_t kResourceMemoryDeltaBytes = 1024ull * 1024ull;
 
 std::atomic<RuntimeLogger*> g_activeLogger{nullptr};
+std::atomic<uint64_t> taskbarFrames{0};
 
 std::string utf8Of(const std::wstring& value) {
     if (value.empty())
@@ -332,6 +333,9 @@ struct RuntimeLogger::Impl {
     bool cleanupRequested = false;
     std::thread worker;
     RuntimeLogSnapshot snapshot;
+    std::chrono::steady_clock::time_point frameSampledAt = std::chrono::steady_clock::now();
+    uint64_t sampledTaskbarFrames = taskbarFrames.load(std::memory_order_relaxed);
+    double taskbarFps = 0.0;
 
     // 调用方持有 ioMutex；状态锁只用于复制路径，不能覆盖文件系统操作。
     void openFileLocked() {
@@ -748,6 +752,16 @@ void RuntimeLogger::setLyricSource(const std::wstring& source) {
     impl_->snapshot.lyricSource = source;
 }
 
+void RuntimeLogger::setDetails(std::vector<std::pair<std::wstring, std::wstring>> details,
+                               std::wstring diagnosticText, std::wstring renderMode) {
+    if (!impl_)
+        return;
+    std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
+    impl_->snapshot.playbackDetails = std::move(details);
+    impl_->snapshot.diagnosticText = std::move(diagnosticText);
+    impl_->snapshot.renderMode = std::move(renderMode);
+}
+
 void RuntimeLogger::setCoverImage(
     const std::shared_ptr<const std::vector<uint8_t>>& cover,
     const std::wstring& source) {
@@ -775,10 +789,23 @@ RuntimeLogSnapshot RuntimeLogger::snapshot() const {
         return {};
     std::lock_guard<std::recursive_mutex> lock(impl_->mutex);
     RuntimeLogSnapshot result = impl_->snapshot;
+    const auto now = std::chrono::steady_clock::now();
+    const double elapsed = std::chrono::duration<double>(now - impl_->frameSampledAt).count();
+    if (elapsed >= 0.5) {
+        const auto frames = taskbarFrames.load(std::memory_order_relaxed);
+        impl_->taskbarFps = static_cast<double>(frames - impl_->sampledTaskbarFrames) / elapsed;
+        impl_->sampledTaskbarFrames = frames;
+        impl_->frameSampledAt = now;
+    }
+    result.taskbarFps = impl_->taskbarFps;
     result.logDirectory = impl_->directory;
     result.sessionFileName = impl_->sessionFileName;
     result.retentionDays = impl_->retentionDays;
     return result;
+}
+
+void recordTaskbarFrame() noexcept {
+    taskbarFrames.fetch_add(1, std::memory_order_relaxed);
 }
 
 std::wstring RuntimeLogger::defaultDirectory() {

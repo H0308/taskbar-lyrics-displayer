@@ -29,7 +29,7 @@ constexpr UINT_PTR kRefreshTimer = 1;
 constexpr UINT64 kInitialPickerGeneration = 1;
 
 constexpr float kWindowW = 780.0f;
-constexpr float kWindowH = 640.0f;
+constexpr float kWindowH = 780.0f;
 constexpr float kMinClientWidthDip = 620.0f;
 constexpr float kMinClientHeightDip = 520.0f;
 constexpr float kMinClientAspectRatio = kMinClientWidthDip / kMinClientHeightDip;
@@ -46,6 +46,7 @@ constexpr int kHitChooseDirectory = 1;
 constexpr int kHitOpenDirectory = 2;
 constexpr int kHitRetention = 3;
 constexpr int kHitCoverToggle = 4;
+constexpr int kHitDiagnostics = 5;
 
 const std::array<int, 4> kRetentionDays{0, 7, 30, 90};
 
@@ -184,12 +185,31 @@ struct RuntimeLogDialog::Impl {
     int focusedId = kHitChooseDirectory;
     bool focusVisible = false;
     bool showCover = false;
+    bool showDiagnostics = false;
+    int scrollY = 0;
+    int maxScroll = 0;
+    bool scrollDragging = false;
+    float scrollGrabY = 0.0f;
+    float viewHeight = 0.0f;
+    D2D1_RECT_F scrollThumb{};
+    D2D1_RECT_F scrollTrack{};
     uint64_t pickerGeneration = kInitialPickerGeneration;
     bool pickerOpen = false;
     D2D1_RECT_F chooseRect{};
     D2D1_RECT_F openRect{};
     D2D1_RECT_F retentionRect{};
     D2D1_RECT_F coverToggleRect{};
+    D2D1_RECT_F diagnosticsRect{};
+
+    float contentHeight(float height) const {
+        return std::max(height, showDiagnostics ? 970.0f : 800.0f);
+    }
+
+    void scrollTo(int position) {
+        scrollY = std::clamp(position, 0, maxScroll);
+        layout();
+        surface.invalidate();
+    }
 
     static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (msg == WM_NCCREATE) {
@@ -209,6 +229,9 @@ struct RuntimeLogDialog::Impl {
     }
 
     int hitTest(float x, float y) const {
+        y += static_cast<float>(scrollY);
+        if (contains(diagnosticsRect, x, y))
+            return kHitDiagnostics;
         if (contains(coverToggleRect, x, y))
             return kHitCoverToggle;
         if (contains(chooseRect, x, y))
@@ -229,7 +252,20 @@ struct RuntimeLogDialog::Impl {
         const auto content = fluent::centeredDialogLayout(
             static_cast<float>(client.right - client.left) / s);
         const float width = content.width;
-        const float height = static_cast<float>(client.bottom - client.top) / s;
+        viewHeight = static_cast<float>(client.bottom - client.top) / s;
+        const float height = contentHeight(viewHeight);
+        maxScroll = static_cast<int>(std::ceil(height - viewHeight));
+        scrollY = std::clamp(scrollY, 0, maxScroll);
+        const float clientWidth = static_cast<float>(client.right - client.left) / s;
+        scrollTrack = D2D1::RectF(clientWidth - 14.0f, 8.0f, clientWidth - 4.0f,
+                                  std::max(8.0f, viewHeight - 8.0f));
+        const float trackHeight = scrollTrack.bottom - scrollTrack.top;
+        const float thumbHeight = std::min(trackHeight, std::max(28.0f, trackHeight * viewHeight / height));
+        const float thumbTop = scrollTrack.top + (maxScroll > 0
+            ? static_cast<float>(scrollY) / maxScroll * (trackHeight - thumbHeight) : 0.0f);
+        scrollThumb = D2D1::RectF(clientWidth - 9.0f, thumbTop, clientWidth - 6.0f,
+                                   thumbTop + thumbHeight);
+        diagnosticsRect = D2D1::RectF(kPagePadding, 562.0f, width - kPagePadding, 594.0f);
 
         const float statusTop = 82.0f;
         const float songH = 68.0f;
@@ -259,7 +295,7 @@ struct RuntimeLogDialog::Impl {
         retentionRect = D2D1::RectF(buttonRight - retentionW, buttonTop, buttonRight,
                                     buttonTop + buttonH);
         fluent::offsetDialogRects(content.offsetX,
-            {&chooseRect, &openRect, &retentionRect, &coverToggleRect});
+            {&chooseRect, &openRect, &retentionRect, &coverToggleRect, &diagnosticsRect});
     }
 
     void drawButton(fluent::FluentDialogSurface::Painter& painter,
@@ -423,6 +459,8 @@ struct RuntimeLogDialog::Impl {
         if (!logger)
             return;
         const auto snapshot = logger->snapshot();
+        height = contentHeight(height);
+        painter.target()->SetTransform(D2D1::Matrix3x2F::Translation(0.0f, -static_cast<float>(scrollY)));
         const auto& p = painter.colors();
         const auto content = fluent::centeredDialogLayout(width);
         width = content.width;
@@ -468,6 +506,40 @@ struct RuntimeLogDialog::Impl {
         drawCard(painter, card(1, 1), L"GPU", percentText(snapshot.gpuPercent));
         drawCard(painter, card(2, 1), L"专用内存", memoryText(snapshot.memoryBytes));
 
+        const D2D1_RECT_F detailsRect = D2D1::RectF(contentLeft, 338.0f, contentRight, 550.0f);
+        painter.fillRoundRect(p.cardFill, detailsRect, kCardRadius);
+        painter.strokeRoundRect(p.cardStroke, detailsRect, 1.0f, kCardRadius);
+        std::wstring rendering = snapshot.renderMode + L" · " +
+            std::to_wstring(static_cast<int>(std::lround(snapshot.taskbarFps))) + L" FPS（任务栏提交合计）";
+        painter.drawText(L"播放与匹配", painter.textFormat(fluent::font_sizes::body, 600, false, true),
+                         D2D1::RectF(contentLeft + 14.0f, 348.0f, contentLeft + 150.0f, 374.0f), p.text);
+        painter.drawTrimmedText(rendering, painter.textFormat(fluent::font_sizes::caption, 400, false, true),
+                                D2D1::RectF(contentLeft + 150.0f, 348.0f, contentRight - 14.0f, 374.0f),
+                                p.textSecondary);
+        float detailY = 378.0f;
+        for (const auto& [label, value] : snapshot.playbackDetails) {
+            painter.drawText(label, painter.textFormat(fluent::font_sizes::caption, 500, false, true),
+                             D2D1::RectF(contentLeft + 14.0f, detailY, contentLeft + 116.0f, detailY + 26.0f),
+                             p.textSecondary);
+            painter.drawTrimmedText(value, painter.textFormat(fluent::font_sizes::caption, 400, false, true),
+                                    D2D1::RectF(contentLeft + 120.0f, detailY, contentRight - 14.0f, detailY + 26.0f),
+                                    p.text);
+            detailY += 26.0f;
+        }
+        drawButton(painter, diagnosticsRect, showDiagnostics ? L"收起诊断详情" : L"展开诊断详情",
+                   kHitDiagnostics);
+        if (showDiagnostics) {
+            const auto rect = D2D1::RectF(contentLeft + 14.0f, 602.0f, contentRight - 14.0f, 770.0f);
+            auto* format = painter.textFormat(fluent::font_sizes::caption, 400);
+            if (auto* text = painter.textLayout(snapshot.diagnosticText, format,
+                                               rect.right - rect.left, rect.bottom - rect.top)) {
+                text->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+                painter.target()->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_ALIASED);
+                painter.drawTextLayout(text, D2D1::Point2F(rect.left, rect.top), p.textSecondary);
+                painter.target()->PopAxisAlignedClip();
+            }
+        }
+
         const float settingsTop = std::max(0.0f, height - 188.0f);
         const D2D1_RECT_F settingsRect = D2D1::RectF(contentLeft, settingsTop,
                                                      contentRight, height - kPagePadding);
@@ -498,6 +570,9 @@ struct RuntimeLogDialog::Impl {
         drawButton(painter, chooseRect, L"选择位置", kHitChooseDirectory, true);
         drawButton(painter, openRect, L"打开位置", kHitOpenDirectory);
         drawButton(painter, retentionRect, retentionLabel(snapshot.retentionDays), kHitRetention);
+        painter.target()->SetTransform(D2D1::Matrix3x2F::Identity());
+        if (maxScroll > 0)
+            painter.fillRoundRect(p.textSecondary, scrollThumb, 1.5f);
     }
 
     void pickDirectory() {
@@ -550,7 +625,10 @@ struct RuntimeLogDialog::Impl {
     }
 
     void onCommand(int id) {
-        if (id == kHitCoverToggle) {
+        if (id == kHitDiagnostics) {
+            showDiagnostics = !showDiagnostics;
+            layout();
+        } else if (id == kHitCoverToggle) {
             showCover = !showCover;
             runtime_log::writef(L"[action][runtime-log] cover-display=%s",
                                 showCover ? L"on" : L"off");
@@ -573,13 +651,24 @@ struct RuntimeLogDialog::Impl {
     }
 
     void focusStep(int direction) {
-        constexpr std::array<int, 4> ids{kHitChooseDirectory, kHitOpenDirectory,
-                                         kHitRetention, kHitCoverToggle};
+        constexpr std::array<int, 5> ids{kHitChooseDirectory, kHitOpenDirectory,
+                                         kHitRetention, kHitCoverToggle, kHitDiagnostics};
         auto it = std::find(ids.begin(), ids.end(), focusedId);
         int index = it == ids.end() ? 0 : static_cast<int>(it - ids.begin());
         index = (index + direction + static_cast<int>(ids.size())) % static_cast<int>(ids.size());
         focusedId = ids[static_cast<size_t>(index)];
         focusVisible = true;
+        const auto rect = focusedId == kHitDiagnostics ? diagnosticsRect
+            : focusedId == kHitCoverToggle ? coverToggleRect
+            : focusedId == kHitChooseDirectory ? chooseRect
+            : focusedId == kHitOpenDirectory ? openRect : retentionRect;
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        const float height = static_cast<float>(client.bottom) / surface.dipScale();
+        if (rect.top < scrollY)
+            scrollTo(static_cast<int>(std::floor(rect.top)));
+        else if (rect.bottom > scrollY + height)
+            scrollTo(static_cast<int>(std::ceil(rect.bottom - height)));
         surface.invalidate();
     }
 
@@ -597,6 +686,9 @@ struct RuntimeLogDialog::Impl {
                 return 0;
             }
             break;
+        case WM_MOUSEWHEEL:
+            scrollTo(scrollY - GET_WHEEL_DELTA_WPARAM(wp) * 48 / WHEEL_DELTA);
+            return 0;
         case WM_SIZE:
             layout();
             surface.invalidate();
@@ -638,6 +730,15 @@ struct RuntimeLogDialog::Impl {
             surface.eraseBackground(reinterpret_cast<HDC>(wp), backdrop);
             return 1;
         case WM_MOUSEMOVE: {
+            if (scrollDragging) {
+                const float y = GET_Y_LPARAM(lp) / surface.dipScale();
+                const float travel = scrollTrack.bottom - scrollTrack.top -
+                                     (scrollThumb.bottom - scrollThumb.top);
+                if (travel > 0.0f)
+                    scrollTo(static_cast<int>(std::lround((y - scrollGrabY - scrollTrack.top) /
+                                                          travel * maxScroll)));
+                return 0;
+            }
             TRACKMOUSEEVENT tme{sizeof(tme), TME_LEAVE, hwnd, 0};
             TrackMouseEvent(&tme);
             const float s = surface.dipScale();
@@ -656,6 +757,18 @@ struct RuntimeLogDialog::Impl {
             SetFocus(hwnd);
             focusVisible = false;
             const float s = surface.dipScale();
+            const float x = GET_X_LPARAM(lp) / s;
+            const float y = GET_Y_LPARAM(lp) / s;
+            if (maxScroll > 0 && contains(scrollTrack, x, y)) {
+                if (y >= scrollThumb.top && y <= scrollThumb.bottom) {
+                    scrollDragging = true;
+                    scrollGrabY = y - scrollThumb.top;
+                    SetCapture(hwnd);
+                } else {
+                    scrollTo(scrollY + static_cast<int>(y < scrollThumb.top ? -viewHeight : viewHeight));
+                }
+                return 0;
+            }
             pressedId = hitTest(GET_X_LPARAM(lp) / s, GET_Y_LPARAM(lp) / s);
             if (pressedId != 0) {
                 focusedId = pressedId;
@@ -665,6 +778,12 @@ struct RuntimeLogDialog::Impl {
             return 0;
         }
         case WM_LBUTTONUP: {
+            if (scrollDragging) {
+                scrollDragging = false;
+                if (GetCapture() == hwnd)
+                    ReleaseCapture();
+                return 0;
+            }
             const float s = surface.dipScale();
             const int hit = hitTest(GET_X_LPARAM(lp) / s, GET_Y_LPARAM(lp) / s);
             const int pressed = pressedId;
@@ -677,6 +796,7 @@ struct RuntimeLogDialog::Impl {
             return 0;
         }
         case WM_CAPTURECHANGED:
+            scrollDragging = false;
             pressedId = 0;
             surface.invalidate();
             return 0;

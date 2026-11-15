@@ -1,4 +1,7 @@
 #include "app/application_internal.h"
+#include "media/player_source.h"
+#include <algorithm>
+#include <cstdlib>
 namespace lyrics_app {
 namespace {
 const wchar_t* onlineLyricSourceName(LyricOrigin origin) {
@@ -20,6 +23,94 @@ const wchar_t* onlineLyricSourceName(LyricOrigin origin) {
 }
 
 void App::updateRuntimeLogState(const SmtcSnapshot& snap) {
+    const auto& state = playback_.state();
+    const auto* source = player_source::find(snap.player);
+    const auto timeText = [](int64_t value) {
+        const auto seconds = std::max<int64_t>(0, value) / 1000;
+        return std::to_wstring(seconds / 60) + L":" + (seconds % 60 < 10 ? L"0" : L"") +
+               std::to_wstring(seconds % 60);
+    };
+    const wchar_t* status = !snap.sessionAlive ? L"无会话"
+        : snap.status == PlaybackStatus::Playing ? L"播放中"
+        : snap.status == PlaybackStatus::Paused ? L"已暂停"
+        : snap.status == PlaybackStatus::Stopped ? L"已停止" : L"状态切换中";
+    std::wstring player = source ? source->displayName : L"无播放器";
+    player += L" · ";
+    player += status;
+    const int line = LyricProvider::findLine(state.currentLyrics_, snap.positionMs);
+    std::wstring format = L"未加载";
+    if (!state.currentLyrics_.empty()) {
+        const bool words = std::any_of(state.currentLyrics_.begin(), state.currentLyrics_.end(),
+                                       [](const LyricLine& value) { return !value.chars.empty(); });
+        format = words ? L"逐字" : L"逐行";
+        if (state.currentLyricsFromLocal_)
+            format += L" QRC";
+        else if (state.currentLyricOrigin_ == LyricOrigin::Kugou)
+            format += L" KRC";
+        else if (state.currentLyricOrigin_ == LyricOrigin::QqMusic)
+            format += words ? L" QRC" : L" LRC";
+        else if (state.currentLyricOrigin_ == LyricOrigin::Netease)
+            format += words ? L" YRC" : L" LRC";
+        else if (state.currentLyricOrigin_ == LyricOrigin::Lrclib)
+            format += words ? L" Lyricsfile" : L" LRC";
+        if (state.currentHasTranslation_)
+            format += L" · 翻译";
+        if (state.currentHasRomanization_)
+            format += L" · 罗马音";
+    }
+    const auto& info = state.currentLyricInfo_;
+    const auto offset = info.timingOffsetMs + info.sourceOffsetMs;
+    std::wstring matched = info.matchedTitle.empty() ? L"暂无候选元数据" : info.matchedTitle;
+    if (!info.matchedArtist.empty())
+        matched += L" · " + info.matchedArtist;
+    if (info.matchedDurationMs > 0)
+        matched += L" · " + timeText(info.matchedDurationMs);
+    std::wstring method = state.currentLyrics_.empty() && !state.lyricLoading_ ? L"未命中"
+        : state.lyricLoading_ ? L"加载中"
+        : state.currentLyricsFromManual_ ? L"已保存的手动选择"
+        : state.currentLyricsFromLocal_ ? L"本地 QRC"
+        : state.currentLyricsFromCache_ ? L"内存缓存" : L"在线请求";
+    if (!state.lyricLoading_ && !state.currentLyricsFromManual_)
+        method += L" · " + std::to_wstring(state.currentLyricLoadMs_) + L" ms";
+    std::wstring diagnostics = L"SMTC  " + (snap.sourceAppUserModelId.empty()
+        ? std::wstring(L"无会话") : snap.sourceAppUserModelId);
+    if (state.lyricDiagnostics_.empty())
+        diagnostics += L"\n本次没有在线请求记录";
+    for (const wchar_t* provider : {L"酷狗音乐", L"QQ 音乐", L"LRCLIB", L"网易云音乐", L"汽水音乐"}) {
+        int count = 0;
+        int64_t elapsed = 0;
+        long http = 0;
+        int error = 0;
+        for (const auto& record : state.lyricDiagnostics_) {
+            if (record.source == provider) {
+                ++count;
+                elapsed += record.elapsedMs;
+                if (record.networkError != 0 || record.httpStatus != 200) {
+                    http = record.httpStatus;
+                    error = record.networkError;
+                }
+            }
+        }
+        if (count > 0)
+            diagnostics += L"\n" + std::wstring(provider) + L"  " + std::to_wstring(count) +
+                L" 次 · " + std::to_wstring(elapsed) + L" ms · " +
+                (http == 0 && error == 0 ? L"HTTP 200" : L"HTTP " + std::to_wstring(http) +
+                 L" / curl " + std::to_wstring(error));
+    }
+    const wchar_t* mode = isRenderMode(RenderMode::Stopped) ? L"完全停止"
+        : isRenderMode(RenderMode::Minimal) ? L"极简"
+        : isRenderMode(RenderMode::Low) ? L"低渲染" : L"正常";
+    runtimeLogger_.setDetails({
+        {L"播放器", player},
+        {L"进度与歌词行", timeText(snap.positionMs) + L" / " + timeText(snap.durationMs) +
+            L" · " + std::to_wstring(line + 1) + L" / " + std::to_wstring(state.currentLyrics_.size()) + L" 行"},
+        {L"歌词类型", format}, {L"匹配曲目", matched}, {L"获取方式", method},
+        {L"时间调整", state.currentLyrics_.empty() ? L"未加载"
+            : state.currentLyricsFromManual_ && !info.timingOffsetKnown ? L"已保存时间轴，偏移量未记录"
+            : offset == 0 ? L"0 ms"
+            : (offset < 0 ? std::wstring(L"提前 ") : std::wstring(L"延后 ")) +
+              std::to_wstring(std::llabs(offset)) + L" ms"}
+    }, std::move(diagnostics), mode);
     if (!snap.sessionAlive) {
         runtimeLogger_.setPlayback({}, {}, 0, false);
         runtimeLogger_.setLyricSource(L"未加载");
@@ -223,6 +314,14 @@ void App::onSmtcChanged() {
 void App::onFrame() {
     syncTaskbarOrientation();
     SmtcSnapshot snap = monitor.snapshot();
+    if (runtimeLogDialog && runtimeLogDialog->isOpen()) {
+        static ULONGLONG lastDiagnosticUpdate = 0;
+        const auto now = GetTickCount64();
+        if (now - lastDiagnosticUpdate >= 500) {
+            lastDiagnosticUpdate = now;
+            updateRuntimeLogState(snap);
+        }
+    }
     if (snap.sessionAlive &&
         (idle_.state().startupTaskSummaryPending_ || idle_.state().startupTaskSummaryActive_)) {
         // 定时器也检查一次，避免媒体事件消息尚未出队时让启动播报多停留一帧。

@@ -247,6 +247,7 @@ void App::showSettingsError(const wchar_t* operation, const std::wstring& messag
 }
 
 void App::showRuntimeLog() {
+    updateRuntimeLogState(monitor.snapshot());
     runtime_log::writef(L"[action][dialog] open=runtime-log");
     if (runtimeLogDialog && !runtimeLogDialog->isOpen())
         runtimeLogDialog.reset();

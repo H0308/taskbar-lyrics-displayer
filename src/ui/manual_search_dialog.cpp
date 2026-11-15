@@ -1674,6 +1674,7 @@ struct ManualSearchDialog::Impl {
         }
         setPreviewState(PreviewState::Empty);
         previewInfo = info;
+        previewInfo.timingOffsetKnown = true;
         setPreviewLines(lines);
         surface.invalidate();
     }
@@ -1693,6 +1694,7 @@ struct ManualSearchDialog::Impl {
     void shiftPreviewTimes(int64_t deltaMs) {
         if (previewLines.empty())
             return;
+        previewInfo.timingOffsetMs += deltaMs;
         for (auto& line : previewLines) {
             line.ms += deltaMs;
             for (auto& character : line.chars) {
