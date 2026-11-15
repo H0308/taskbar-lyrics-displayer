@@ -54,7 +54,7 @@ void App::updateTrayIcon() {
     nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     nid.uCallbackMessage = kTrayMsg;
     nid.hIcon = app_icon::taskbarIcon();
-    lstrcpyW(nid.szTip, L"QQ 音乐歌词");
+    lstrcpyW(nid.szTip, app_info::kName);
     Shell_NotifyIconW(NIM_MODIFY, &nid);
     // 首次创建时 MODIFY 不会生效，用 ADD
     Shell_NotifyIconW(NIM_ADD, &nid);

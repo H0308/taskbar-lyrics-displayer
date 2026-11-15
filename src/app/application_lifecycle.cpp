@@ -222,7 +222,8 @@ bool App::initialize(HINSTANCE inst, bool wantTaskbar) {
     appVolume_.setChangedCallback(
         [this] { PostThreadMessageW(mainThread, kMsgAppVolumeChanged, 0, 0); });
 
-    runtime_log::writef(L"QQMusicLyric started, waiting for QQ Music, NetEase Music or Soda Music...");
+    runtime_log::writef(L"%s started, waiting for QQ Music, NetEase Music, Soda Music or Spotify...",
+                        app_info::kEnglishName);
 
     return true;
 }

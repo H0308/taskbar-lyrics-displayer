@@ -37,12 +37,12 @@
 
 [Setup]
 AppId=QQMusicLyric
-AppName=QQMusicLyric
+AppName=Windows 任务栏歌词
 AppVersion={#AppVersion}
 AppPublisher=H0308
 AppPublisherURL=https://github.com/H0308/taskbar-lyrics-displayer
 DefaultDirName={autopf}\QQMusicLyric
-DefaultGroupName=QQMusicLyric
+DefaultGroupName=Windows 任务栏歌词
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
@@ -50,7 +50,7 @@ OutputDir=..\dist
 OutputBaseFilename=QQMusicLyric-{#AppVersion}-Setup
 SetupIconFile=..\asset\logo-dark.ico
 UninstallDisplayIcon={app}\QQMusicLyric.exe
-UninstallDisplayName=QQMusicLyric
+UninstallDisplayName=Windows 任务栏歌词
 ; 默认不自动关闭正在运行的程序；软件内更新会通过 /CLOSEAPPLICATIONS 显式覆盖。
 CloseApplications=no
 Compression=lzma2
@@ -58,8 +58,8 @@ SolidCompression=yes
 WizardStyle=modern dynamic
 VersionInfoVersion={#AppVersionNumeric}
 VersionInfoCompany=H0308
-VersionInfoDescription=QQMusicLyric 安装程序
-VersionInfoProductName=QQMusicLyric
+VersionInfoDescription=Windows 任务栏歌词安装程序
+VersionInfoProductName=Windows Taskbar Lyrics
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "{#ChineseMessagesFile}"
@@ -72,13 +72,13 @@ Source: "prereq\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 #endif
 
 [Icons]
-Name: "{autoprograms}\QQMusicLyric"; Filename: "{app}\QQMusicLyric.exe"; WorkingDir: "{app}"
+Name: "{autoprograms}\Windows 任务栏歌词"; Filename: "{app}\QQMusicLyric.exe"; WorkingDir: "{app}"
 
 [Run]
 #ifexist "prereq\vc_redist.x64.exe"
 Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "正在安装 Microsoft Visual C++ 运行库..."; Flags: waituntilterminated
 #endif
-Filename: "{app}\QQMusicLyric.exe"; Description: "启动 QQMusicLyric"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\QQMusicLyric.exe"; Description: "启动 Windows 任务栏歌词"; Flags: nowait postinstall skipifsilent
 
 [Code]
 const
@@ -131,7 +131,7 @@ begin
 
   while IsAppRunning do
   begin
-    if MsgBox('检测到 QQMusicLyric 正在运行。' + #13#10 + #13#10 +
+    if MsgBox('检测到 Windows 任务栏歌词正在运行。' + #13#10 + #13#10 +
       '请先在系统托盘图标上右键退出软件，然后点击“重试”继续安装；' +
       '点击“取消”将退出安装程序。',
       mbError, MB_RETRYCANCEL) = IDCANCEL then
@@ -151,12 +151,12 @@ begin
 
   while IsAppRunning do
   begin
-    if MsgBox('检测到 QQMusicLyric 正在运行。' + #13#10 + #13#10 +
+    if MsgBox('检测到 Windows 任务栏歌词正在运行。' + #13#10 + #13#10 +
       '请先在系统托盘图标上右键退出软件，然后点击“重试”继续安装；' +
       '点击“取消”将退出安装程序。',
       mbError, MB_RETRYCANCEL) = IDCANCEL then
     begin
-      Result := '安装已取消：QQMusicLyric 正在运行。';
+      Result := '安装已取消：Windows 任务栏歌词正在运行。';
       exit;
     end;
   end;
