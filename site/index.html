@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Windows 任务栏歌词 — 把歌词嵌入 Windows 任务栏</title>
-  <meta name="description" content="把 QQ 音乐、网易云音乐和汽水音乐的歌词嵌入 Windows 10/11 任务栏：逐字高亮与歌词特效、播放控制、音频频谱、资源监视、每日一言，支持字号建议与小任务栏自动适配。C++ 原生实现，无 Electron、WebView 和 .NET/WPF 运行时，秉持工具软件应尽可能少占内存的原则。">
+  <meta name="description" content="把 QQ 音乐、网易云音乐、汽水音乐和 Spotify 的歌词嵌入 Windows 10/11 任务栏：五源歌词匹配、逐字高亮、播放控制、音频频谱、资源监视和每日一言。C++ 原生实现，无 Electron、WebView 和 .NET/WPF 运行时，秉持工具软件应尽可能少占内存的原则。">
   <meta property="og:title" content="Windows 任务栏歌词">
-  <meta property="og:description" content="把歌词嵌入 Windows 任务栏：逐字跟唱、流星粒子拖尾、音频频谱、资源监视与小任务栏自动适配。C++ 原生实现，无 Electron、WebView 和 .NET/WPF 运行时，秉持工具软件应尽可能少占内存的原则。">
+  <meta property="og:description" content="支持 QQ 音乐、网易云音乐、汽水音乐和 Spotify，五源歌词匹配、逐字跟唱、音频频谱与资源监视。C++ 原生实现，无 Electron、WebView 和 .NET/WPF 运行时，秉持工具软件应尽可能少占内存的原则。">
   <meta property="og:type" content="website">
   <meta property="og:image" content="assets/img/social-preview.png">
   <link rel="icon" type="image/png" href="assets/img/logo.png">
@@ -75,7 +75,7 @@
       <div class="container">
         <h1>把歌词嵌入<br><span class="accent">Windows 任务栏</span></h1>
         <p class="hero-sub">
-          支持 QQ 音乐、网易云音乐和汽水音乐，滚动歌词、逐字高亮、播放控制、音频频谱、每日一言<br>
+          支持 QQ 音乐、网易云音乐、汽水音乐和 Spotify，滚动歌词、逐字高亮、播放控制、音频频谱、每日一言<br>
           C++ 原生实现，无 Electron、WebView 和 .NET/WPF 运行时
         </p>
         <div class="hero-actions">
@@ -100,7 +100,7 @@
     <section class="highlights">
       <div class="container highlights-grid">
         <div class="hl reveal"><strong>C++ 原生</strong><span>无 Electron、WebView 和 .NET/WPF 运行时，日常使用占用内存20~80MB</span></div>
-        <div class="hl reveal"><strong>多播放器支持</strong><span>QQ 音乐、网易云音乐、汽水音乐，自动识别当前播放来源</span></div>
+        <div class="hl reveal"><strong>多播放器支持</strong><span>QQ 音乐、网易云音乐、汽水音乐、Spotify，自动识别当前播放来源</span></div>
         <div class="hl reveal"><strong>逐字高亮</strong><span>逐字时间轴按像素进度平滑填充</span></div>
         <div class="hl reveal"><strong>音频频谱</strong><span>只捕获当前播放器的音频，不受其他软件发声影响</span></div>
       </div>
@@ -184,7 +184,7 @@
         <div class="explore-grid">
           <div class="explore-item reveal">
             <h3>手动搜索歌词</h3>
-            <p>自动匹配不准时，可预览并选择歌词、微调进度。汽水音乐使用原生歌词候选，其他播放源可搜索 QQ 音乐、网易云音乐和酷狗歌词。</p>
+            <p>汽水音乐、网易云音乐、酷狗、QQ 音乐和 LRCLIB 五个歌词源跨播放器通用，原生来源优先。支持繁体歌名、歌手匹配简体歌词，搜索结果按来源分组，可预览逐字或逐行歌词并微调进度，选定版本按当前播放平台保存。</p>
           </div>
           <div class="explore-item reveal">
             <h3>QQ 音乐本地歌词</h3>
@@ -257,7 +257,7 @@
           <div class="step reveal">
             <span class="step-num">2</span>
             <h3>打开音乐</h3>
-            <p>打开 QQ 音乐、网易云音乐或汽水音乐并播放歌曲，歌词自动出现在任务栏。多个播放器同时运行时，自动识别当前播放来源。</p>
+            <p>打开 QQ 音乐、网易云音乐、汽水音乐或 Spotify 并播放歌曲，歌词自动出现在任务栏。多个播放器同时运行时，自动识别当前播放来源。</p>
           </div>
           <div class="step-connector" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
           <div class="step reveal">
@@ -266,7 +266,7 @@
             <p>右键托盘图标进入设置：主题、字体、频谱、悬浮卡片、切歌弹窗、每日一言，都可以自由定制。</p>
           </div>
         </div>
-        <p class="quickstart-note reveal">QQ 音乐需开启「显示系统媒体传输控件（SMTC）」；汽水音乐使用客户端原生 SMTC；网易云音乐需额外安装 <a href="https://github.com/std-microblock/BetterNCM-Installer/releases/latest" target="_blank" rel="noopener">BetterNCM</a> 与 <a href="https://github.com/apoint123/inflink-rs/releases/latest" target="_blank" rel="noopener">InfLink-rs</a> 插件，详见 <a href="docs.html#players">播放器配置文档</a>。</p>
+        <p class="quickstart-note reveal">QQ 音乐需开启「显示系统媒体传输控件（SMTC）」；汽水音乐和 Spotify 使用原生 SMTC；网易云音乐需安装 <a href="https://github.com/std-microblock/BetterNCM-Installer/releases/latest" target="_blank" rel="noopener">BetterNCM</a> 与 <a href="https://github.com/apoint123/inflink-rs/releases/latest" target="_blank" rel="noopener">InfLink-rs</a> 插件，详见 <a href="docs.html#players">播放器配置文档</a>。</p>
         <p class="quickstart-note reveal"><a href="docs.html">打开文档中心，查看完整使用指南 →</a></p>
       </div>
     </section>
