@@ -126,7 +126,7 @@ struct ManualSearchDialog::Impl {
     fluent::FluentDialogSurface surface;
     fluent::CompositedScrollView candidateScrollView;
     fluent::CompositedScrollView previewScrollView;
-    bool scrollOnlyPaint = false;
+    bool candidateContentDirty = true;
     float previewScrollPadding = 0.0f;
 
     TextField titleEdit;
@@ -1133,7 +1133,8 @@ struct ManualSearchDialog::Impl {
                         candidateListRect.top + 4.0f,
                         candidateListRect.right - kScrollBarHitWidth, candidateListRect.bottom - 4.0f),
             std::max(0.0f, candidateContentHeight() - 8.0f), surface.dpi());
-        if (!candidateScrollView.animating())
+        if (!candidateScrollView.animating() &&
+            std::fabs(candidateScrollView.offset() - candidateScroll) > 0.01f)
             candidateScrollView.setOffset(candidateScroll);
         candidateScroll = candidateScrollView.offset();
         candidateScrollView.paint([&](fluent::FluentDialogSurface::Painter& painter,
@@ -1207,7 +1208,8 @@ struct ManualSearchDialog::Impl {
             y += rowH;
         }
 
-        }, !scrollOnlyPaint);
+        }, false, candidateContentDirty);
+        candidateContentDirty = false;
         if (candidateHasScroll() && height > 0.0f) {
             const auto bar = scrollBarGeometry(height, candidateContentHeight());
             const float thumbY = candidateListRect.top +
@@ -1491,6 +1493,7 @@ struct ManualSearchDialog::Impl {
             return;
         selectedItemRow = row;
         selectedIdx = candidateItems[row].candidateIndex;
+        candidateContentDirty = true;
         const auto& candidate = candidates[selectedIdx];
         runtime_log::writef(L"[action][manual-search] candidate-selected index=%d name=\"%ls\" "
                             L"artist=\"%ls\" source=%d",
@@ -1582,6 +1585,7 @@ struct ManualSearchDialog::Impl {
 
     void handleCandidatesReady(const std::vector<SearchCandidate>& result) {
         candidates = result;
+        candidateContentDirty = true;
         candidateItems.clear();
         selectedItemRow = -1;
         selectedIdx = -1;
@@ -1768,6 +1772,7 @@ struct ManualSearchDialog::Impl {
             return TRUE;
         case WM_SETTINGCHANGE:
         case WM_THEMECHANGED:
+            candidateContentDirty = true;
             refreshPreviewAnimations();
             previewMeasuredWidth = -1.0f;
             candidateScroll = candidateScrollView.offset();
@@ -1783,10 +1788,6 @@ struct ManualSearchDialog::Impl {
         case WM_PAINT: {
             PAINTSTRUCT ps{};
             HDC hdc = BeginPaint(hwnd, &ps);
-            const float scale = surface.dipScale();
-            scrollOnlyPaint =
-                ps.rcPaint.left >= std::floor((candidateListRect.right - kScrollBarHitWidth) * scale) &&
-                ps.rcPaint.right <= std::ceil(candidateListRect.right * scale);
             surface.paint(hdc, backdrop,
                           [this](fluent::FluentDialogSurface::Painter& painter, float w, float h) {
                               paint(painter, w, h);
@@ -1842,6 +1843,8 @@ struct ManualSearchDialog::Impl {
             const int id = hitTest(x, y);
             const int row = id == kIdCandidateList ? candidateRowAt(y) : -1;
             if (id != hoverId || row != hoverItemRow) {
+                if (row != hoverItemRow)
+                    candidateContentDirty = true;
                 hoverId = id;
                 hoverItemRow = row;
                 surface.invalidate();
@@ -1850,6 +1853,8 @@ struct ManualSearchDialog::Impl {
         }
         case WM_MOUSELEAVE:
             if (!candidateScrollDragging) {
+                if (hoverItemRow != -1)
+                    candidateContentDirty = true;
                 hoverId = 0;
                 hoverItemRow = -1;
                 surface.invalidate();

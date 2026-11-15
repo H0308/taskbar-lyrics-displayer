@@ -603,7 +603,7 @@ void CompositedScrollView::paint(const Draw& draw, bool redraw, bool forceRedraw
         cacheHeight_ < std::min(height_ + 2.0f, maxTextureDip) - 1.0f;
     if (!forceRedraw && (animating_ || !redraw) && !cacheMiss && !targetOutsideCache)
         return;
-    if (!ready_ || cacheMiss || targetOutsideCache || !animating_) {
+    if (!ready_ || cacheMiss || targetOutsideCache) {
         const float travelSpan =
             animating_ ? std::fabs(target_ - position) + viewHeight * 1.5f : 0.0f;
         cacheHeight_ = std::max(
