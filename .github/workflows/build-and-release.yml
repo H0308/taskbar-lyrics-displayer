@@ -98,7 +98,7 @@ jobs:
       - name: Verify Release executable
         shell: pwsh
         run: |
-          $process = Start-Process 'build/windows-msvc-release/QQMusicLyric.exe' -ArgumentList '--verify-release' -Wait -PassThru
+          $process = Start-Process 'build/windows-msvc-release/WindowsTaskbarLyrics.exe' -ArgumentList '--verify-release' -Wait -PassThru
           if ($process.ExitCode -ne 0) {
             throw "Release verification failed with exit code $($process.ExitCode)."
           }
@@ -111,7 +111,7 @@ jobs:
         shell: pwsh
         run: |
           $requiredFiles = @(
-            'dist/package/QQMusicLyric.exe',
+            'dist/package/WindowsTaskbarLyrics.exe',
             'dist/package/libcurl.dll',
             'dist/package/z.dll',
             'dist/package/LICENSE'
@@ -121,7 +121,7 @@ jobs:
               throw "Required staged file was not installed: $file"
             }
           }
-          $process = Start-Process 'dist/package/QQMusicLyric.exe' -ArgumentList '--verify-release' -Wait -PassThru
+          $process = Start-Process 'dist/package/WindowsTaskbarLyrics.exe' -ArgumentList '--verify-release' -Wait -PassThru
           if ($process.ExitCode -ne 0) {
             throw "Staged Release verification failed with exit code $($process.ExitCode)."
           }

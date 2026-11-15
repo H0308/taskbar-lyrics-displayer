@@ -20,7 +20,7 @@
 #define BuildDir "..\dist\package"
 #endif
 #define BuildDirPath AddBackslash(SourcePath) + BuildDir
-#define BuildExe BuildDirPath + "\QQMusicLyric.exe"
+#define BuildExe BuildDirPath + "\WindowsTaskbarLyrics.exe"
 
 #ifnexist "prereq\vc_redist.x64.exe"
 #warning "Missing installer\prereq\vc_redist.x64.exe; the generated installer will not install the MSVC runtime."
@@ -32,7 +32,7 @@
 
 ; Compile-time guard: --verify-release returns 0 only for a Release build.
 #if Exec(BuildExe, "--verify-release", BuildDirPath, 1, 0) != 0
-#error "Staged QQMusicLyric.exe is not a Release build."
+#error "Staged WindowsTaskbarLyrics.exe is not a Release build."
 #endif
 
 [Setup]
@@ -49,7 +49,7 @@ PrivilegesRequired=admin
 OutputDir=..\dist
 OutputBaseFilename=QQMusicLyric-{#AppVersion}-Setup
 SetupIconFile=..\asset\logo-dark.ico
-UninstallDisplayIcon={app}\QQMusicLyric.exe
+UninstallDisplayIcon={app}\WindowsTaskbarLyrics.exe
 UninstallDisplayName=Windows 任务栏歌词
 ; 默认不自动关闭正在运行的程序；软件内更新会通过 /CLOSEAPPLICATIONS 显式覆盖。
 CloseApplications=no
@@ -72,19 +72,19 @@ Source: "prereq\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 #endif
 
 [Icons]
-Name: "{autoprograms}\Windows 任务栏歌词"; Filename: "{app}\QQMusicLyric.exe"; WorkingDir: "{app}"
+Name: "{autoprograms}\Windows 任务栏歌词"; Filename: "{app}\WindowsTaskbarLyrics.exe"; WorkingDir: "{app}"
 
 [Run]
 #ifexist "prereq\vc_redist.x64.exe"
 Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "正在安装 Microsoft Visual C++ 运行库..."; Flags: waituntilterminated
 #endif
-Filename: "{app}\QQMusicLyric.exe"; Description: "启动 Windows 任务栏歌词"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\WindowsTaskbarLyrics.exe"; Description: "启动 Windows 任务栏歌词"; Flags: nowait postinstall skipifsilent
 
 [Code]
 const
   AutoStartKey = 'Software\Microsoft\Windows\CurrentVersion\Run';
   AutoStartValue = 'QQMusicLyric';
-  AppExeName = 'QQMusicLyric.exe';
+  AppExeName = 'WindowsTaskbarLyrics.exe';
 
 { 通过 WMI 按可执行文件名精确枚举进程；WMI 不可用时返回 False 以免误拦截安装。 }
 function IsAppRunning: Boolean;
@@ -98,7 +98,8 @@ begin
     WbemLocator := CreateOleObject('WbemScripting.SWbemLocator');
     WbemServices := WbemLocator.ConnectServer('.', 'root\CIMV2');
     Processes := WbemServices.ExecQuery(
-      'SELECT ProcessId FROM Win32_Process WHERE Name = ''' + AppExeName + '''');
+      'SELECT ProcessId FROM Win32_Process WHERE Name = ''' + AppExeName +
+      ''' OR Name = ''QQMusicLyric.exe''');
     Result := Processes.Count > 0;
   except
     Result := False;
@@ -173,7 +174,7 @@ begin
     exit;
 
   { 当前程序写入的值就是带引号的 exe 路径；安装后改成新安装目录。 }
-  NewCommand := '"' + ExpandConstant('{app}\QQMusicLyric.exe') + '"';
+  NewCommand := '"' + ExpandConstant('{app}\WindowsTaskbarLyrics.exe') + '"';
   RegWriteStringValue(HKEY_CURRENT_USER, AutoStartKey, AutoStartValue, NewCommand);
 end;
 

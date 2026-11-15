@@ -144,7 +144,7 @@ git push origin v2.7.0
 
 完整操作说明与选项限制见[文档中心](https://www.taskbar-lyrics.top/docs.html)。
 
-1. 运行 `QQMusicLyric.exe`，再打开 QQ 音乐、网易云音乐、汽水音乐或 Spotify 播放歌曲，歌词会自动出现在任务栏上
+1. 运行 `WindowsTaskbarLyrics.exe`，再打开 QQ 音乐、网易云音乐、汽水音乐或 Spotify 播放歌曲，歌词会自动出现在任务栏上
 2. 右键托盘图标：
    - **开启/关闭任务栏歌词**：显示或隐藏任务栏歌词
    - **性能模式**：直接切换正常 / 低渲染 / 完全停止 / 极简模式；完全停止时如需显示任务栏歌词，请先切换到其他模式
@@ -203,7 +203,7 @@ git push origin v2.7.0
 1. 从 [BetterNCM Installer](https://github.com/std-microblock/BetterNCM-Installer/releases/latest) 下载并安装 BetterNCM。
 2. 打开网易云音乐的 BetterNCM 插件商店，搜索并安装 **InfLink-rs**。
    > 如果插件商店不可用，也可以从 [InfLink-rs Releases](https://github.com/apoint123/inflink-rs/releases/latest) 下载插件后手动安装。
-3. 按提示重启网易云音乐，再运行或重启 `QQMusicLyric.exe`。
+3. 按提示重启网易云音乐，再运行或重启 `WindowsTaskbarLyrics.exe`。
 
 > 只安装 **InfLink-rs**，不要同时安装旧版 InfLink。网易云适配的可用性受 BetterNCM、InfLink-rs 以及网易云音乐客户端版本影响，不保证所有版本均可用。
 

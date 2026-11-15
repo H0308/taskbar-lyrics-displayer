@@ -158,6 +158,7 @@ add_executable(QQMusicLyric
 )
 
 target_include_directories(QQMusicLyric PRIVATE src)
+set_target_properties(QQMusicLyric PROPERTIES OUTPUT_NAME WindowsTaskbarLyrics)
 
 # 清单文件已通过 resource.rc 嵌入（app.manifest），关闭链接器的默认清单生成，避免重复。
 # Release 使用 Windows 子系统（不弹控制台黑窗），代码入口是 main()，
