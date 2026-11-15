@@ -53,7 +53,7 @@ struct SearchCandidate {
     bool lrclibWordSync = false;
 };
 
-// 歌词获取：QQ 匹配 QRC/KRC/LRC；汽水取原生逐字/LRC；网易云按歌曲 ID 取 YRC/LRC。
+// 自动匹配优先取原生歌词，随后按酷狗、QQ 音乐、LRCLIB 和剩余来源查找。
 class LyricProvider {
 public:
     // 所有异步接口均在工作线程回调，调用前已释放内部锁；UI 更新由调用方投递。
@@ -78,22 +78,23 @@ public:
                       bool persistOrder = false, const std::wstring& album = {});
 
     // 按网易云歌曲 ID 异步取歌词：优先 YRC，失败后回退网易云 LRC。
-    // 同时传入当前元数据，用于读取按歌曲 ID 保存的手动歌词覆盖。
+    // 曲目元数据用于手动覆盖和原生未命中后的通用匹配。
     void requestNeteaseAsync(const std::wstring& songId, const std::wstring& title,
-                             const std::wstring& artist, int64_t durationMs,
+                             const std::wstring& artist, const std::wstring& album,
+                             int64_t durationMs,
                              ReadyCallback cb);
 
-    // 汽水按元数据搜索歌曲 ID 并取原生逐字/LRC；试听片段映射到本地时间轴。
+    // 汽水优先搜索原生逐字/LRC，试听片段按原生的试听起点对齐。
     // 联网前合并切歌元数据事件，新请求使旧请求取消；手动覆盖和缓存立即返回。
     // 手动覆盖独立保存，不读取 QQ 本地 QRC。
     void requestSodaAsync(const std::wstring& title, const std::wstring& artist,
-                            int64_t durationMs, ReadyCallback cb);
+                            const std::wstring& album, int64_t durationMs, ReadyCallback cb);
 
     // 仅按当前元数据查询 QQ songmid/albummid，不读取或替换当前歌词。
     void requestQqSongInfoAsync(const std::wstring& title, const std::wstring& artist,
                                 int64_t durationMs, SongInfoCallback cb);
 
-    // 手动搜索候选按播放源决定可查询的曲库。
+    // 手动搜索查询全部来源，原生候选优先显示。
     void searchCandidatesAsync(const std::wstring& title, const std::wstring& artist,
                                SearchCallback cb, SmtcPlayerType player);
 

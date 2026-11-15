@@ -368,10 +368,10 @@ void PlaybackController::startLyricRequest(const SmtcSnapshot& snap, bool forceO
             delete payload;
     };
     if (snap.player == SmtcPlayerType::NetEase) {
-        provider.requestNeteaseAsync(snap.neteaseSongId, snap.title, snap.artist, durationMs,
-                                     postLyricResult);
+        provider.requestNeteaseAsync(snap.neteaseSongId, snap.title, snap.artist, snap.album,
+                                     durationMs, postLyricResult);
     } else if (snap.player == SmtcPlayerType::Soda) {
-        provider.requestSodaAsync(snap.title, snap.artist, durationMs, postLyricResult);
+        provider.requestSodaAsync(snap.title, snap.artist, snap.album, durationMs, postLyricResult);
     } else {
         using Source = LyricProvider::RequestSource;
         const Source source = snap.player == SmtcPlayerType::Spotify ? Source::Spotify

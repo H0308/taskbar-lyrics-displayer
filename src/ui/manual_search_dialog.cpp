@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <numbers>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -39,17 +40,19 @@ constexpr float kMinClientHeightDip = 504.0f;
 constexpr float kMinClientAspectRatio = kMinClientWidthDip / kMinClientHeightDip;
 
 constexpr float kCandidateHeaderHeight = 28.0f;
-constexpr float kCandidateRowHeight = 40.0f;
+constexpr float kCandidateRowHeight = 48.0f;
 constexpr float kScrollBarWidth = 3.0f;
 constexpr float kScrollBarHitWidth = 12.0f;
 constexpr float kScrollBarInset = 8.0f;
 
 constexpr UINT kPreviewTimerId = 1;
+constexpr UINT kPreviewLoadingTimerId = 2;
 constexpr DWORD kPreviewResumeDelayMs = 2000;
 constexpr int kPreviewWheelLinesPerNotch = 3;
 constexpr float kPreviewLineScrollFrequency = 18.0f;
 constexpr float kPreviewResumeScrollFrequency = 14.0f;
-constexpr float kLyricTextWidthDip = 240.0f;
+constexpr float kLyricTextWidthDip = 420.0f;
+constexpr float kPreviewHeaderHeight = 62.0f;
 constexpr float kLyricRowHeightDip = 50.0f;
 constexpr float kPreviewSecondaryLineHeight = 18.0f;
 constexpr float kPreviewSecondaryGap = 2.0f;
@@ -105,6 +108,7 @@ struct ManualSearchDialog::Impl {
         std::wstring cue;
         size_t caret = 0;
         size_t anchor = 0;
+        float scrollX = 0.0f;
     };
 
     struct CandidateItem {
@@ -112,6 +116,8 @@ struct ManualSearchDialog::Impl {
         int candidateIndex = -1; // -1 表示分组标题
         bool header = false;
     };
+
+    enum class PreviewState { Empty, Loading, NoCandidates, Unavailable };
 
     HWND hwnd = nullptr;
     HWND notifyHwnd = nullptr; // 关闭时向托盘窗口投递 kMsgDialogClosed
@@ -125,8 +131,10 @@ struct ManualSearchDialog::Impl {
 
     TextField titleEdit;
     TextField artistEdit;
-    std::wstring statusText;
     bool searching = false;
+    PreviewState previewState = PreviewState::Empty;
+    bool previewAnimations = true;
+    ULONGLONG previewLoadingSince = 0;
     UINT_PTR searchGeneration = 0;
     UINT_PTR previewGeneration = 0;
 
@@ -140,7 +148,6 @@ struct ManualSearchDialog::Impl {
 
     bool targetIsSoda() const { return targetPlayer == SmtcPlayerType::Soda; }
     bool targetIsNetease() const { return targetPlayer == SmtcPlayerType::NetEase; }
-    bool targetIsSpotify() const { return targetPlayer == SmtcPlayerType::Spotify; }
 
     std::vector<SearchCandidate> candidates;
     std::vector<CandidateItem> candidateItems;
@@ -161,7 +168,6 @@ struct ManualSearchDialog::Impl {
     bool previewHasRomanization = false;
     bool previewShowTranslation = false;
     bool previewShowRomanization = false;
-    int64_t previewOffsetMs = 0;
     int64_t playbackPositionMs = 0;
     int64_t previewPositionMs = 0;
     int previewTopLine = 0;
@@ -178,14 +184,10 @@ struct ManualSearchDialog::Impl {
     bool candidateScrollDragging = false;
     float candidateScrollGrabDy = 0.0f;
 
-    D2D1_RECT_F titleRect{};
-    D2D1_RECT_F subtitleRect{};
     D2D1_RECT_F titleEditRect{};
     D2D1_RECT_F artistEditRect{};
     D2D1_RECT_F searchRect{};
-    D2D1_RECT_F statusRect{};
-    D2D1_RECT_F hintRect{};
-    D2D1_RECT_F compatibilityRect{};
+    D2D1_RECT_F workspaceRect{};
     D2D1_RECT_F candidateListRect{};
     D2D1_RECT_F previewRect{};
     D2D1_RECT_F previewRomanizationRect{};
@@ -219,7 +221,7 @@ struct ManualSearchDialog::Impl {
     }
 
     static bool contains(const D2D1_RECT_F& rect, float x, float y) {
-        return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+        return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
     }
 
     static bool isCtrlDown() {
@@ -252,12 +254,6 @@ struct ManualSearchDialog::Impl {
 
     static size_t selectionEnd(const TextField& field) {
         return std::max(field.caret, field.anchor);
-    }
-
-    static void collapseSelection(TextField& field, bool toEnd) {
-        const size_t position = toEnd ? selectionEnd(field) : selectionStart(field);
-        field.caret = position;
-        field.anchor = position;
     }
 
     void moveCaret(TextField& field, size_t next, bool extend) {
@@ -363,7 +359,7 @@ struct ManualSearchDialog::Impl {
         switch (key) {
         case VK_LEFT:
             if (!shift && selectionStart(*field) != selectionEnd(*field))
-                collapseSelection(*field, false);
+                moveCaret(*field, selectionStart(*field), false);
             else if (field->caret > 0)
                 moveCaret(*field, field->caret - 1, shift);
             else
@@ -371,7 +367,7 @@ struct ManualSearchDialog::Impl {
             return true;
         case VK_RIGHT:
             if (!shift && selectionStart(*field) != selectionEnd(*field))
-                collapseSelection(*field, true);
+                moveCaret(*field, selectionEnd(*field), false);
             else if (field->caret < field->text.size())
                 moveCaret(*field, field->caret + 1, shift);
             else
@@ -415,6 +411,38 @@ struct ManualSearchDialog::Impl {
         return true;
     }
 
+    void updatePreviewLoadingTimer() {
+        if (previewState == PreviewState::Loading && previewAnimations && !IsIconic(hwnd))
+            SetTimer(hwnd, kPreviewLoadingTimerId, 33, nullptr);
+        else
+            KillTimer(hwnd, kPreviewLoadingTimerId);
+    }
+
+    void setPreviewState(PreviewState state) {
+        if (state == previewState)
+            return;
+        previewState = state;
+        if (state == PreviewState::Loading)
+            previewLoadingSince = GetTickCount64();
+        updatePreviewLoadingTimer();
+    }
+
+    void refreshPreviewAnimations() {
+        BOOL enabled = TRUE;
+        SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0);
+        previewAnimations = enabled != FALSE;
+        updatePreviewLoadingTimer();
+    }
+
+    void invalidatePreview() {
+        const float scale = surface.dipScale();
+        const RECT dirty{static_cast<LONG>(std::floor(previewRect.left * scale)),
+                         static_cast<LONG>(std::floor(previewRect.top * scale)),
+                         static_cast<LONG>(std::ceil(previewRect.right * scale)),
+                         static_cast<LONG>(std::ceil(previewRect.bottom * scale))};
+        surface.invalidate(&dirty);
+    }
+
     void createControls() {
         titleEdit.cue = L"歌名";
         titleEdit.text = targetTitle;
@@ -423,7 +451,7 @@ struct ManualSearchDialog::Impl {
         artistEdit.text = targetArtist;
         artistEdit.caret = artistEdit.anchor = artistEdit.text.size();
 
-        statusText = L"请输入歌名和歌手，点击搜索。";
+        setPreviewState(PreviewState::Empty);
         searching = false;
         focusedId = kIdTitleEdit;
         focusVisible = false;
@@ -445,43 +473,43 @@ struct ManualSearchDialog::Impl {
         const float h = std::max(0.0f, static_cast<float>(rc.bottom - rc.top) / scale);
         const float pad = fluent::metrics::pagePadding;
         const float gap = fluent::metrics::controlGap;
-        const float compactGap = fluent::metrics::compactGap;
         const float controlH = fluent::metrics::controlHeight;
 
-        const float titleH = fluent::metrics::titleHeight;
-        const float subtitleH = fluent::metrics::subtitleHeight;
-        titleRect = D2D1::RectF(pad, pad, std::max(pad, w - pad), pad + titleH);
-        subtitleRect = D2D1::RectF(pad, pad + titleH, std::max(pad, w - pad),
-                                    pad + titleH + subtitleH);
-
-        const float inputY = pad + titleH + subtitleH + fluent::metrics::sectionGap;
-        const float searchW = 88.0f;
-        const float inputW = std::max(40.0f, (w - pad * 2.0f - gap * 2.0f - searchW) / 2.0f);
-        titleEditRect = D2D1::RectF(pad, inputY, pad + inputW, inputY + controlH);
-        artistEditRect = D2D1::RectF(pad + inputW + gap, inputY,
-                                     pad + inputW * 2.0f + gap, inputY + controlH);
+        const float inputY = pad + 22.0f;
+        const float searchW = 104.0f;
+        const float fieldsW = std::max(80.0f, w - 2.0f * pad - 2.0f * gap - searchW);
+        const float titleW = fieldsW * 0.68f;
+        titleEditRect = D2D1::RectF(pad, inputY, pad + titleW, inputY + controlH);
+        artistEditRect = D2D1::RectF(pad + titleW + gap, inputY,
+                                     pad + fieldsW + gap, inputY + controlH);
         searchRect = D2D1::RectF(w - pad - searchW, inputY, w - pad, inputY + controlH);
 
-        const float statusY = inputY + controlH + compactGap;
-        const float statusH = 22.0f;
-        statusRect = D2D1::RectF(pad, statusY, std::max(pad, w - pad), statusY + statusH);
-        const float hintY = statusY + statusH + 4.0f;
-        hintRect = D2D1::RectF(pad, hintY, std::max(pad, w - pad), hintY + statusH);
-        const float compatibilityY = hintY + statusH + 2.0f;
-        compatibilityRect = D2D1::RectF(pad, compatibilityY, std::max(pad, w - pad),
-                                          compatibilityY + statusH);
-
-        const float contentTop = compatibilityY + statusH + fluent::metrics::sectionGap;
+        const float contentTop = inputY + controlH + fluent::metrics::sectionGap;
         const float buttonH = controlH;
         const float buttonY = std::max(contentTop, h - pad - buttonH);
-        const float contentBottom = buttonY - fluent::metrics::sectionGap;
-        const float contentH = std::max(0.0f, contentBottom - contentTop);
-        const float availableW = std::max(0.0f, w - pad * 2.0f - gap);
-        const float listW = availableW * 0.4f;
-        const float rightX = pad + listW + gap;
-        const float rightW = std::max(0.0f, w - rightX - pad);
-        candidateListRect = D2D1::RectF(pad, contentTop, pad + listW, contentTop + contentH);
-        previewRect = D2D1::RectF(rightX, contentTop, rightX + rightW, contentTop + contentH);
+        const float contentBottom = std::max(contentTop, buttonY - fluent::metrics::sectionGap);
+        const float workspaceW = std::max(0.0f, w - 2.0f * pad);
+        workspaceRect = D2D1::RectF(pad, contentTop, pad + workspaceW, contentBottom);
+        candidateListRect = workspaceRect;
+        previewRect = {};
+        advanceRect = {};
+        delayRect = {};
+        if (!candidates.empty()) {
+            const float listW = std::min(workspaceW, std::clamp(workspaceW * 0.36f, 168.0f, 360.0f));
+            candidateListRect.right = pad + listW;
+            const float previewLeft = candidateListRect.right + 1.0f;
+            const float toolsY = std::max(contentTop, contentBottom - gap - controlH);
+            previewRect = D2D1::RectF(previewLeft, contentTop, workspaceRect.right,
+                                      std::max(contentTop, toolsY - gap));
+            const float timingW = 100.0f;
+            const float toolsLeft = previewLeft + 18.0f;
+            advanceRect = D2D1::RectF(toolsLeft, toolsY, toolsLeft + timingW, toolsY + controlH);
+            delayRect = D2D1::RectF(advanceRect.right + gap, toolsY,
+                                    advanceRect.right + gap + timingW, toolsY + controlH);
+        } else {
+            candidateScrollView.layout({}, 0.0f, surface.dpi());
+            previewScrollView.layout({}, 0.0f, surface.dpi());
+        }
         previewRomanizationRect = {};
         previewTranslationRect = {};
         const int previewToggleCount = (previewHasRomanization ? 1 : 0) +
@@ -508,18 +536,13 @@ struct ManualSearchDialog::Impl {
             }
         }
 
-        const float timingW = 100.0f;
-        advanceRect = D2D1::RectF(pad, buttonY, pad + timingW, buttonY + buttonH);
-        delayRect = D2D1::RectF(pad + timingW + gap, buttonY,
-                                pad + timingW + gap + timingW, buttonY + buttonH);
         const float cancelW = 88.0f;
         const float applyW = 120.0f;
         cancelRect = D2D1::RectF(w - pad - cancelW, buttonY, w - pad, buttonY + buttonH);
         applyRect = D2D1::RectF(w - pad - cancelW - gap - applyW, buttonY,
                                 w - pad - cancelW - gap, buttonY + buttonH);
         fluent::offsetDialogRects(content.offsetX, {
-            &titleRect, &subtitleRect, &titleEditRect, &artistEditRect,
-            &searchRect, &statusRect, &hintRect, &compatibilityRect,
+            &titleEditRect, &artistEditRect, &searchRect, &workspaceRect,
             &candidateListRect, &previewRect, &previewRomanizationRect, &previewTranslationRect,
             &advanceRect, &delayRect, &applyRect, &cancelRect});
         candidateScroll = std::clamp(candidateScroll, 0.0f, candidateMaxScroll());
@@ -654,7 +677,7 @@ struct ManualSearchDialog::Impl {
     }
 
     float previewContentTop() const {
-        return previewCapabilityLabel.empty() ? 0.0f : 27.0f;
+        return kPreviewHeaderHeight + (previewCapabilityLabel.empty() ? 0.0f : 24.0f);
     }
 
     int previewSecondaryLineCount() const {
@@ -978,58 +1001,82 @@ struct ManualSearchDialog::Impl {
     }
 
     void drawTextField(fluent::FluentDialogSurface::Painter& painter,
-                       const D2D1_RECT_F& rect, const TextField& field, int id) {
+                       const D2D1_RECT_F& rect, TextField& field, int id) {
         const auto& p = fluent::palette();
+        const bool focused = focusedId == id && GetFocus() == hwnd;
+        painter.drawText(field.cue, painter.textFormat(fluent::font_sizes::caption, 600, false, true),
+                         D2D1::RectF(rect.left, rect.top - 23.0f, rect.right, rect.top - 4.0f),
+                         p.accent);
         painter.fillRoundRect(p.cardFill, rect);
-        painter.strokeRoundRect(p.controlStroke, rect);
-        const bool focused = focusedId == id;
-        const float underlineHeight = focused ? 2.0f : 1.0f;
-        if (auto* br = painter.brush(focused ? p.accent : p.textSecondary)) {
-            painter.target()->FillRectangle(
-                D2D1::RectF(rect.left + 1.0f, rect.bottom - underlineHeight,
-                            rect.right - 1.0f, rect.bottom),
-                br);
-        }
+        painter.strokeRoundRect(focused ? p.accent : p.controlStroke, rect);
 
         auto* format = painter.textFormat(fluent::font_sizes::body, 400, false, true);
         if (!format)
             return;
         const D2D1_RECT_F textRect =
             D2D1::RectF(rect.left + 12.0f, rect.top, rect.right - 12.0f, rect.bottom);
-        const bool hasSelection = selectionStart(field) != selectionEnd(field);
-        if (hasSelection) {
-            const std::wstring before = field.text.substr(0, selectionStart(field));
-            const std::wstring selected =
-                field.text.substr(selectionStart(field), selectionEnd(field) - selectionStart(field));
-            const float left = textRect.left + painter.measureTextWidth(before, format);
-            const float right = std::min(textRect.right,
-                                         left + painter.measureTextWidth(selected, format));
-            if (right > left)
-                painter.target()->FillRectangle(
-                    D2D1::RectF(left, textRect.top + 6.0f, right, textRect.bottom - 6.0f),
-                    painter.brush(p.listSelected));
+        if (!focused) {
+            field.scrollX = 0.0f;
+            painter.drawTrimmedText(field.text, format, textRect, p.text);
+            return;
         }
 
-        if (field.text.empty())
-            painter.drawText(field.cue, format, textRect, p.textSecondary);
-        else
-            painter.drawText(field.text, format, textRect, p.text);
-
-        if (focusedId == id) {
-            const std::wstring before = field.text.substr(0, field.caret);
-            const float caretX = std::clamp(textRect.left + painter.measureTextWidth(before, format),
-                                            textRect.left, textRect.right - 1.0f);
-            if (auto* brush = painter.brush(p.accent))
-                painter.target()->FillRectangle(
-                    D2D1::RectF(caretX, textRect.top + 7.0f, caretX + 1.0f,
-                                textRect.bottom - 7.0f),
-                    brush);
+        const float width = std::max(1.0f, textRect.right - textRect.left - 1.0f);
+        auto* layout = painter.textLayout(field.text, format, width, textRect.bottom - textRect.top);
+        if (!layout)
+            return;
+        DWRITE_TEXT_METRICS metrics{};
+        layout->GetMetrics(&metrics);
+        float caretX = 0.0f;
+        if (!field.text.empty()) {
+            const bool atEnd = field.caret >= field.text.size();
+            const auto index = static_cast<UINT32>(atEnd ? field.text.size() - 1 : field.caret);
+            float caretY = 0.0f;
+            DWRITE_HIT_TEST_METRICS caretMetrics{};
+            layout->HitTestTextPosition(index, atEnd, &caretX, &caretY, &caretMetrics);
         }
+        const float maxScroll = std::max(0.0f, metrics.widthIncludingTrailingWhitespace - width);
+        field.scrollX = std::clamp(field.scrollX, 0.0f, maxScroll);
+        if (caretX < field.scrollX)
+            field.scrollX = caretX;
+        else if (caretX > field.scrollX + width)
+            field.scrollX = caretX - width;
+
+        const float originX = textRect.left - field.scrollX;
+        auto* target = painter.target();
+        target->PushAxisAlignedClip(textRect, D2D1_ANTIALIAS_MODE_ALIASED);
+        const auto start = static_cast<UINT32>(selectionStart(field));
+        const auto length = static_cast<UINT32>(selectionEnd(field) - selectionStart(field));
+        if (length > 0) {
+            UINT32 count = 0;
+            layout->HitTestTextRange(start, length, originX, textRect.top, nullptr, 0, &count);
+            if (count > 0) {
+                std::vector<DWRITE_HIT_TEST_METRICS> spans(count);
+                if (auto* brush = painter.brush(p.listSelected);
+                    brush && SUCCEEDED(layout->HitTestTextRange(start, length, originX, textRect.top,
+                                                              spans.data(), count, &count))) {
+                    for (UINT32 i = 0; i < count; ++i) {
+                        const auto& span = spans[i];
+                        target->FillRectangle(D2D1::RectF(span.left, span.top, span.left + span.width,
+                                                        span.top + span.height), brush);
+                    }
+                }
+            }
+        }
+        painter.drawTextLayout(layout, D2D1::Point2F(originX, textRect.top), p.text);
+        if (auto* brush = painter.brush(p.accent)) {
+            const float x = originX + caretX;
+            target->FillRectangle(D2D1::RectF(x, textRect.top + 7.0f, x + 1.0f,
+                                             textRect.bottom - 7.0f), brush);
+        }
+        target->PopAxisAlignedClip();
     }
 
     bool isEnabled(int id) const {
         if (id == kIdSearchButton)
             return !searching;
+        if (id == kIdCandidateList || id == kIdPreview)
+            return !candidates.empty();
         if (id == kIdPreviewRomanization)
             return previewHasRomanization;
         if (id == kIdPreviewTranslation)
@@ -1077,10 +1124,8 @@ struct ManualSearchDialog::Impl {
         const float height = candidateListRect.bottom - candidateListRect.top;
         candidateScroll = std::clamp(candidateScroll, 0.0f, candidateMaxScroll());
 
-        painter.fillRoundRect(p.cardFill, candidateListRect, fluent::metrics::cardRadius);
-        const bool focused = focusedId == kIdCandidateList && focusVisible;
-        painter.strokeRoundRect(focused ? p.accent : p.cardStroke, candidateListRect, 1.0f,
-                                fluent::metrics::cardRadius);
+        if (focusedId == kIdCandidateList && focusVisible)
+            painter.strokeRoundRect(p.accent, candidateListRect, 1.0f, fluent::metrics::cardRadius);
 
         // 合成滚动层是矩形，留出圆角和边框空间，避免覆盖卡片边缘。
         candidateScrollView.layout(
@@ -1122,17 +1167,41 @@ struct ManualSearchDialog::Impl {
                                         paintBounds.left + 7.0f,
                                         y + rowH * 0.5f + 8.0f),
                             1.5f);
+                    const auto& candidate = candidates[item.candidateIndex];
+                    const float left = paintBounds.left + 16.0f;
+                    const float right = paintBounds.right - 12.0f;
+                    float titleRight = right;
+                    auto* detailFormat = painter.textFormat(fluent::font_sizes::caption, 400,
+                                                            false, true);
+                    if (candidate.durationMs > 0) {
+                        const auto seconds = candidate.durationMs / 1000;
+                        const std::wstring duration = std::to_wstring(seconds / 60) + L":" +
+                            (seconds % 60 < 10 ? L"0" : L"") + std::to_wstring(seconds % 60);
+                        const float durationWidth = painter.measureTextWidth(duration, detailFormat);
+                        titleRight = std::max(left, right - durationWidth - 10.0f);
+                        painter.drawText(duration, detailFormat,
+                                         D2D1::RectF(right - durationWidth, y + 5.0f,
+                                                     right, y + 25.0f),
+                                         p.textSecondary);
+                    }
                     painter.drawTrimmedText(
-                        item.text, painter.textFormat(fluent::font_sizes::label, 400, false, true),
-                        D2D1::RectF(paintBounds.left + 16.0f, y,
-                                    paintBounds.right - 8.0f, y + rowH),
-                        p.text);
+                        candidate.name, painter.textFormat(fluent::font_sizes::label, 550, false, true),
+                        D2D1::RectF(left, y + 4.0f, titleRight, y + 26.0f), p.text);
+                    std::wstring detail = candidate.singer;
+                    if (!candidate.album.empty()) {
+                        if (!detail.empty())
+                            detail += L"  /  ";
+                        detail += candidate.album;
+                    }
+                    painter.drawTrimmedText(detail, detailFormat,
+                                             D2D1::RectF(left, y + 26.0f, right, y + rowH - 4.0f),
+                                             p.textSecondary);
                 } else {
-                    painter.drawText(
+                    painter.drawTrimmedText(
                         item.text, painter.textFormat(fluent::font_sizes::caption, 600, false, true),
                         D2D1::RectF(paintBounds.left + 16.0f, y,
                                     paintBounds.right - 8.0f, y + rowH),
-                        p.textSecondary);
+                        p.accent);
                 }
             }
             y += rowH;
@@ -1151,12 +1220,43 @@ struct ManualSearchDialog::Impl {
         }
     }
 
+    void drawPreviewPlaceholder(fluent::FluentDialogSurface::Painter& painter) const {
+        const auto& p = fluent::palette();
+        const float centerX = (previewRect.left + previewRect.right) * 0.5f;
+        const float centerY = (previewRect.top + kPreviewHeaderHeight + previewRect.bottom) * 0.5f;
+        const bool loading = previewState == PreviewState::Loading;
+        const wchar_t* text = loading ? L"正在加载预览…"
+            : previewState == PreviewState::Unavailable ? L"该候选没有可用歌词"
+                                                        : L"选择左侧歌曲预览歌词";
+
+        if (loading) {
+            // 五根静止的节拍柱错开亮度，避免持续改变图形位置或尺寸。
+            constexpr float heights[] = {10.0f, 18.0f, 26.0f, 18.0f, 10.0f};
+            constexpr ULONGLONG beatMs = 500;
+            const auto elapsed = GetTickCount64() - previewLoadingSince;
+            for (size_t i = 0; i < _countof(heights); ++i) {
+                const float x = centerX + (static_cast<float>(i) - 2.0f) * 9.0f;
+                const float halfHeight = heights[i] * 0.5f;
+                const float phase = static_cast<float>((elapsed + beatMs - i * 60) % beatMs) /
+                                    static_cast<float>(beatMs);
+                const float pulse = 0.5f - 0.5f * std::cos(phase * 2.0f * std::numbers::pi_v<float>);
+                auto color = p.accent;
+                color.a *= previewAnimations ? 0.30f + 0.65f * pulse : 0.75f;
+                painter.fillRoundRect(color, D2D1::RectF(x - 2.0f, centerY - 14.0f - halfHeight,
+                                                       x + 2.0f, centerY - 14.0f + halfHeight),
+                                      2.0f);
+            }
+        }
+        const float textY = centerY + (loading ? 18.0f : 0.0f);
+        painter.drawText(text, painter.textFormat(fluent::font_sizes::emphasis, 400, true),
+                         D2D1::RectF(previewRect.left + 12.0f, textY - 14.0f,
+                                     previewRect.right - 12.0f, textY + 14.0f),
+                         p.textSecondary);
+    }
+
     void drawPreview(fluent::FluentDialogSurface::Painter& painter) {
         const auto& p = fluent::palette();
         const float width = previewRect.right - previewRect.left;
-        const float height = previewRect.bottom - previewRect.top;
-        painter.fillRoundRect(p.cardFill, previewRect, fluent::metrics::cardRadius);
-        painter.strokeRoundRect(p.cardStroke, previewRect, 1.0f, fluent::metrics::cardRadius);
         if (focusedId == kIdPreview && focusVisible) {
             painter.strokeRoundRect(
                 p.accent,
@@ -1165,21 +1265,35 @@ struct ManualSearchDialog::Impl {
                 1.5f, fluent::metrics::cardRadius - 1.0f);
         }
 
+        if (selectedIdx >= 0 && selectedIdx < static_cast<int>(candidates.size())) {
+            const auto& candidate = candidates[selectedIdx];
+            const float left = previewRect.left + 18.0f;
+            const float right = previewRect.right - 18.0f;
+            const float top = previewRect.top;
+            painter.drawTrimmedText(
+                candidate.name, painter.textFormat(fluent::font_sizes::emphasis, 600, false, true),
+                D2D1::RectF(left, top + 7.0f, right, top + 31.0f), p.text);
+            painter.drawTrimmedText(
+                candidate.singer, painter.textFormat(fluent::font_sizes::caption, 400, false, true),
+                D2D1::RectF(left, top + 31.0f, right, top + 51.0f), p.textSecondary);
+            if (auto* brush = painter.brush(p.cardStroke)) {
+                const float y = top + kPreviewHeaderHeight - 6.0f;
+                painter.target()->FillRectangle(D2D1::RectF(left, y, right, y + 1.0f), brush);
+            }
+        }
+
         if (previewLines.empty()) {
             previewScrollView.layout({}, 0.0f, surface.dpi());
-            painter.drawText(
-                L"选择左侧歌曲预览歌词", painter.textFormat(fluent::font_sizes::emphasis, 400, true),
-                D2D1::RectF(previewRect.left + 12.0f, previewRect.top + height * 0.4f,
-                            previewRect.right - 12.0f, previewRect.top + height * 0.6f),
-                p.textSecondary);
+            drawPreviewPlaceholder(painter);
             return;
         }
 
         const float contentTop = previewContentTop();
         if (!previewCapabilityLabel.empty())
             painter.drawText(previewCapabilityLabel, painter.textFormat(fluent::font_sizes::smallText, 400, true),
-                             D2D1::RectF(previewRect.left + 12.0f, previewRect.top + 7.0f,
-                                         previewRect.right - 12.0f, previewRect.top + 27.0f),
+                             D2D1::RectF(previewRect.left + 12.0f, previewRect.top + kPreviewHeaderHeight,
+                                         previewRect.right - 12.0f,
+                                         previewRect.top + kPreviewHeaderHeight + 24.0f),
                              p.textSecondary);
 
         const bool hasToggleRail = previewHasRomanization || previewHasTranslation;
@@ -1288,33 +1402,34 @@ struct ManualSearchDialog::Impl {
 
     void paint(fluent::FluentDialogSurface::Painter& painter, float, float) {
         const auto& p = fluent::palette();
-        painter.drawText(L"手动搜索歌词", painter.textFormat(fluent::font_sizes::title, 600), titleRect, p.text);
-        painter.drawText(targetIsSoda() ? L"搜索汽水音乐并预览原生歌词" : L"从多个来源选择并预览歌词",
-                         painter.textFormat(fluent::font_sizes::label, 400), subtitleRect,
-                         p.textSecondary);
         drawTextField(painter, titleEditRect, titleEdit, kIdTitleEdit);
         drawTextField(painter, artistEditRect, artistEdit, kIdArtistEdit);
         drawButton(painter, searchRect, L"搜索", true, kIdSearchButton);
 
-        painter.drawTrimmedText(statusText, painter.textFormat(fluent::font_sizes::label, 400, false, true), statusRect,
-                                 p.text);
-        painter.drawTrimmedText(
-            targetIsSoda() ? L"来自汽水音乐的原生歌词，支持逐字和逐行显示。"
-            : targetIsSpotify() ? L"LRCLIB 支持逐字和逐行歌词。"
-                           : L"YRC/LRC 为网易云歌词；QRC 为 QQ 原生逐字歌词；KRC 为酷狗逐字歌词",
-            painter.textFormat(fluent::font_sizes::caption, 400, false, true), hintRect, p.textSecondary);
-        painter.drawTrimmedText(
-            targetIsSoda() ? L"当前为汽水音乐，仅显示汽水音乐歌词候选。"
-            : targetIsNetease() ? L"当前为网易云音乐，仅显示网易云歌词候选。"
-            : targetIsSpotify() ? L"搜索酷狗、QQ 音乐和 LRCLIB 的同步歌词。"
-                            : L"当前仅显示酷狗和 QQ 音乐歌词候选。",
-            painter.textFormat(fluent::font_sizes::label, 600, false, true), compatibilityRect, p.text);
-
-        drawCandidateList(painter);
-        drawPreview(painter);
-        drawButton(painter, advanceRect, L"提前 0.5 秒", false, kIdAdvanceButton);
-        drawButton(painter, delayRect, L"延后 0.5 秒", false, kIdDelayButton);
-        drawButton(painter, applyRect, L"使用此歌词", true, kIdApplyButton);
+        if (!candidates.empty()) {
+            painter.fillRoundRect(p.cardFill, workspaceRect, fluent::metrics::cardRadius);
+            painter.strokeRoundRect(p.cardStroke, workspaceRect, 1.0f, fluent::metrics::cardRadius);
+            if (auto* brush = painter.brush(p.cardStroke)) {
+                const float x = candidateListRect.right;
+                painter.target()->FillRectangle(
+                    D2D1::RectF(x, workspaceRect.top + 1.0f, x + 1.0f, workspaceRect.bottom - 1.0f),
+                    brush);
+            }
+            drawCandidateList(painter);
+            drawPreview(painter);
+            drawButton(painter, advanceRect, L"提前 0.5 秒", false, kIdAdvanceButton);
+            drawButton(painter, delayRect, L"延后 0.5 秒", false, kIdDelayButton);
+            drawButton(painter, applyRect, L"使用此歌词", true, kIdApplyButton);
+        } else {
+            const wchar_t* hint = searching ? L"正在搜索歌词候选…"
+                : previewState == PreviewState::NoCandidates ? L"未找到歌词，试试缩短歌名或更换歌手关键词。"
+                                                             : L"输入歌名和歌手后搜索。";
+            painter.drawText(hint,
+                             painter.textFormat(fluent::font_sizes::label, 400, false, true),
+                             D2D1::RectF(workspaceRect.left, workspaceRect.top,
+                                         workspaceRect.right, workspaceRect.top + 26.0f),
+                             p.textSecondary);
+        }
         drawButton(painter, cancelRect, L"取消", false, kIdCancelButton);
     }
 
@@ -1325,7 +1440,7 @@ struct ManualSearchDialog::Impl {
             return kIdArtistEdit;
         if (contains(searchRect, x, y))
             return kIdSearchButton;
-        if (contains(candidateListRect, x, y))
+        if (isEnabled(kIdCandidateList) && contains(candidateListRect, x, y))
             return kIdCandidateList;
         if (previewHasRomanization && contains(previewRomanizationRect, x, y))
             return kIdPreviewRomanization;
@@ -1337,7 +1452,7 @@ struct ManualSearchDialog::Impl {
             return kIdAdvanceButton;
         if (contains(delayRect, x, y))
             return kIdDelayButton;
-        if (contains(applyRect, x, y))
+        if (!candidates.empty() && contains(applyRect, x, y))
             return kIdApplyButton;
         if (contains(cancelRect, x, y))
             return kIdCancelButton;
@@ -1439,6 +1554,7 @@ struct ManualSearchDialog::Impl {
         const UINT_PTR generation = ++searchGeneration;
         ++previewGeneration;
         searching = true;
+        setPreviewState(PreviewState::Empty);
         candidateItems.clear();
         candidates.clear();
         selectedItemRow = -1;
@@ -1447,9 +1563,7 @@ struct ManualSearchDialog::Impl {
         candidateScroll = 0.0f;
         candidateScrollView.setOffset(0.0f);
         candidateWheelAccum = 0;
-        previewOffsetMs = 0;
         setPreviewLines({});
-        statusText = L"搜索中，请稍候…";
         surface.invalidate();
 
         const std::wstring title = titleEdit.text;
@@ -1467,16 +1581,7 @@ struct ManualSearchDialog::Impl {
     }
 
     void handleCandidatesReady(const std::vector<SearchCandidate>& result) {
-        candidates.clear();
-        for (const auto& candidate : result) {
-            if (targetIsSoda() ? candidate.source == LyricSource::Soda
-                : targetIsNetease() ? candidate.source == LyricSource::Yrc
-                                : (candidate.source == LyricSource::Krc ||
-                                   candidate.source == LyricSource::Qrc ||
-                                   candidate.source == LyricSource::Lrc ||
-                                   (targetIsSpotify() && candidate.source == LyricSource::Lrclib)))
-                candidates.push_back(candidate);
-        }
+        candidates = result;
         candidateItems.clear();
         selectedItemRow = -1;
         selectedIdx = -1;
@@ -1485,102 +1590,42 @@ struct ManualSearchDialog::Impl {
         candidateScrollView.setOffset(0.0f);
         candidateWheelAccum = 0;
         searching = false;
-        previewOffsetMs = 0;
         setPreviewLines({});
 
-        int yrcCount = 0;
-        int qrcCount = 0;
-        int krcCount = 0;
-        int lrcCount = 0;
-        int sodaCount = 0;
-        for (const auto& candidate : candidates) {
-            if (candidate.source == LyricSource::Soda)
-                ++sodaCount;
-            else if (candidate.source == LyricSource::Yrc)
-                ++yrcCount;
-            else if (candidate.source == LyricSource::Qrc)
-                ++qrcCount;
-            else if (candidate.source == LyricSource::Krc)
-                ++krcCount;
-            else if (candidate.source == LyricSource::Lrc)
-                ++lrcCount;
-        }
-
-        auto addHeader = [this](const wchar_t* text) {
-            candidateItems.push_back({text, -1, true});
-        };
         auto addCandidate = [this](int index) {
-            const auto& candidate = candidates[index];
-            std::wstring label = candidate.name + L" - " + candidate.singer;
-            if (targetIsSpotify()) {
-                if (!candidate.album.empty())
-                    label += L" · " + candidate.album;
-                if (candidate.durationMs > 0) {
-                    const auto seconds = candidate.durationMs / 1000;
-                    label += L" · " + std::to_wstring(seconds / 60) + L":" +
-                             (seconds % 60 < 10 ? L"0" : L"") + std::to_wstring(seconds % 60);
-                }
-            }
-            candidateItems.push_back({std::move(label), index, false});
+            candidateItems.push_back({{}, index, false});
         };
-        auto addLrclibGroup = [&](const wchar_t* header, bool wordSync) {
+        auto addGroup = [&](const wchar_t* header, LyricSource source, bool wordSync = false) {
             bool hasHeader = false;
             for (int i = 0; i < static_cast<int>(candidates.size()); ++i) {
                 const auto& candidate = candidates[i];
-                if (candidate.source != LyricSource::Lrclib || candidate.lrclibWordSync != wordSync)
+                if (candidate.source != source ||
+                    (source == LyricSource::Lrclib && candidate.lrclibWordSync != wordSync))
                     continue;
                 if (!hasHeader) {
-                    addHeader(header);
+                    candidateItems.push_back({header, -1, true});
                     hasHeader = true;
                 }
                 addCandidate(i);
             }
         };
-        if (sodaCount > 0) {
-            addHeader(L"汽水音乐原生歌词（逐字／LRC）");
-            for (int i = 0; i < static_cast<int>(candidates.size()); ++i)
-                if (candidates[i].source == LyricSource::Soda)
-                    addCandidate(i);
-        }
-        if (yrcCount > 0) {
-            addHeader(L"网易云歌词（YRC/LRC）");
-            for (int i = 0; i < static_cast<int>(candidates.size()); ++i)
-                if (candidates[i].source == LyricSource::Yrc)
-                    addCandidate(i);
-        }
-        if (krcCount > 0) {
-            addHeader(L"酷狗逐字歌词（KRC）");
-            for (int i = 0; i < static_cast<int>(candidates.size()); ++i)
-                if (candidates[i].source == LyricSource::Krc)
-                    addCandidate(i);
-        }
-        if (qrcCount > 0) {
-            addHeader(L"QQ 音乐逐字歌词（QRC）");
-            for (int i = 0; i < static_cast<int>(candidates.size()); ++i)
-                if (candidates[i].source == LyricSource::Qrc)
-                    addCandidate(i);
-        }
-        if (lrcCount > 0) {
-            addHeader(L"QQ 音乐逐行歌词（LRC）");
-            for (int i = 0; i < static_cast<int>(candidates.size()); ++i)
-                if (candidates[i].source == LyricSource::Lrc)
-                    addCandidate(i);
-        }
-        addLrclibGroup(L"LRCLIB 逐字歌词", true);
-        addLrclibGroup(L"LRCLIB 逐行歌词（LRC）", false);
+        if (targetIsSoda())
+            addGroup(L"汽水音乐歌词（逐字／LRC）", LyricSource::Soda);
+        if (targetIsNetease())
+            addGroup(L"网易云歌词（YRC/LRC）", LyricSource::Yrc);
+        addGroup(L"酷狗逐字歌词（KRC）", LyricSource::Krc);
+        addGroup(L"QQ 音乐逐字歌词（QRC）", LyricSource::Qrc);
+        addGroup(L"QQ 音乐逐行歌词（LRC）", LyricSource::Lrc);
+        addGroup(L"LRCLIB 逐字歌词", LyricSource::Lrclib, true);
+        addGroup(L"LRCLIB 逐行歌词（LRC）", LyricSource::Lrclib);
+        if (!targetIsNetease())
+            addGroup(L"网易云歌词（YRC/LRC）", LyricSource::Yrc);
+        if (!targetIsSoda())
+            addGroup(L"汽水音乐歌词（逐字／LRC）", LyricSource::Soda);
 
         if (candidates.empty()) {
-            statusText = L"未找到相关歌曲，请尝试更换关键词。";
+            setPreviewState(PreviewState::NoCandidates);
         } else {
-            statusText = targetIsSoda()
-                ? L"找到 " + std::to_wstring(sodaCount) + L" 条汽水音乐候选，点击选择以预览歌词。"
-                : targetIsNetease()
-                ? L"找到 " + std::to_wstring(yrcCount) + L" 条网易云（YRC/LRC）候选，点击选择以预览歌词。"
-                : targetIsSpotify()
-                ? L"找到 " + std::to_wstring(candidates.size()) + L" 条候选，点击选择以预览歌词。"
-                : L"找到 " + std::to_wstring(krcCount) + L" 条酷狗逐字（KRC）、 " +
-                         std::to_wstring(qrcCount) + L" 条 QQ 逐字（QRC）、 " +
-                         std::to_wstring(lrcCount) + L" 条 QQ 逐行（LRC）候选，点击选择以预览歌词。";
             for (int row = 0; row < static_cast<int>(candidateItems.size()); ++row) {
                 if (!candidateItems[row].header) {
                     selectCandidateRow(row);
@@ -1594,9 +1639,8 @@ struct ManualSearchDialog::Impl {
     void onSelectionChanged() {
         if (selectedIdx < 0 || selectedIdx >= static_cast<int>(candidates.size()) || !provider)
             return;
+        setPreviewState(PreviewState::Loading);
         setPreviewLines({});
-        previewOffsetMs = 0;
-        statusText = L"正在加载《" + candidates[selectedIdx].name + L"》的歌词预览…";
         surface.invalidate();
 
         HWND hwndCopy = hwnd;
@@ -1617,25 +1661,16 @@ struct ManualSearchDialog::Impl {
 
     void handlePreviewLyricReady(int index, bool ok, const std::vector<LyricLine>& lines,
                                  const SongInfo& info) {
-        if (index != selectedIdx || !ok) {
-            if (index == selectedIdx)
-                statusText = L"该候选没有可用歌词，请尝试其他歌曲。";
+        if (index != selectedIdx)
+            return;
+        if (!ok || lines.empty()) {
+            setPreviewState(PreviewState::Unavailable);
             surface.invalidate();
             return;
         }
+        setPreviewState(PreviewState::Empty);
         previewInfo = info;
-        previewOffsetMs = 0;
         setPreviewLines(lines);
-        bool wordByWord = false;
-        for (const auto& line : lines) {
-            if (!line.chars.empty()) {
-                wordByWord = true;
-                break;
-            }
-        }
-        statusText = L"已加载《" + candidates[index].name +
-                     (wordByWord ? L"》的逐字歌词预览，点击“使用此歌词”应用。"
-                                 : L"》的整行歌词预览，点击“使用此歌词”应用。");
         surface.invalidate();
     }
 
@@ -1654,7 +1689,6 @@ struct ManualSearchDialog::Impl {
     void shiftPreviewTimes(int64_t deltaMs) {
         if (previewLines.empty())
             return;
-        previewOffsetMs += deltaMs;
         for (auto& line : previewLines) {
             line.ms += deltaMs;
             for (auto& character : line.chars) {
@@ -1663,9 +1697,6 @@ struct ManualSearchDialog::Impl {
             }
         }
         resetPreviewView();
-        std::wstring offsetText = previewOffsetMs >= 0 ? L"+" : L"";
-        offsetText += std::to_wstring(previewOffsetMs / 1000);
-        statusText = L"预览时间已调整 " + offsetText + L" 秒，确认后点击“使用此歌词”。";
         surface.invalidate();
     }
 
@@ -1700,10 +1731,12 @@ struct ManualSearchDialog::Impl {
                 }))
                 return -1;
             createControls();
+            refreshPreviewAnimations();
             layout();
             SetTimer(hwnd, kPreviewTimerId, 100, nullptr);
             return 0;
         case WM_SIZE:
+            updatePreviewLoadingTimer();
             candidateScroll = candidateScrollView.offset();
             candidateScrollView.stop();
             previewScrollView.stop();
@@ -1735,6 +1768,7 @@ struct ManualSearchDialog::Impl {
             return TRUE;
         case WM_SETTINGCHANGE:
         case WM_THEMECHANGED:
+            refreshPreviewAnimations();
             previewMeasuredWidth = -1.0f;
             candidateScroll = candidateScrollView.offset();
             candidateScrollView.stop();
@@ -1764,6 +1798,11 @@ struct ManualSearchDialog::Impl {
             surface.eraseBackground(reinterpret_cast<HDC>(wp), backdrop);
             return 1;
         case WM_TIMER:
+            if (wp == kPreviewLoadingTimerId) {
+                if (previewState == PreviewState::Loading && previewAnimations)
+                    invalidatePreview();
+                return 0;
+            }
             if (candidateScrollView.tick(wp) || previewScrollView.tick(wp))
                 return 0;
             if (wp == kPreviewTimerId)
@@ -1974,6 +2013,7 @@ struct ManualSearchDialog::Impl {
             previewScrollView.reset();
             discardPendingResults(hwnd);
             KillTimer(hwnd, kPreviewTimerId);
+            KillTimer(hwnd, kPreviewLoadingTimerId);
             surface.discard();
             hwnd = nullptr;
             if (notifyHwnd)
@@ -2112,7 +2152,6 @@ void ManualSearchDialog::setTargetSong(const std::wstring& title, const std::wst
     impl_->selectedItemRow = -1;
     impl_->selectedIdx = -1;
     impl_->hoverItemRow = -1;
-    impl_->previewOffsetMs = 0;
     impl_->previewInfo = {};
     impl_->setPreviewLines({});
     impl_->createControls();
