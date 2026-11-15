@@ -2730,6 +2730,7 @@ struct LyricProvider::Impl {
                         if (!info.songmid.empty())
                             attachQqSecondary(curl, toUtf8(info.songmid), out);
                         runtime_log::writef(L"[lyric][source=kugou] lines=%zu", out.size());
+                        info.lyricOrigin = LyricOrigin::Kugou;
                         return true;
                     }
                 }
@@ -2770,6 +2771,7 @@ struct LyricProvider::Impl {
                             attachQqSecondary(curl, candidate->songmid, out);
                         info.songmid = toWide(candidate->songmid);
                         info.albummid = toWide(candidate->albummid);
+                        info.lyricOrigin = LyricOrigin::QqMusic;
                         runtime_log::writef(L"[lyric][source=qq] format=%ls lines=%zu",
                                             source == LyricSource::Qrc ? L"QRC" : L"LRC", out.size());
                         return true;
@@ -2792,12 +2794,20 @@ struct LyricProvider::Impl {
         });
         runtime_log::writef(L"[lyric][source=lrclib] lines=%zu word-sync=%d",
                             out.size(), wordSync ? 1 : 0);
-        if (!out.empty())
+        if (!out.empty()) {
+            info.lyricOrigin = LyricOrigin::Lrclib;
             return true;
-        if (player != SmtcPlayerType::NetEase && fetchNeteaseByMetadata(curl, q, out, request))
+        }
+        if (player != SmtcPlayerType::NetEase && fetchNeteaseByMetadata(curl, q, out, request)) {
+            info.lyricOrigin = LyricOrigin::Netease;
             return true;
-        return player != SmtcPlayerType::Soda &&
-               fetchSodaLyrics(title, artist, durationMs, out, request);
+        }
+        if (player != SmtcPlayerType::Soda &&
+            fetchSodaLyrics(title, artist, durationMs, out, request)) {
+            info.lyricOrigin = LyricOrigin::Soda;
+            return true;
+        }
+        return false;
     }
 
     bool fetchNetease(const std::wstring& songId, std::vector<LyricLine>& out,
@@ -2810,6 +2820,7 @@ struct LyricProvider::Impl {
         if (ok) {
             info = SongInfo{}; // 网易云歌词不使用 QQ songmid/albummid 封面兜底
             info.neteaseSongId = songId;
+            info.lyricOrigin = LyricOrigin::Netease;
         }
         return ok;
     }
@@ -3242,6 +3253,24 @@ void LyricProvider::fetchLyricAsync(const SearchCandidate& cand, FetchCallback c
                             cand.name.c_str(), static_cast<int>(cand.source),
                             ok ? L"success" : L"failed", lines.size());
         SongInfo info{cand.songmid, cand.albummid, cand.neteaseSongId};
+        switch (cand.source) {
+        case LyricSource::Qrc:
+        case LyricSource::Lrc:
+            info.lyricOrigin = LyricOrigin::QqMusic;
+            break;
+        case LyricSource::Krc:
+            info.lyricOrigin = LyricOrigin::Kugou;
+            break;
+        case LyricSource::Yrc:
+            info.lyricOrigin = LyricOrigin::Netease;
+            break;
+        case LyricSource::Soda:
+            info.lyricOrigin = LyricOrigin::Soda;
+            break;
+        case LyricSource::Lrclib:
+            info.lyricOrigin = LyricOrigin::Lrclib;
+            break;
+        }
         if (cb)
             cb(ok, std::move(lines), info);
     });
@@ -3281,6 +3310,8 @@ void LyricProvider::requestSodaAsync(const std::wstring& title, const std::wstri
             runtime_log::writef(L"[lyric][request][Soda Music] title=\"%ls\" artist=\"%ls\" duration=%lldms",
                                 title.c_str(), artist.c_str(), static_cast<long long>(durationMs));
             ready.ok = fetchSodaLyrics(title, artist, durationMs, ready.lines, request);
+            if (ready.ok)
+                ready.info.lyricOrigin = LyricOrigin::Soda;
             if (!ready.ok)
                 ready.ok = impl->fetchOnline(title, artist, album, durationMs, ready.lines,
                                              ready.info, SmtcPlayerType::Soda, request);

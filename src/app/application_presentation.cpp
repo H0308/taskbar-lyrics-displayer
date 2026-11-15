@@ -1,5 +1,24 @@
 #include "app/application_internal.h"
 namespace lyrics_app {
+namespace {
+const wchar_t* onlineLyricSourceName(LyricOrigin origin) {
+    switch (origin) {
+    case LyricOrigin::QqMusic:
+        return L"在线歌词（QQ 音乐）";
+    case LyricOrigin::Kugou:
+        return L"在线歌词（酷狗音乐）";
+    case LyricOrigin::Netease:
+        return L"在线歌词（网易云音乐）";
+    case LyricOrigin::Soda:
+        return L"在线歌词（汽水音乐）";
+    case LyricOrigin::Lrclib:
+        return L"在线歌词（LRCLIB）";
+    default:
+        return L"在线歌词";
+    }
+}
+}
+
 void App::updateRuntimeLogState(const SmtcSnapshot& snap) {
     if (!snap.sessionAlive) {
         runtimeLogger_.setPlayback({}, {}, 0, false);
@@ -22,7 +41,7 @@ void App::updateRuntimeLogState(const SmtcSnapshot& snap) {
     else if (playback_.state().currentLyricsFromLocal_)
         runtimeLogger_.setLyricSource(L"本地歌词（QQ音乐本地）");
     else if (!playback_.state().currentLyrics_.empty())
-        runtimeLogger_.setLyricSource(L"在线歌词");
+        runtimeLogger_.setLyricSource(onlineLyricSourceName(playback_.state().currentLyricOrigin_));
     else
         runtimeLogger_.setLyricSource(L"暂无歌词");
     std::shared_ptr<const std::vector<uint8_t>> cover;

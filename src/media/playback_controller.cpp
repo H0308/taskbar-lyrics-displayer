@@ -212,6 +212,7 @@ void PlaybackController::applyManualLyrics(LyricResult result, const SmtcSnapsho
     state_.currentLyrics_ = std::move(result.lines);
     state_.currentLyricsFromLocal_ = false;
     state_.currentLyricsFromManual_ = true;
+    state_.currentLyricOrigin_ = result.info.lyricOrigin;
     state_.lyricLoading_ = false;
     updateLyricCapabilities(state_.currentLyrics_);
     logLyricsCreated(L"manual");
@@ -261,6 +262,7 @@ void PlaybackController::releaseCurrentLyrics() {
     state_.currentLyrics_.clear();
     state_.currentLyricsFromLocal_ = false;
     state_.currentLyricsFromManual_ = false;
+    state_.currentLyricOrigin_ = LyricOrigin::Unknown;
     updateLyricCapabilities({});
 }
 
@@ -422,6 +424,7 @@ void PlaybackController::onLyricReady(std::unique_ptr<LyricPayload> payload) {
         state_.currentLyricsFromLocal_ =
             snap.player == SmtcPlayerType::QQMusic && payload->result.fromLocal;
         state_.currentLyricsFromManual_ = payload->result.fromManual;
+        state_.currentLyricOrigin_ = payload->result.info.lyricOrigin;
         updateLyricCapabilities(state_.currentLyrics_);
         logLyricsCreated(state_.currentLyricsFromManual_  ? L"manual"
                          : state_.currentLyricsFromLocal_ ? L"local"

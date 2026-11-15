@@ -9,11 +9,14 @@
 #include <vector>
 
 
+enum class LyricOrigin { Unknown, QqMusic, Kugou, Netease, Soda, Lrclib };
+
 // 搜索匹配到的歌曲信息（用于歌词下载，也用于封面兜底）
 struct SongInfo {
     std::wstring songmid;
     std::wstring albummid;
     std::wstring neteaseSongId;
+    LyricOrigin lyricOrigin = LyricOrigin::Unknown;
 };
 
 // 每次请求独立交付的结果，不依赖 Provider 内部的可变“当前歌词”。

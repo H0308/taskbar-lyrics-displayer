@@ -41,6 +41,7 @@ struct PlaybackState {
     std::vector<LyricLine> currentLyrics_;
     bool currentLyricsFromLocal_ = false;
     bool currentLyricsFromManual_ = false;
+    LyricOrigin currentLyricOrigin_ = LyricOrigin::Unknown;
     uint64_t requestGeneration_ = 0;
     std::shared_ptr<const std::vector<uint8_t>> lastSmtcThumbnail;
     bool currentHasTranslation_ = false;
