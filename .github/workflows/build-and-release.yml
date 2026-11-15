@@ -31,12 +31,12 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           $appInfo = Get-Content -Raw 'src/app_info.h'
-          $installer = Get-Content -Raw 'installer/QQMusicLyric.iss'
+          $installer = Get-Content -Raw 'installer/WindowsTaskbarLyrics.iss'
           $appMatch = [regex]::Match($appInfo, 'kVersion\[\]\s*=\s*L"(?<version>\d+\.\d+\.\d+)"')
           $installerMatch = [regex]::Match($installer, '#define AppVersion\s+"(?<version>\d+\.\d+\.\d+)"')
 
           if (-not $appMatch.Success -or -not $installerMatch.Success) {
-            throw 'Unable to read the application version from app_info.h or QQMusicLyric.iss.'
+            throw 'Unable to read the application version from app_info.h or WindowsTaskbarLyrics.iss.'
           }
 
           $version = $appMatch.Groups['version'].Value
@@ -163,7 +163,7 @@ jobs:
             throw "ChineseSimplified.isl checksum mismatch: $translationHash"
           }
 
-          & $iscc "/DAppVersion=$env:INSTALLER_VERSION" "/DAppVersionNumeric=$env:APPLICATION_VERSION.0" '/DChineseMessagesFile=ChineseSimplified.isl' 'installer/QQMusicLyric.iss'
+          & $iscc "/DAppVersion=$env:INSTALLER_VERSION" "/DAppVersionNumeric=$env:APPLICATION_VERSION.0" '/DChineseMessagesFile=ChineseSimplified.isl' 'installer/WindowsTaskbarLyrics.iss'
           if ($LASTEXITCODE -ne 0) {
             throw "Inno Setup failed with exit code $LASTEXITCODE."
           }
@@ -174,7 +174,7 @@ jobs:
           INSTALLER_VERSION: ${{ steps.metadata.outputs.installer_version }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = "dist/QQMusicLyric-$env:INSTALLER_VERSION-Setup.exe"
+          $installer = "dist/WindowsTaskbarLyrics-$env:INSTALLER_VERSION-Setup.exe"
           if (-not (Test-Path $installer)) {
             throw "Expected installer was not produced: $installer"
           }
@@ -185,10 +185,10 @@ jobs:
       - name: Upload installer artifact
         uses: actions/upload-artifact@v7
         with:
-          name: QQMusicLyric-${{ steps.metadata.outputs.installer_version }}-windows-x64
+          name: WindowsTaskbarLyrics-${{ steps.metadata.outputs.installer_version }}-windows-x64
           path: |
-            dist/QQMusicLyric-${{ steps.metadata.outputs.installer_version }}-Setup.exe
-            dist/QQMusicLyric-${{ steps.metadata.outputs.installer_version }}-Setup.exe.sha256
+            dist/WindowsTaskbarLyrics-${{ steps.metadata.outputs.installer_version }}-Setup.exe
+            dist/WindowsTaskbarLyrics-${{ steps.metadata.outputs.installer_version }}-Setup.exe.sha256
           if-no-files-found: error
           retention-days: 14
 
@@ -200,14 +200,14 @@ jobs:
       contents: write
 
     steps:
+      - name: Check out release notes
+        uses: actions/checkout@v7
+
       - name: Download installer artifact
         uses: actions/download-artifact@v8
         with:
-          name: QQMusicLyric-${{ needs.build.outputs.installer_version }}-windows-x64
+          name: WindowsTaskbarLyrics-${{ needs.build.outputs.installer_version }}-windows-x64
           path: dist
-
-      - name: Check out release notes
-        uses: actions/checkout@v7
 
       - name: Create GitHub Release
         shell: bash
@@ -219,7 +219,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          installer="dist/QQMusicLyric-${INSTALLER_VERSION}-Setup.exe"
+          installer="dist/WindowsTaskbarLyrics-${INSTALLER_VERSION}-Setup.exe"
           checksum="${installer}.sha256"
           args=(release create "$RELEASE_TAG" "$installer" "$checksum"
                 --repo "$GITHUB_REPOSITORY"

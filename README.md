@@ -131,7 +131,7 @@ GitHub Actions 仅在推送 `v*` 版本标签时执行 Windows x64 Release 构�
 
 Release 正文来自仓库中的 `.github/release-notes.md`。每次发版前，将更新说明写入该文件并随版本修改一起提交，再推送对应标签。Actions 会将文件中的 Markdown 原文用作 Release 内容，不再自动生成默认发布说明。应用内关于页的更新日志也读取同一份 Release 内容。
 
-创建 GitHub Release 时，先同步修改 `src/app_info.h` 与 `installer/QQMusicLyric.iss` 中的版本号，然后推送同版本标签：
+创建 GitHub Release 时，先同步修改 `src/app_info.h` 与 `installer/WindowsTaskbarLyrics.iss` 中的版本号，然后推送同版本标签：
 
 ```powershell
 git tag v2.7.0

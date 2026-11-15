@@ -611,7 +611,7 @@ void requestLatestRelease(uint64_t requestId, UpdateSource source,
             (installerVersion.front() == 'v' || installerVersion.front() == 'V'))
             installerVersion.erase(installerVersion.begin());
         const std::string expectedInstaller =
-            "QQMusicLyric-" + installerVersion + "-Setup.exe";
+            "WindowsTaskbarLyrics-" + installerVersion + "-Setup.exe";
         if (json.contains("assets") && json["assets"].is_array()) {
             for (const auto& asset : json["assets"]) {
                 if (!asset.is_object() || !asset.contains("name") ||

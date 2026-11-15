@@ -30,7 +30,7 @@ if(DEFINED CMAKE_TOOLCHAIN_FILE)
         "Shared vcpkg manifest installation directory")
 endif()
 
-project(QQMusicLyric LANGUAGES CXX)
+project(WindowsTaskbarLyrics LANGUAGES CXX)
 
 include(CTest)
 
@@ -53,7 +53,7 @@ set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/resource.rc
     PROPERTIES OBJECT_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/app.manifest;${CMAKE_CURRENT_SOURCE_DIR}/asset/logo-dark.ico;${CMAKE_CURRENT_SOURCE_DIR}/asset/logo-light.ico;${CMAKE_CURRENT_SOURCE_DIR}/asset/dock_pet_sprites.png")
 
-add_executable(QQMusicLyric
+add_executable(WindowsTaskbarLyrics
     src/main.cpp
     src/graphics/gdiplus_runtime.cpp
     src/graphics/pixel_luminance.cpp
@@ -157,21 +157,20 @@ add_executable(QQMusicLyric
     ${CMAKE_CURRENT_BINARY_DIR}/resource.rc
 )
 
-target_include_directories(QQMusicLyric PRIVATE src)
-set_target_properties(QQMusicLyric PROPERTIES OUTPUT_NAME WindowsTaskbarLyrics)
+target_include_directories(WindowsTaskbarLyrics PRIVATE src)
 
 # 清单文件已通过 resource.rc 嵌入（app.manifest），关闭链接器的默认清单生成，避免重复。
 # Release 使用 Windows 子系统（不弹控制台黑窗），代码入口是 main()，
 # 需显式指定 CRT 入口 mainCRTStartup；Debug 保留控制台便于查看日志
-target_link_options(QQMusicLyric PRIVATE /MANIFEST:NO
+target_link_options(WindowsTaskbarLyrics PRIVATE /MANIFEST:NO
     $<$<CONFIG:Release>:/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup>)
 
-target_compile_definitions(QQMusicLyric PRIVATE
+target_compile_definitions(WindowsTaskbarLyrics PRIVATE
     UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00
     $<$<CONFIG:Release>:QQMUSICLYRIC_RELEASE_BUILD=1>)
-target_compile_options(QQMusicLyric PRIVATE /utf-8 /EHsc)
+target_compile_options(WindowsTaskbarLyrics PRIVATE /utf-8 /EHsc)
 
-target_link_libraries(QQMusicLyric PRIVATE
+target_link_libraries(WindowsTaskbarLyrics PRIVATE
     CURL::libcurl
     nlohmann_json::nlohmann_json
     yaml-cpp::yaml-cpp
@@ -277,7 +276,7 @@ endif()
 
 # CMake owns the deployable application layout. Packaging tools consume this
 # staging tree instead of reaching into a generator-specific build directory.
-install(TARGETS QQMusicLyric
+install(TARGETS WindowsTaskbarLyrics
     RUNTIME_DEPENDENCIES
         PRE_EXCLUDE_REGEXES
             "api-ms-.*"

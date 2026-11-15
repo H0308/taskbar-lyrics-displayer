@@ -1,4 +1,4 @@
-; QQMusicLyric Inno Setup installer
+; WindowsTaskbarLyrics Inno Setup installer
 ; 编译前建议将官方 vc_redist.x64.exe 放到 installer\prereq\。
 ; 如果该文件不存在，脚本仍可编译，但生成的安装包要求目标系统已有
 ; Visual C++ x64 Redistributable；正式发布前应补齐该前置依赖。
@@ -36,18 +36,19 @@
 #endif
 
 [Setup]
+; AppId 是 Inno Setup 的升级身份，沿用旧值以确保旧版本可被覆盖升级。
 AppId=QQMusicLyric
 AppName=Windows 任务栏歌词
 AppVersion={#AppVersion}
 AppPublisher=H0308
 AppPublisherURL=https://github.com/H0308/taskbar-lyrics-displayer
-DefaultDirName={autopf}\QQMusicLyric
+DefaultDirName={autopf}\WindowsTaskbarLyrics
 DefaultGroupName=Windows 任务栏歌词
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 OutputDir=..\dist
-OutputBaseFilename=QQMusicLyric-{#AppVersion}-Setup
+OutputBaseFilename=WindowsTaskbarLyrics-{#AppVersion}-Setup
 SetupIconFile=..\asset\logo-dark.ico
 UninstallDisplayIcon={app}\WindowsTaskbarLyrics.exe
 UninstallDisplayName=Windows 任务栏歌词
