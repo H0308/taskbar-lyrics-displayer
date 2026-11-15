@@ -190,6 +190,10 @@ TEST_CASE("player_source.session_aliases_process_mapping_and_unknown_source") {
         {L"cloudmusic.exe", SmtcPlayerType::NetEase, L"cloudmusic.exe"},
         {L"NETEASEBRIDGE.EXE", SmtcPlayerType::NetEase, L"cloudmusic.exe"},
         {L"汽水音乐", SmtcPlayerType::Soda, L"SodaMusic.exe"},
+        {L"Spotify.exe", SmtcPlayerType::Spotify, L"Spotify.exe"},
+        {L"spotify", SmtcPlayerType::Spotify, L"Spotify.exe"},
+        {L"SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", SmtcPlayerType::Spotify, L"Spotify.exe"},
+        {L"spotifyab.spotifymusic_AnotherPublisher123!SPOTIFY", SmtcPlayerType::Spotify, L"Spotify.exe"},
     };
     for (const auto& item : cases) {
         const auto* source = player_source::find(std::wstring(item.session));
@@ -206,4 +210,17 @@ TEST_CASE("player_source.session_aliases_process_mapping_and_unknown_source") {
     EXPECT_TRUE(player_source::find(std::wstring(L"UnknownPlayer.exe")) == nullptr);
     EXPECT_TRUE(player_source::find(std::wstring()) == nullptr);
     EXPECT_TRUE(player_source::find(SmtcPlayerType::Unknown) == nullptr);
+}
+
+TEST_CASE("player_source.spotify_matching_preserves_application_boundaries") {
+    const wchar_t* rejected[]{
+        L"OtherSpotify.exe", L"SpotifyHelper.exe", L"chrome.exe Spotify",
+        L"Other.SpotifyAB.SpotifyMusic_publisher!Spotify",
+        L"SpotifyAB.SpotifyMusic_!Spotify",
+        L"SpotifyAB.SpotifyMusic_publisher!Other",
+        L"SpotifyAB.SpotifyMusic_publisher!SpotifyExtra",
+        L"SpotifyAB.SpotifyMusic_publisher!Other!Spotify",
+    };
+    for (const auto* session : rejected)
+        EXPECT_TRUE(player_source::find(std::wstring(session)) == nullptr);
 }
