@@ -21,7 +21,8 @@ const Definition* find(SmtcPlayerType player) noexcept;
 const Definition* find(const std::wstring& sessionId) noexcept;
 
 constexpr bool showsTrackInfoBeforeLyrics(SmtcPlayerType player) noexcept {
-    return player == SmtcPlayerType::Soda || player == SmtcPlayerType::Spotify;
+    return player == SmtcPlayerType::QQMusic || player == SmtcPlayerType::NetEase ||
+           player == SmtcPlayerType::Soda || player == SmtcPlayerType::Spotify;
 }
 
 } // namespace player_source

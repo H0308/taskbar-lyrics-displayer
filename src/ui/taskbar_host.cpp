@@ -2510,7 +2510,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const bool sceneChanged = frame.scene != scene_;
         const auto* incomingSource = player_source::find(frame.media.sourceAppUserModelId);
         const bool loadedLyricsFromPrelude = !trackChanged && lyricsChanged && lines.empty() &&
-            incomingSource && incomingSource->player == SmtcPlayerType::Spotify &&
+            incomingSource && player_source::showsTrackInfoBeforeLyrics(incomingSource->player) &&
             isTaskbarMediaScene(scene_) && frame.scene == DisplayScene::Lyrics &&
             frame.currentLine >= 0 && frame.media.playing && frame.animateTransition &&
             !statusText.empty() && lastLyric_ == statusText;

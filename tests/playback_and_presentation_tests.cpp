@@ -31,6 +31,33 @@ private:
 };
 } // namespace
 
+TEST_CASE("presentation.qq_and_netease_show_track_info_until_first_lyric") {
+    for (const auto player : {SmtcPlayerType::QQMusic, SmtcPlayerType::NetEase}) {
+        PresentationModel model;
+        AppSettings settings;
+        PlaybackState playback;
+        IdleFrameInput idle;
+        SmtcSnapshot snap;
+        snap.player = player;
+        snap.sessionAlive = true;
+        snap.status = PlaybackStatus::Playing;
+        snap.title = L"测试歌曲";
+        snap.artist = L"测试歌手";
+        playback.lyricLoading_ = true;
+        EXPECT_EQ(model.update(snap, settings, playback, idle, {}).statusText,
+                  std::wstring(L"测试歌曲 - 测试歌手"));
+
+        playback.lyricLoading_ = false;
+        playback.currentLyrics_ = {{1000, L"第一句"}, {3000, L"第二句"}};
+        snap.positionMs = 950;
+        const auto& frame = model.update(snap, settings, playback, idle, {.lyricsChanged = true});
+        EXPECT_EQ(frame.currentLine, -1);
+        EXPECT_EQ(frame.statusText, std::wstring(L"测试歌曲 - 测试歌手"));
+        snap.positionMs = 1000;
+        EXPECT_EQ(model.updatePlayback(snap).currentLine, 0);
+    }
+}
+
 TEST_CASE("track_identity.qq_stale_timeline_and_netease_song_id") {
     SmtcSnapshot qqSnap;
     qqSnap.sessionAlive = true;

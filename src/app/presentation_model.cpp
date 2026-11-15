@@ -109,15 +109,17 @@ void fillPresentationFrame(PresentationFrame& frame, const SmtcSnapshot& snap,
             frame.statusText.clear();
     } else if (!snap.sessionAlive)
         frame.statusText = notRunningStatus(playback);
-    else if (playback.lyricLoading_ && snap.player != SmtcPlayerType::Spotify)
+    else if (playback.lyricLoading_ && snap.player != SmtcPlayerType::Spotify &&
+             snap.player != SmtcPlayerType::QQMusic && snap.player != SmtcPlayerType::NetEase)
         frame.statusText = L"歌词加载中…";
     else if (snap.player == SmtcPlayerType::Spotify ||
-             (snap.player == SmtcPlayerType::Soda && !playback.currentLyrics_.empty())) {
+             (player_source::showsTrackInfoBeforeLyrics(snap.player) &&
+              (playback.lyricLoading_ || !playback.currentLyrics_.empty()))) {
         frame.statusText = snap.title.empty() ? playback.currentTitle : snap.title;
         const auto& artist = snap.artist.empty() ? playback.currentArtist : snap.artist;
         if (!artist.empty())
             frame.statusText += L" - " + artist;
-        if (snap.player == SmtcPlayerType::Spotify && frame.statusText.empty())
+        if (frame.statusText.empty())
             frame.statusText = L"等待播放…";
     } else if (playback.currentLyrics_.empty()) {
         frame.statusText = playback.currentKey.empty() ? L"等待播放…" : L"暂无歌词";
