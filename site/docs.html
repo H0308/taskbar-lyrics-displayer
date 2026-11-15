@@ -96,7 +96,7 @@
           <h2>快速开始</h2>
           <p>软件仅提供 64 位 Windows 版本。推荐使用 Windows 11；Windows 10 22H2 的核心功能基本可用，但任务栏防遮挡存在兼容性问题，沉浸模式与 Dock 模式尚未在该版本实机验证。音频频谱要求 Windows 10 2004 或更高版本。</p>
           <ol class="doc-steps">
-            <li><strong>下载安装。</strong>从 <a href="https://github.com/H0308/taskbar-lyrics-displayer/releases/latest" target="_blank" rel="noopener">GitHub Releases</a> 或 <a href="https://gitee.com/EPSDA/taskbar-lyrics-displayer/releases" target="_blank" rel="noopener">Gitee Releases</a> 下载安装包。国内网络可优先选择 Gitee。安装后运行 <code>QQMusicLyric.exe</code>。</li>
+            <li><strong>下载安装。</strong>从 <a href="https://github.com/H0308/taskbar-lyrics-displayer/releases/latest" target="_blank" rel="noopener">GitHub Releases</a> 或 <a href="https://gitee.com/EPSDA/taskbar-lyrics-displayer/releases" target="_blank" rel="noopener">Gitee Releases</a> 下载安装包。国内网络可优先选择 Gitee。安装后运行 <code>WindowsTaskbarLyrics.exe</code>。</li>
             <li><strong>配置播放器。</strong>支持 QQ 音乐、网易云音乐、汽水音乐和 Spotify。QQ 音乐需要开启 SMTC，网易云音乐需要安装 BetterNCM 和 InfLink-rs，汽水音乐和 Spotify 使用原生 SMTC，具体说明见下一章。</li>
             <li><strong>播放音乐。</strong>打开已配置的桌面播放器并播放歌曲，封面、歌曲信息和歌词会自动显示在任务栏。多个播放器同时运行时，软件会根据当前媒体会话和播放状态自动选择来源。</li>
             <li><strong>调整显示。</strong>右键托盘图标进入「设置…」，选择展示模式、字体、歌词颜色和其他功能。需要登录 Windows 后自动运行时，在托盘菜单勾选「开机自启动」，无需管理员权限。</li>
@@ -107,7 +107,7 @@
         <section class="doc-section" id="players">
           <h2>配置音乐播放器</h2>
           <h3>QQ 音乐桌面版</h3>
-          <p>在 QQ 音乐自身设置中开启「显示系统媒体传输控件（SMTC）」，然后播放歌曲。如果软件已经运行但仍未识别，重启 QQ 音乐和 <code>QQMusicLyric.exe</code> 后重试。</p>
+          <p>在 QQ 音乐自身设置中开启「显示系统媒体传输控件（SMTC）」，然后播放歌曲。如果软件已经运行但仍未识别，重启 QQ 音乐和 <code>WindowsTaskbarLyrics.exe</code> 后重试。</p>
           <h3>汽水音乐桌面版</h3>
           <p>打开汽水音乐桌面客户端并播放歌曲，软件通过原生 SMTC 获取歌曲信息、封面、播放状态和进度。自动匹配优先使用汽水原生逐字歌词或 LRC，试听歌词按片段起点对齐；未命中时继续查询其他来源。手动搜索可以选择全部五个歌词源的候选。</p>
           <h3>Spotify Windows（64 位）</h3>
@@ -118,7 +118,7 @@
           <ol>
             <li>从 <a href="https://github.com/std-microblock/BetterNCM-Installer/releases/latest" target="_blank" rel="noopener">BetterNCM Installer</a> 下载并安装 BetterNCM。</li>
             <li>打开网易云音乐的 BetterNCM 插件商店，搜索并安装 <strong>InfLink-rs</strong>。插件商店不可用时，可从 <a href="https://github.com/apoint123/inflink-rs/releases/latest" target="_blank" rel="noopener">InfLink-rs Releases</a> 下载并手动安装。</li>
-            <li>按提示重启网易云音乐，再运行或重启 <code>QQMusicLyric.exe</code>。</li>
+            <li>按提示重启网易云音乐，再运行或重启 <code>WindowsTaskbarLyrics.exe</code>。</li>
           </ol>
           <div class="doc-callout doc-callout-warning"><strong>不要混用插件</strong><p>只安装 InfLink-rs，不要同时安装旧版 InfLink。酷狗音乐的 SMTC 会话目前未适配，酷狗歌词可供所有已适配播放器自动匹配或手动选择。</p></div>
         </section>
