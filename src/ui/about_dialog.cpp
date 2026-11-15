@@ -1580,7 +1580,7 @@ struct AboutDialog::Impl {
 
     void paint(fluent::FluentDialogSurface::Painter& painter, float, float) {
         const auto& p = fluent::palette();
-        painter.drawText(L"QQ 音乐/网易云任务栏歌词", painter.textFormat(fluent::font_sizes::brandTitle, 600), titleRect,
+        painter.drawText(app_info::kName, painter.textFormat(fluent::font_sizes::brandTitle, 600), titleRect,
                          p.text);
         painter.drawText(L"把歌词带到 Windows 任务栏", painter.textFormat(fluent::font_sizes::label, 400), subtitleRect,
                          p.textSecondary);
