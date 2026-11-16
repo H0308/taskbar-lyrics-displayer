@@ -26,14 +26,56 @@ std::shared_ptr<const std::vector<uint8_t>> readThumbnail(
     const winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionMediaProperties& props,
     uint64_t readSequence);
 
+struct PlaybackSample {
+    bool valid = false;
+    PlaybackStatus status = PlaybackStatus::Other;
+    bool hasControls = false;
+    bool canPrev = false;
+    bool canPlayPause = false;
+    bool canNext = false;
+};
+
+struct TimelineSample {
+    bool valid = false;
+    int64_t positionMs = 0;
+    int64_t durationMs = 0;
+    int64_t anchorUtcMs = 0;
+};
+
 template <typename PlaybackInfo>
-inline void applyPlaybackControls(const PlaybackInfo& info, SmtcSnapshot& snapshot) {
-    auto controls = info.Controls();
-    if (!controls)
+inline PlaybackSample readPlaybackSample(const PlaybackInfo& info) {
+    PlaybackSample sample;
+    if (!info)
+        return sample;
+    sample.valid = true;
+    sample.status = mapStatus(info.PlaybackStatus());
+    if (auto controls = info.Controls()) {
+        sample.hasControls = true;
+        sample.canPrev = controls.IsPreviousEnabled();
+        sample.canPlayPause = controls.IsPlayEnabled() || controls.IsPauseEnabled();
+        sample.canNext = controls.IsNextEnabled();
+    }
+    return sample;
+}
+
+template <typename TimelineProperties>
+inline TimelineSample readTimelineSample(const TimelineProperties& timeline) {
+    TimelineSample sample;
+    if (!timeline)
+        return sample;
+    sample.valid = true;
+    sample.positionMs = timeSpanMs(timeline.Position());
+    sample.durationMs = timeSpanMs(timeline.EndTime());
+    sample.anchorUtcMs = lastUpdatedMs(timeline.LastUpdatedTime());
+    return sample;
+}
+
+inline void applyPlaybackControls(const PlaybackSample& sample, SmtcSnapshot& snapshot) {
+    if (!sample.valid || !sample.hasControls)
         return;
-    snapshot.canPrev = controls.IsPreviousEnabled();
-    snapshot.canPlayPause = controls.IsPlayEnabled() || controls.IsPauseEnabled();
-    snapshot.canNext = controls.IsNextEnabled();
+    snapshot.canPrev = sample.canPrev;
+    snapshot.canPlayPause = sample.canPlayPause;
+    snapshot.canNext = sample.canNext;
 }
 
 inline void advancePlayingPosition(SmtcSnapshot& snapshot, int64_t nowMs,

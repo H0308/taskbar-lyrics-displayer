@@ -31,27 +31,28 @@ void SampledSmtcAdapter::prepareInitialSnapshot(SmtcSnapshot& snapshot) const {
     timeline_.initialize(snapshot, nowUtcMs());
 }
 
-void SampledSmtcAdapter::refreshTimeline(const Session& session, SmtcSnapshot& snapshot,
+void SampledSmtcAdapter::refreshTimeline(const PlaybackSample& playback,
+                                         const TimelineSample& timeline,
+                                         SmtcSnapshot& snapshot,
                                          int64_t eventNowMs) {
-    auto info = session.GetPlaybackInfo();
-    if (!info)
+    if (!playback.valid)
         return;
 
-    timeline_.updatePlayback(snapshot, mapStatus(info.PlaybackStatus()), eventNowMs);
-    applyPlaybackControls(info, snapshot);
+    timeline_.updatePlayback(snapshot, playback.status, eventNowMs);
+    applyPlaybackControls(playback, snapshot);
 
-    auto timeline = session.GetTimelineProperties();
-    if (!timeline)
+    if (!timeline.valid)
         return;
-    timeline_.updateSample(snapshot, timeSpanMs(timeline.Position()),
-                           lastUpdatedMs(timeline.LastUpdatedTime()),
-                           timeSpanMs(timeline.EndTime()), eventNowMs);
+    timeline_.updateSample(snapshot, timeline.positionMs, timeline.anchorUtcMs,
+                           timeline.durationMs, eventNowMs);
 }
 
-void SampledSmtcAdapter::refreshPlayback(const Session& session, SmtcSnapshot& snapshot,
+void SampledSmtcAdapter::refreshPlayback(const PlaybackSample& playback,
+                                         const TimelineSample& timeline,
+                                         SmtcSnapshot& snapshot,
                                          int64_t eventNowMs) {
     // 与时间线更新共用一次状态读取，保留旧状态供暂停／恢复的锚点换算使用。
-    refreshTimeline(session, snapshot, eventNowMs);
+    refreshTimeline(playback, timeline, snapshot, eventNowMs);
 }
 
 SmtcSnapshot SampledSmtcAdapter::snapshot(const SmtcSnapshot& source, int64_t nowMs) const {

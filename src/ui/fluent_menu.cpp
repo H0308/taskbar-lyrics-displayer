@@ -39,7 +39,7 @@ constexpr ULONGLONG kRevealDurationMs = 100;
 // 子菜单只保留很短的防误触延迟；菜单内容已经在 UI 线程准备完成，
 // 过长的延迟会被感知为打开卡顿。
 constexpr UINT kSubmenuDelayMs = 150;
-// 链外点击关闭菜单（由 WH_MOUSE_LL 钩子投递）
+// 链外点击关闭菜单（由 WM_INPUT 监听器投递）
 constexpr UINT kMsgOutsideClick = WM_APP + 30;
 
 struct MenuWnd {
@@ -64,6 +64,7 @@ struct MenuWnd {
     float textWidthDip = 0.0f;
     bool frameReady = false;
     bool backdrop = false;
+    bool closing = false;
 
     void prepareRowText(float widthDip) {
         if (rowText.size() == items.size() && textWidthDip == widthDip)
@@ -120,7 +121,7 @@ struct MenuWnd {
     void closeChain();    // 关闭整棵菜单树
     void closeChainFrom();// 关闭自身及子链（退回父菜单）
     void openSubmenu(bool animate = false); // 为当前悬停行打开子菜单
-    LRESULT handleMsg(UINT msg, WPARAM wp, LPARAM lp);
+    LRESULT handleMsg(HWND h, UINT msg, WPARAM wp, LPARAM lp);
 
     void releaseNativeIconBitmaps() {
         for (auto*& bitmap : nativeIconBitmaps) {
@@ -377,42 +378,54 @@ struct MenuWnd {
 MenuWnd* g_root = nullptr;
 constexpr wchar_t kMenuClass[] = L"QQMusicLyricFluentMenu";
 
-// 菜单存活期间的低级鼠标钩子：消隐不能依赖 WM_ACTIVATE（点任务栏空白、托盘区、
-// WS_EX_NOACTIVATE 窗口等不会切换前台窗口，WA_INACTIVE 永远不触发），
-// 必须直接检测“点击发生在菜单链之外”这个事件本身
-HHOOK g_mouseHook = nullptr;
+// 菜单存活期间的全局鼠标点击检测：消隐不能依赖 WM_ACTIVATE（点任务栏空白、
+// 托盘区、WS_EX_NOACTIVATE 窗口等不会切换前台窗口，WA_INACTIVE 不触发），
+// 通过进程级 RIDEV_INPUTSINK 在根菜单上接收点击通知，避免系统级 WH_MOUSE_LL 钩子在 UI 线程卡顿时冻结全系统鼠标输入
+HWND g_rawMouseHwnd = nullptr;
 
-LRESULT CALLBACK lowLevelMouseProc(int code, WPARAM wp, LPARAM lp) {
-    if (code == HC_ACTION && g_root) {
-        switch (wp) {
-        case WM_LBUTTONDOWN:
-        case WM_RBUTTONDOWN:
-        case WM_MBUTTONDOWN:
-        case WM_NCLBUTTONDOWN:
-        case WM_NCRBUTTONDOWN:
-        case WM_NCMBUTTONDOWN: {
-            auto* mhs = reinterpret_cast<MSLLHOOKSTRUCT*>(lp);
-            bool inside = false;
-            for (MenuWnd* m = g_root; m; m = m->child) {
-                if (!m->hwnd)
-                    continue;
-                RECT rc;
-                GetWindowRect(m->hwnd, &rc);
-                if (PtInRect(&rc, mhs->pt)) {
-                    inside = true;
-                    break;
-                }
-            }
-            // 不在任何一级菜单窗口内：投递消息异步关闭，避免在钩子里同步销毁窗口
-            if (!inside)
-                PostMessageW(g_root->hwnd, kMsgOutsideClick, 0, 0);
-            break;
-        }
-        default:
-            break;
-        }
+bool pointInsideMenuChain(POINT pt) {
+    for (MenuWnd* m = g_root; m; m = m->child) {
+        if (!m->hwnd)
+            continue;
+        RECT rc;
+        if (GetWindowRect(m->hwnd, &rc) && PtInRect(&rc, pt))
+            return true;
     }
-    return CallNextHookEx(nullptr, code, wp, lp);
+    return false;
+}
+
+void registerRawMouseSink(HWND rootHwnd) {
+    if (!rootHwnd || g_rawMouseHwnd == rootHwnd)
+        return;
+    RAWINPUTDEVICE rid{0x01, 0x02, RIDEV_INPUTSINK, rootHwnd};
+    if (RegisterRawInputDevices(&rid, 1, sizeof(rid)))
+        g_rawMouseHwnd = rootHwnd;
+}
+
+void unregisterRawMouseSink(HWND rootHwnd) {
+    if (!rootHwnd || g_rawMouseHwnd != rootHwnd)
+        return;
+    RAWINPUTDEVICE rid{0x01, 0x02, RIDEV_REMOVE, nullptr};
+    RegisterRawInputDevices(&rid, 1, sizeof(rid));
+    g_rawMouseHwnd = nullptr;
+}
+
+bool isOutsideRawMouseClick(LPARAM lp) {
+    RAWINPUT raw{};
+    UINT size = sizeof(raw);
+    if (GetRawInputData(reinterpret_cast<HRAWINPUT>(lp), RID_INPUT, &raw, &size, sizeof(RAWINPUTHEADER)) ==
+        static_cast<UINT>(-1)) {
+        return false;
+    }
+    if (raw.header.dwType != RIM_TYPEMOUSE)
+        return false;
+    constexpr USHORT kDownFlags =
+        RI_MOUSE_LEFT_BUTTON_DOWN | RI_MOUSE_RIGHT_BUTTON_DOWN | RI_MOUSE_MIDDLE_BUTTON_DOWN;
+    if ((raw.data.mouse.usButtonFlags & kDownFlags) == 0)
+        return false;
+    DWORD msgPos = GetMessagePos();
+    POINT pt{GET_X_LPARAM(static_cast<LPARAM>(msgPos)), GET_Y_LPARAM(static_cast<LPARAM>(msgPos))};
+    return !pointInsideMenuChain(pt);
 }
 
 void MenuWnd::closeChildren() {
@@ -424,15 +437,16 @@ void MenuWnd::closeChildren() {
 }
 
 void MenuWnd::closeAll() {
+    if (closing)
+        return;
+    closing = true;
     closeChildren();
     if (this == g_root)
         g_root = nullptr;
     if (parent && parent->child == this)
         parent->child = nullptr;
-    HWND h = hwnd;
-    hwnd = nullptr;
-    if (h)
-        DestroyWindow(h); // WM_DESTROY 中 delete this
+    if (hwnd)
+        DestroyWindow(hwnd); // WM_NCDESTROY 中 delete this
 }
 
 // 创建一级菜单窗口（根或子菜单）
@@ -494,9 +508,21 @@ MenuWnd* createMenuLevel(HWND owner, MenuWnd* parent, std::vector<FluentMenuItem
         } else {
             self = reinterpret_cast<MenuWnd*>(GetWindowLongPtrW(h, GWLP_USERDATA));
         }
+        if (msg == WM_NCDESTROY) {
+            SetWindowLongPtrW(h, GWLP_USERDATA, 0);
+            if (self) {
+                if (self == g_root)
+                    g_root = nullptr;
+                if (self->parent && self->parent->child == self)
+                    self->parent->child = nullptr;
+                self->hwnd = nullptr;
+                delete self;
+            }
+            return DefWindowProcW(h, msg, wp, lp);
+        }
         if (!self)
             return DefWindowProcW(h, msg, wp, lp);
-        return self->handleMsg(msg, wp, lp);
+        return self->handleMsg(h, msg, wp, lp);
     };
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.lpszClassName = kMenuClass;
@@ -545,9 +571,9 @@ MenuWnd* createMenuLevel(HWND owner, MenuWnd* parent, std::vector<FluentMenuItem
 } // namespace
 
 // 消息处理放在结构外实现（lambda 转 WNDPROC 需要无捕获静态函数）
-LRESULT MenuWnd::handleMsg(UINT msg, WPARAM wp, LPARAM lp) {
+LRESULT MenuWnd::handleMsg(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     auto dipY = [&](LPARAM l) {
-        return GET_Y_LPARAM(l) / dipScale(GetDpiForWindow(hwnd));
+        return GET_Y_LPARAM(l) / dipScale(GetDpiForWindow(h));
     };
     switch (msg) {
     case WM_NCCALCSIZE:
@@ -700,33 +726,35 @@ LRESULT MenuWnd::handleMsg(UINT msg, WPARAM wp, LPARAM lp) {
         // 下次弹出时按新 DPI 重建，避免旧尺寸内容被拉伸
         closeChain();
         return 0;
+    case WM_INPUT:
+        if (!parent && !closing && g_root == this && isOutsideRawMouseClick(lp))
+            PostMessageW(h, kMsgOutsideClick, 0, 0);
+        // 必须交给 DefWindowProcW 完成 RIM_INPUT 清理，避免遗留原始输入状态
+        break;
     case kMsgOutsideClick:
-        closeChain();
+        if (!closing)
+            closeChain();
         return 0;
     case WM_DESTROY: {
-        KillTimer(hwnd, kTimerSubmenu);
-        KillTimer(hwnd, kTimerReveal);
-        // 只有根菜单持有鼠标钩子
-        if (!parent && g_mouseHook) {
-            UnhookWindowsHookEx(g_mouseHook);
-            g_mouseHook = nullptr;
-        }
+        closing = true;
+        KillTimer(h, kTimerSubmenu);
+        KillTimer(h, kTimerReveal);
+        if (!parent)
+            unregisterRawMouseSink(h);
         releaseDrawingResources();
         if (fmt) {
             fmt->Release();
             fmt = nullptr;
         }
-        MenuWnd* self = this;
-        if (self == g_root)
+        if (this == g_root)
             g_root = nullptr;
-        if (parent && parent->child == self)
+        if (parent && parent->child == this)
             parent->child = nullptr;
         hwnd = nullptr;
-        delete self;
         return 0;
     }
     }
-    return DefWindowProcW(hwnd, msg, wp, lp);
+    return DefWindowProcW(h, msg, wp, lp);
 }
 
 void MenuWnd::closeChain() {
@@ -742,7 +770,7 @@ void MenuWnd::closeChainFrom() {
 }
 
 void MenuWnd::openSubmenu(bool animate) {
-    if (!selectable(hover) || items[hover].submenu.empty())
+    if (closing || !hwnd || !selectable(hover) || items[hover].submenu.empty())
         return;
     // 返回同一个父菜单项时复用现有子窗口，不重建或重复播放淡入动画。
     if (child && child->parentRow == hover)
@@ -754,19 +782,22 @@ void MenuWnd::openSubmenu(bool animate) {
     RECT rc;
     GetWindowRect(hwnd, &rc);
     POINT pt{rc.right, rc.top + static_cast<int>((y - kPadY) * s)};
-    child = createMenuLevel(hwnd, this, items[hover].submenu, nullptr, pt, animate);
-    if (child)
-        SetForegroundWindow(child->hwnd);
+    MenuWnd* created = createMenuLevel(hwnd, this, items[hover].submenu, nullptr, pt, animate);
+    if (created && created->hwnd) {
+        child = created;
+        SetForegroundWindow(created->hwnd);
+    }
 }
 
 void FluentMenu::show(HWND owner, POINT screenPt, std::vector<FluentMenuItem> items, Callback cb) {
     dismiss();
     g_root = createMenuLevel(owner, nullptr, std::move(items), &cb, screenPt);
-    if (g_root) {
-        SetForegroundWindow(g_root->hwnd);
-        // 菜单存活期间全局监听链外点击；低级钩子回调在本线程消息循环中执行
-        g_mouseHook = SetWindowsHookExW(WH_MOUSE_LL, lowLevelMouseProc,
-                                        GetModuleHandleW(nullptr), 0);
+    if (g_root && g_root->hwnd) {
+        HWND rootHwnd = g_root->hwnd;
+        SetForegroundWindow(rootHwnd);
+        // 菜单存活期间通过 Raw Input 接收点击；确认根菜单未在切换前台期间关闭再注册。
+        if (g_root && g_root->hwnd == rootHwnd)
+            registerRawMouseSink(rootHwnd);
     }
 }
 

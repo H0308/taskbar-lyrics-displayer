@@ -107,22 +107,22 @@ bool QqMusicSmtcAdapter::shouldDropStale(
     return true;
 }
 
-void QqMusicSmtcAdapter::refreshTimeline(const Session& session,
+void QqMusicSmtcAdapter::refreshTimeline(const PlaybackSample&,
+                                         const TimelineSample& timeline,
                                          SmtcSnapshot& snapshot,
                                          int64_t eventNowMs) {
-    auto timeline = session.GetTimelineProperties();
-    if (!timeline)
+    if (!timeline.valid)
         return;
 
-    int64_t newPos = timeSpanMs(timeline.Position());
+    int64_t newPos = timeline.positionMs;
     // 旧歌残留的迟到事件：duration/position 整体属于上一首歌，全部丢弃。
     if (isResidualTimeline(newPos, eventNowMs)) {
         snapshot.timelineStale = true;
         return;
     }
 
-    snapshot.durationMs = timeSpanMs(timeline.EndTime());
-    int64_t newAnchor = lastUpdatedMs(timeline.LastUpdatedTime());
+    snapshot.durationMs = timeline.durationMs;
+    int64_t newAnchor = timeline.anchorUtcMs;
     if (newAnchor == 0)
         newAnchor = eventNowMs;
 
@@ -160,14 +160,14 @@ void QqMusicSmtcAdapter::refreshTimeline(const Session& session,
     }
 }
 
-void QqMusicSmtcAdapter::refreshPlayback(const Session& session,
+void QqMusicSmtcAdapter::refreshPlayback(const PlaybackSample& playback,
+                                         const TimelineSample& timeline,
                                          SmtcSnapshot& snapshot,
                                          int64_t eventNowMs) {
-    auto info = session.GetPlaybackInfo();
-    if (!info)
+    if (!playback.valid)
         return;
 
-    auto newStatus = mapStatus(info.PlaybackStatus());
+    auto newStatus = playback.status;
     if (newStatus != snapshot.status)
         lastStatusChangeMs_ = eventNowMs;
     const PlaybackStatus previousStatus = snapshot.status;
@@ -179,14 +179,14 @@ void QqMusicSmtcAdapter::refreshPlayback(const Session& session,
     snapshot.status = newStatus;
     bool smoothUsed = false;
     int64_t newPos = 0;
-    auto timeline = session.GetTimelineProperties();
-    if (timeline && isResidualTimeline(timeSpanMs(timeline.Position()), eventNowMs)) {
-        timeline = nullptr; // 残留事件只更新播放状态/控件，不采用其位置
+    bool useTimeline = timeline.valid;
+    if (useTimeline && isResidualTimeline(timeline.positionMs, eventNowMs)) {
+        useTimeline = false; // 残留事件只更新播放状态/控件，不采用其位置
         snapshot.timelineStale = true;
     }
-    if (timeline) {
-        newPos = timeSpanMs(timeline.Position());
-        int64_t newAnchor = lastUpdatedMs(timeline.LastUpdatedTime());
+    if (useTimeline) {
+        newPos = timeline.positionMs;
+        int64_t newAnchor = timeline.anchorUtcMs;
         if (newAnchor == 0)
             newAnchor = eventNowMs;
         if (eventNowMs - newAnchor > 2000)
@@ -223,7 +223,7 @@ void QqMusicSmtcAdapter::refreshPlayback(const Session& session,
         snapshot.anchorUtcMs = eventNowMs;
     }
 
-    applyPlaybackControls(info, snapshot);
+    applyPlaybackControls(playback, snapshot);
 }
 
 SmtcSnapshot QqMusicSmtcAdapter::snapshot(const SmtcSnapshot& source,

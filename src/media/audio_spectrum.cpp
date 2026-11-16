@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -128,7 +129,7 @@ DWORD findPlayerAudioPid(const std::wstring& processName) {
 // ActivateAudioInterfaceAsync 完成回调：把结果转交给等待中的捕获线程
 class ActivateHandler : public IActivateAudioInterfaceCompletionHandler {
 public:
-    explicit ActivateHandler(HANDLE done) : done_(done) {}
+    ActivateHandler() : done_(CreateEventW(nullptr, TRUE, FALSE, nullptr)) {}
 
     STDMETHOD(QueryInterface)(REFIID riid, void** ppv) override {
         if (riid == __uuidof(IUnknown) ||
@@ -152,24 +153,55 @@ public:
     STDMETHOD(ActivateCompleted)(IActivateAudioInterfaceAsyncOperation* op) override {
         HRESULT hrAct = E_FAIL;
         IUnknown* unk = nullptr;
+        IAudioClient* client = nullptr;
         HRESULT hr = op->GetActivateResult(&hrAct, &unk);
         if (SUCCEEDED(hr))
             hr = hrAct;
         if (SUCCEEDED(hr) && unk)
             hr = unk->QueryInterface(__uuidof(IAudioClient),
-                                     reinterpret_cast<void**>(&client_));
+                                     reinterpret_cast<void**>(&client));
         if (unk)
             unk->Release();
-        hr_ = hr;
-        SetEvent(done_);
+        HANDLE eventToSet = nullptr;
+        {
+            std::lock_guard<std::mutex> lk(mutex_);
+            if (abandoned_) {
+                releaseCom(client);
+                return S_OK;
+            }
+            hr_ = hr;
+            client_ = client;
+            eventToSet = done_;
+        }
+        if (eventToSet)
+            SetEvent(eventToSet);
         return S_OK;
     }
 
-    HRESULT hr_ = E_FAIL;
-    IAudioClient* client_ = nullptr;
+    void waitAndTake(DWORD timeoutMs, HRESULT& hrOut, IAudioClient*& clientOut) {
+        if (done_)
+            WaitForSingleObject(done_, timeoutMs);
+        std::lock_guard<std::mutex> lk(mutex_);
+        abandoned_ = true;
+        hrOut = hr_;
+        clientOut = client_;
+        client_ = nullptr;
+    }
+
+    HANDLE eventHandle() const noexcept { return done_; }
 
 private:
-    HANDLE done_;
+    ~ActivateHandler() {
+        releaseCom(client_);
+        if (done_)
+            CloseHandle(done_);
+    }
+
+    std::mutex mutex_;
+    HANDLE done_ = nullptr;
+    HRESULT hr_ = E_FAIL;
+    IAudioClient* client_ = nullptr;
+    bool abandoned_ = false;
     ULONG ref_ = 1;
 };
 
@@ -367,21 +399,17 @@ void AudioSpectrum::run() {
         pv.blob.cbSize = sizeof(actParams);
         pv.blob.pBlobData = reinterpret_cast<BYTE*>(&actParams);
 
-        HANDLE done = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-        auto* handler = new ActivateHandler(done);
+        auto* handler = new ActivateHandler();
         IActivateAudioInterfaceAsyncOperation* op = nullptr;
-        HRESULT hr = ActivateAudioInterfaceAsync(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
-                                                 __uuidof(IAudioClient), &pv, handler, &op);
+        HRESULT hr = handler->eventHandle()
+            ? ActivateAudioInterfaceAsync(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
+                                          __uuidof(IAudioClient), &pv, handler, &op)
+            : E_OUTOFMEMORY;
         IAudioClient* client = nullptr;
-        if (SUCCEEDED(hr)) {
-            WaitForSingleObject(done, 5000);
-            hr = handler->hr_;
-            client = handler->client_;
-            handler->client_ = nullptr;
-        }
+        if (SUCCEEDED(hr))
+            handler->waitAndTake(5000, hr, client);
         handler->Release();
         releaseCom(op);
-        CloseHandle(done);
         if (FAILED(hr) || !client) {
             releaseCom(client);
             sleepOrStop(2000);
@@ -405,7 +433,7 @@ void AudioSpectrum::run() {
         HANDLE dataReady = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         IAudioCaptureClient* capture = nullptr;
         if (SUCCEEDED(hr))
-            hr = client->SetEventHandle(dataReady);
+            hr = dataReady ? client->SetEventHandle(dataReady) : E_OUTOFMEMORY;
         if (SUCCEEDED(hr))
             hr = client->GetService(__uuidof(IAudioCaptureClient),
                                     reinterpret_cast<void**>(&capture));
@@ -460,7 +488,8 @@ void AudioSpectrum::run() {
         client->Stop();
         releaseCom(capture);
         releaseCom(client);
-        CloseHandle(dataReady);
+        if (dataReady)
+            CloseHandle(dataReady);
         analyzer.publishZeros();
         if (!reconnectRequested_.load(std::memory_order_acquire))
             sleepOrStop(1000); // 会话断开（QQ 重启等）后重建

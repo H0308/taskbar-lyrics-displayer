@@ -13,6 +13,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cwchar>
+#include <deque>
 #include <mutex>
 #include <sstream>
 #include <thread>
@@ -122,6 +123,8 @@ std::wstring sessionSourceAppUserModelId(const Session& session) {
 } // namespace
 
 struct SmtcMonitor::Impl {
+    enum class ControlAction { PlayPause, SkipNext, SkipPrevious };
+
     struct RefreshSignal {
         std::mutex mtx;
         std::condition_variable cv;
@@ -129,6 +132,7 @@ struct SmtcMonitor::Impl {
         bool requested = false;
         bool rebuildWatchers = false;
         bool mediaPropertiesChanged = false;
+        std::deque<ControlAction> pendingControls;
     };
 
     struct ThumbnailRequest {
@@ -200,19 +204,16 @@ struct SmtcMonitor::Impl {
         {
             std::lock_guard<std::mutex> lk(refreshSignal->mtx);
             refreshSignal->stopping = true;
+            refreshSignal->pendingControls.clear();
         }
         refreshSignal->cv.notify_all();
+        // 先结束轮询线程（其内部会在 MTA 退出前撤销所有 SMTC 事件和会话对象），
+        // 再停止封面线程，确保不存在跨套间的 WinRT 析构。
         if (pollThread.joinable())
             pollThread.join();
-        timelineRevoker.revoke();
-        selectedPropsRevoker.revoke();
-        currentSessionRevoker.revoke();
-        sessionsRevoker.revoke();
-        sessionWatchers.clear();
         {
             std::lock_guard<std::mutex> lk(thumbnailMtx);
             thumbnailStopping = true;
-            thumbnailRequest = {};
         }
         thumbnailCv.notify_all();
         if (thumbnailThread.joinable())
@@ -229,6 +230,17 @@ struct SmtcMonitor::Impl {
             signal->requested = true;
             signal->rebuildWatchers = signal->rebuildWatchers || rebuildWatchers;
             signal->mediaPropertiesChanged = signal->mediaPropertiesChanged || mediaPropertiesChanged;
+        }
+        signal->cv.notify_one();
+    }
+
+    static void requestControl(const std::shared_ptr<RefreshSignal>& signal,
+                               ControlAction action) {
+        {
+            std::lock_guard<std::mutex> lk(signal->mtx);
+            if (signal->stopping)
+                return;
+            signal->pendingControls.push_back(action);
         }
         signal->cv.notify_one();
     }
@@ -269,8 +281,10 @@ struct SmtcMonitor::Impl {
                     thumbnailCv.wait(lk, [this] {
                         return thumbnailStopping || thumbnailRequest.props;
                     });
-                    if (thumbnailStopping)
+                    if (thumbnailStopping) {
+                        thumbnailRequest = {};
                         break;
+                    }
                     request = std::move(thumbnailRequest);
                     thumbnailRequest = {};
                 }
@@ -319,42 +333,77 @@ struct SmtcMonitor::Impl {
         });
     }
 
-    // 调用方持有快照锁；图片流读取独立于歌曲信息和播放状态的提交。
-    void requestThumbnail(
-        const GlobalSystemMediaTransportControlsSessionMediaProperties& props) {
-        if (!props || thumbCache_ || thumbnailPending ||
-            smtc::nowUtcMs() < thumbnailRetryAtMs)
-            return;
-        const bool hasThumbnail = static_cast<bool>(props.Thumbnail());
-        if (thumbnailDiagnosticsGeneration != thumbnailGeneration ||
-            thumbnailReferenceState != static_cast<int>(hasThumbnail)) {
-            thumbnailDiagnosticsGeneration = thumbnailGeneration;
-            thumbnailReferenceState = static_cast<int>(hasThumbnail);
-            runtime_log::writef(
-                L"[cover][smtc] thumbnail-%s generation=%llu source=\"%s\" title=\"%s\" artist=\"%s\" album=\"%s\"",
-                hasThumbnail ? L"provided" : L"missing",
-                static_cast<unsigned long long>(thumbnailGeneration), snap.sourceAppUserModelId.c_str(),
-                snap.title.c_str(), snap.artist.c_str(), snap.album.c_str());
-        }
-        if (!hasThumbnail)
-            return;
-        const uint64_t sequence = ++thumbnailReadSequence;
-        {
-            std::lock_guard<std::mutex> lk(thumbnailMtx);
-            if (thumbnailRequest.props) {
+    void clearPendingThumbnail(uint64_t generation) {
+        std::lock_guard<std::mutex> lk(mtx);
+        if (thumbnailGeneration == generation)
+            thumbnailPending = false;
+    }
+
+    // 在快照锁外访问 WinRT 缩略图引用，再单独入队给封面线程。
+    void enqueueThumbnailCheck(
+        const GlobalSystemMediaTransportControlsSessionMediaProperties& props,
+        uint64_t generation, const std::wstring& source,
+        const std::wstring& title, const std::wstring& artist,
+        const std::wstring& album) {
+        bool queued = false;
+        try {
+            const bool hasThumbnail = static_cast<bool>(props.Thumbnail());
+            if (thumbnailDiagnosticsGeneration != generation ||
+                thumbnailReferenceState != static_cast<int>(hasThumbnail)) {
+                thumbnailDiagnosticsGeneration = generation;
+                thumbnailReferenceState = static_cast<int>(hasThumbnail);
                 runtime_log::writef(
-                    L"[cover][smtc] read-discarded sequence=%llu generation=%llu title=\"%s\" reason=request-replaced-before-read",
-                    static_cast<unsigned long long>(thumbnailRequest.sequence),
-                    static_cast<unsigned long long>(thumbnailRequest.generation), thumbnailRequest.title.c_str());
+                    L"[cover][smtc] thumbnail-%s generation=%llu source=\"%s\" title=\"%s\" artist=\"%s\" album=\"%s\"",
+                    hasThumbnail ? L"provided" : L"missing",
+                    static_cast<unsigned long long>(generation), source.c_str(),
+                    title.c_str(), artist.c_str(), album.c_str());
             }
-            thumbnailRequest = { props, thumbnailGeneration, sequence,
-                                 snap.title, snap.artist, snap.album, snap.sourceAppUserModelId };
-            thumbnailPending = true;
-            runtime_log::writef(L"[cover][smtc] read-queued sequence=%llu generation=%llu title=\"%s\"",
-                               static_cast<unsigned long long>(sequence),
-                               static_cast<unsigned long long>(thumbnailGeneration), snap.title.c_str());
+            if (!hasThumbnail) {
+                clearPendingThumbnail(generation);
+                return;
+            }
+            const uint64_t sequence = ++thumbnailReadSequence;
+            {
+                std::lock_guard<std::mutex> lk(thumbnailMtx);
+                if (thumbnailStopping) {
+                    clearPendingThumbnail(generation);
+                    return;
+                }
+                if (thumbnailRequest.props) {
+                    runtime_log::writef(
+                        L"[cover][smtc] read-discarded sequence=%llu generation=%llu title=\"%s\" reason=request-replaced-before-read",
+                        static_cast<unsigned long long>(thumbnailRequest.sequence),
+                        static_cast<unsigned long long>(thumbnailRequest.generation), thumbnailRequest.title.c_str());
+                }
+                thumbnailRequest = { props, generation, sequence,
+                                     title, artist, album, source };
+                queued = true;
+                runtime_log::writef(L"[cover][smtc] read-queued sequence=%llu generation=%llu title=\"%s\"",
+                                   static_cast<unsigned long long>(sequence),
+                                   static_cast<unsigned long long>(generation), title.c_str());
+            }
+            thumbnailCv.notify_one();
+        } catch (const winrt::hresult_error& error) {
+            if (!queued)
+                clearPendingThumbnail(generation);
+            if (thumbnailDiagnosticsGeneration != generation || thumbnailReferenceState != -2) {
+                thumbnailDiagnosticsGeneration = generation;
+                thumbnailReferenceState = -2;
+                runtime_log::writef(
+                    L"[cover][smtc] request-failed generation=%llu title=\"%s\" hresult=0x%08X reason=\"%s\"",
+                    static_cast<unsigned long long>(generation), title.c_str(),
+                    static_cast<unsigned int>(error.code().value), error.message().c_str());
+            }
+        } catch (...) {
+            if (!queued)
+                clearPendingThumbnail(generation);
+            if (thumbnailDiagnosticsGeneration != generation || thumbnailReferenceState != -2) {
+                thumbnailDiagnosticsGeneration = generation;
+                thumbnailReferenceState = -2;
+                runtime_log::writef(L"[cover][smtc] request-failed generation=%llu title=\"%s\" reason=unknown",
+                                   static_cast<unsigned long long>(generation), title.c_str());
+            }
         }
-        thumbnailCv.notify_one();
     }
 
     smtc::SmtcSessionIdentity identifySession(const Session& candidate) const {
@@ -373,8 +422,8 @@ struct SmtcMonitor::Impl {
             onChange();
     }
 
-    // 控制按钮运行在任务栏窗口线程上，不能同步等待远程 WinRT 操作。
-    // 完成回调只记录异步结果，不阻塞任务栏消息循环。
+    // 控制请求投递到后台 MTA 轮询线程执行，避免跨套间操作 WinRT 会话，
+    // 完成回调只记录异步结果，不阻塞轮询消息调度。
     void logControlSession(const wchar_t* action, const wchar_t* api,
                            const Session& target, const SmtcSnapshot& snapshot) {
         Session systemCurrent{ nullptr };
@@ -518,26 +567,35 @@ struct SmtcMonitor::Impl {
             return;
 
         bool playbackChanged = false;
+        smtc::PlaybackSample phase1Playback;
+        smtc::TimelineSample phase1Timeline;
         try {
-            auto info = currentSession.GetPlaybackInfo();
-            std::lock_guard<std::mutex> lk(mtx);
-            if (info && snap.sessionAlive) {
-                if (smtc::mapStatus(info.PlaybackStatus()) != snap.status) {
-                    try {
-                        if (auto* adapter = adapterFor(snap.player))
-                            adapter->refreshPlayback(currentSession, snap, smtc::nowUtcMs());
-                    } catch (...) {
-                    }
-                    snap.status = smtc::mapStatus(info.PlaybackStatus());
+            if (auto info = currentSession.GetPlaybackInfo()) {
+                phase1Playback = smtc::readPlaybackSample(info);
+                if (phase1Playback.valid && previous.sessionAlive &&
+                    phase1Playback.status != previous.status) {
+                    phase1Timeline = smtc::readTimelineSample(
+                        currentSession.GetTimelineProperties());
                 }
-                smtc::applyPlaybackControls(info, snap);
+            }
+        } catch (...) {
+        }
+        {
+            std::lock_guard<std::mutex> lk(mtx);
+            if (phase1Playback.valid && snap.sessionAlive) {
+                if (phase1Playback.status != snap.status) {
+                    if (auto* adapter = adapterFor(snap.player))
+                        adapter->refreshPlayback(phase1Playback, phase1Timeline,
+                                                 snap, smtc::nowUtcMs());
+                    snap.status = phase1Playback.status;
+                }
+                smtc::applyPlaybackControls(phase1Playback, snap);
                 playbackChanged = snap.status != previous.status ||
                                   snap.canPrev != previous.canPrev ||
                                   snap.canPlayPause != previous.canPlayPause ||
                                   snap.canNext != previous.canNext;
             }
             previous = snap;
-        } catch (...) {
         }
         if (playbackChanged)
             notify();
@@ -587,40 +645,52 @@ struct SmtcMonitor::Impl {
                                   next.title != previous.title ||
                                   next.artist != previous.artist ||
                                   next.neteaseSongId != previous.neteaseSongId;
+        smtc::TimelineSample timelineSample;
+        smtc::PlaybackSample playbackSample;
         try {
             auto timeline = currentSession.GetTimelineProperties();
             auto info = currentSession.GetPlaybackInfo();
-            if (timeline && info) {
-                const int64_t now = smtc::nowUtcMs();
-                const int64_t position = smtc::timeSpanMs(timeline.Position());
-                const int64_t duration = smtc::timeSpanMs(timeline.EndTime());
-                const int64_t anchor = smtc::lastUpdatedMs(timeline.LastUpdatedTime());
-                std::lock_guard<std::mutex> lk(mtx);
-                if (trackChanged) {
-                    next.positionMs = position;
-                    next.durationMs = duration;
-                    next.anchorUtcMs = anchor > 0 ? anchor : now;
-                    next.timelineStale = false;
-                    adapter->prepareInitialSnapshot(next);
-                    next.status = smtc::mapStatus(info.PlaybackStatus());
-                } else {
-                    if (smtc::mapStatus(info.PlaybackStatus()) != next.status)
-                        adapter->refreshPlayback(currentSession, next, now);
-                    if (next.timelineStale || position != sampledPositionMs ||
-                        duration != sampledDurationMs || anchor != sampledAnchorMs)
-                        adapter->refreshTimeline(currentSession, next, now);
-                }
-                smtc::applyPlaybackControls(info, next);
-                sampledPositionMs = position;
-                sampledDurationMs = duration;
-                sampledAnchorMs = anchor;
-            }
+            timelineSample = smtc::readTimelineSample(timeline);
+            playbackSample = smtc::readPlaybackSample(info);
         } catch (...) {
         }
 
         bool changed = false;
+        bool needThumbnailCheck = false;
+        uint64_t evalGeneration = 0;
+        std::wstring evalSource;
+        std::wstring evalTitle;
+        std::wstring evalArtist;
+        std::wstring evalAlbum;
         {
             std::lock_guard<std::mutex> lk(mtx);
+            const int64_t now = smtc::nowUtcMs();
+            if (timelineSample.valid && playbackSample.valid) {
+                if (trackChanged) {
+                    next.positionMs = timelineSample.positionMs;
+                    next.durationMs = timelineSample.durationMs;
+                    next.anchorUtcMs = timelineSample.anchorUtcMs > 0
+                                           ? timelineSample.anchorUtcMs
+                                           : now;
+                    next.timelineStale = false;
+                    adapter->prepareInitialSnapshot(next);
+                    next.status = playbackSample.status;
+                } else {
+                    if (playbackSample.status != next.status)
+                        adapter->refreshPlayback(playbackSample, timelineSample, next, now);
+                    if (next.timelineStale ||
+                        timelineSample.positionMs != sampledPositionMs ||
+                        timelineSample.durationMs != sampledDurationMs ||
+                        timelineSample.anchorUtcMs != sampledAnchorMs) {
+                        adapter->refreshTimeline(playbackSample, timelineSample, next, now);
+                    }
+                }
+                smtc::applyPlaybackControls(playbackSample, next);
+                sampledPositionMs = timelineSample.positionMs;
+                sampledDurationMs = timelineSample.durationMs;
+                sampledAnchorMs = timelineSample.anchorUtcMs;
+            }
+
             const std::wstring key = thumbnailKey(next);
             // 歌名可能先更新，封面稍后通过同曲目的属性事件补齐。
             // 属性更新也必须开启新读取代次，不能因已缓存图片而永久跳过。
@@ -643,26 +713,19 @@ struct SmtcMonitor::Impl {
                       next.thumbnail != snap.thumbnail || next.canPrev != snap.canPrev ||
                       next.canPlayPause != snap.canPlayPause || next.canNext != snap.canNext;
             snap = std::move(next);
-            try {
-                requestThumbnail(props);
-            } catch (const winrt::hresult_error& error) {
-                if (thumbnailDiagnosticsGeneration != thumbnailGeneration || thumbnailReferenceState != -2) {
-                    thumbnailDiagnosticsGeneration = thumbnailGeneration;
-                    thumbnailReferenceState = -2;
-                    runtime_log::writef(
-                        L"[cover][smtc] request-failed generation=%llu title=\"%s\" hresult=0x%08X reason=\"%s\"",
-                        static_cast<unsigned long long>(thumbnailGeneration), snap.title.c_str(),
-                        static_cast<unsigned int>(error.code().value), error.message().c_str());
-                }
-            } catch (...) {
-                if (thumbnailDiagnosticsGeneration != thumbnailGeneration || thumbnailReferenceState != -2) {
-                    thumbnailDiagnosticsGeneration = thumbnailGeneration;
-                    thumbnailReferenceState = -2;
-                    runtime_log::writef(L"[cover][smtc] request-failed generation=%llu title=\"%s\" reason=unknown",
-                                       static_cast<unsigned long long>(thumbnailGeneration), snap.title.c_str());
-                }
+            if (props && !thumbCache_ && !thumbnailPending &&
+                now >= thumbnailRetryAtMs) {
+                needThumbnailCheck = true;
+                thumbnailPending = true;
+                evalGeneration = thumbnailGeneration;
+                evalSource = snap.sourceAppUserModelId;
+                evalTitle = snap.title;
+                evalArtist = snap.artist;
+                evalAlbum = snap.album;
             }
         }
+        if (needThumbnailCheck)
+            enqueueThumbnailCheck(props, evalGeneration, evalSource, evalTitle, evalArtist, evalAlbum);
         if (changed)
             notify();
     }
@@ -919,6 +982,93 @@ struct SmtcMonitor::Impl {
         }
     }
 
+    bool isStopping() const {
+        std::lock_guard<std::mutex> lk(refreshSignal->mtx);
+        return refreshSignal->stopping;
+    }
+
+    void initializeManagerOnPollThread() {
+        try {
+            auto managerOp = GlobalSystemMediaTransportControlsSessionManager::RequestAsync();
+            if (!managerOp)
+                return;
+            while (!isStopping()) {
+                const auto status = managerOp.wait_for(std::chrono::milliseconds(100));
+                if (status == winrt::Windows::Foundation::AsyncStatus::Completed) {
+                    manager = managerOp.GetResults();
+                    break;
+                }
+                if (status != winrt::Windows::Foundation::AsyncStatus::Started)
+                    return;
+            }
+            if (isStopping()) {
+                if (managerOp.Status() == winrt::Windows::Foundation::AsyncStatus::Started)
+                    managerOp.Cancel();
+                return;
+            }
+            if (!manager)
+                return;
+            sessionsRevoker = manager.SessionsChanged(winrt::auto_revoke,
+                [signal = refreshSignal](auto&&, auto&&) {
+                    Impl::requestRefresh(signal, true);
+                });
+            currentSessionRevoker = manager.CurrentSessionChanged(winrt::auto_revoke,
+                [signal = refreshSignal](auto&&, auto&&) {
+                    Impl::requestRefresh(signal);
+                });
+        } catch (...) {
+            // 没有可用媒体会话或系统媒体控制能力时，监控器保持空快照，
+            // 不让启动阶段的 HRESULT 终止后台线程。
+            manager = nullptr;
+        }
+    }
+
+    void executeControl(ControlAction action) {
+        Session current{ nullptr };
+        SmtcSnapshot snapshotCopy;
+        {
+            std::lock_guard<std::mutex> lk(mtx);
+            current = session;
+            snapshotCopy = snap;
+        }
+        switch (action) {
+        case ControlAction::PlayPause:
+            startControlOperation(L"play-pause", L"TryTogglePlayPauseAsync", current, snapshotCopy,
+                                  [current] { return current.TryTogglePlayPauseAsync(); });
+            break;
+        case ControlAction::SkipNext:
+            startControlOperation(L"next", L"TrySkipNextAsync", current, snapshotCopy,
+                                  [current] { return current.TrySkipNextAsync(); });
+            break;
+        case ControlAction::SkipPrevious:
+            startControlOperation(L"previous", L"TrySkipPreviousAsync", current, snapshotCopy,
+                                  [current] { return current.TrySkipPreviousAsync(); });
+            break;
+        }
+    }
+
+    void shutdownWinrtOnPollThread() {
+        auto safeRevoke = [](auto& revoker) {
+            try {
+                revoker.revoke();
+            } catch (...) {
+            }
+        };
+        safeRevoke(timelineRevoker);
+        safeRevoke(selectedPropsRevoker);
+        safeRevoke(currentSessionRevoker);
+        safeRevoke(sessionsRevoker);
+        try {
+            sessionWatchers.clear();
+        } catch (...) {
+        }
+        {
+            std::lock_guard<std::mutex> lk(mtx);
+            session = nullptr;
+        }
+        manager = nullptr;
+    }
+
     void startPolling() {
         pollThread = std::thread([this] {
             try {
@@ -926,13 +1076,17 @@ struct SmtcMonitor::Impl {
             } catch (...) {
                 return;
             }
+            initializeManagerOnPollThread();
+            requestRefresh(refreshSignal, true);
             for (;;) {
                 bool rebuildWatchers = false;
                 bool mediaPropertiesChanged = false;
+                std::deque<ControlAction> controls;
                 {
                     std::unique_lock<std::mutex> lk(refreshSignal->mtx);
                     refreshSignal->cv.wait_for(lk, std::chrono::milliseconds(100), [this] {
-                        return refreshSignal->stopping || refreshSignal->requested;
+                        return refreshSignal->stopping || refreshSignal->requested ||
+                               !refreshSignal->pendingControls.empty();
                     });
                     if (refreshSignal->stopping)
                         break;
@@ -941,6 +1095,11 @@ struct SmtcMonitor::Impl {
                     refreshSignal->requested = false;
                     refreshSignal->rebuildWatchers = false;
                     refreshSignal->mediaPropertiesChanged = false;
+                    controls.swap(refreshSignal->pendingControls);
+                }
+                while (!controls.empty()) {
+                    executeControl(controls.front());
+                    controls.pop_front();
                 }
                 try {
                     updateSession(rebuildWatchers);
@@ -948,6 +1107,7 @@ struct SmtcMonitor::Impl {
                 } catch (...) {
                 }
             }
+            shutdownWinrtOnPollThread();
             winrt::uninit_apartment();
         });
     }
@@ -959,29 +1119,8 @@ SmtcMonitor::~SmtcMonitor() = default;
 void SmtcMonitor::start(ChangeCallback onChange) {
     writeSmtcControlLog(L"phase=monitor-start");
     impl_->onChange = std::move(onChange);
-    try {
-        auto managerOp = GlobalSystemMediaTransportControlsSessionManager::RequestAsync();
-        if (!managerOp)
-            return;
-        impl_->manager = managerOp.get();
-        if (!impl_->manager)
-            return;
-        impl_->sessionsRevoker = impl_->manager.SessionsChanged(winrt::auto_revoke,
-            [signal = impl_->refreshSignal](auto&&, auto&&) {
-                Impl::requestRefresh(signal, true);
-            });
-        impl_->currentSessionRevoker = impl_->manager.CurrentSessionChanged(winrt::auto_revoke,
-            [signal = impl_->refreshSignal](auto&&, auto&&) {
-                Impl::requestRefresh(signal);
-            });
-        impl_->startThumbnailReader();
-        Impl::requestRefresh(impl_->refreshSignal, true);
-        impl_->startPolling();
-    } catch (...) {
-        // 没有可用媒体会话或系统媒体控制能力时，监控器保持空快照，
-        // 不让启动阶段的 HRESULT 终止主程序。
-        impl_->manager = nullptr;
-    }
+    impl_->startThumbnailReader();
+    impl_->startPolling();
 }
 
 SmtcSnapshot SmtcMonitor::snapshot() const {
@@ -995,37 +1134,13 @@ SmtcSnapshot SmtcMonitor::snapshot() const {
 }
 
 void SmtcMonitor::playPause() {
-    Session current{ nullptr };
-    SmtcSnapshot snapshot;
-    {
-        std::lock_guard<std::mutex> lk(impl_->mtx);
-        current = impl_->session;
-        snapshot = impl_->snap;
-    }
-    impl_->startControlOperation(L"play-pause", L"TryTogglePlayPauseAsync", current, snapshot,
-                                 [current] { return current.TryTogglePlayPauseAsync(); });
+    Impl::requestControl(impl_->refreshSignal, Impl::ControlAction::PlayPause);
 }
 
 void SmtcMonitor::skipNext() {
-    Session current{ nullptr };
-    SmtcSnapshot snapshot;
-    {
-        std::lock_guard<std::mutex> lk(impl_->mtx);
-        current = impl_->session;
-        snapshot = impl_->snap;
-    }
-    impl_->startControlOperation(L"next", L"TrySkipNextAsync", current, snapshot,
-                                 [current] { return current.TrySkipNextAsync(); });
+    Impl::requestControl(impl_->refreshSignal, Impl::ControlAction::SkipNext);
 }
 
 void SmtcMonitor::skipPrevious() {
-    Session current{ nullptr };
-    SmtcSnapshot snapshot;
-    {
-        std::lock_guard<std::mutex> lk(impl_->mtx);
-        current = impl_->session;
-        snapshot = impl_->snap;
-    }
-    impl_->startControlOperation(L"previous", L"TrySkipPreviousAsync", current, snapshot,
-                                 [current] { return current.TrySkipPreviousAsync(); });
+    Impl::requestControl(impl_->refreshSignal, Impl::ControlAction::SkipPrevious);
 }

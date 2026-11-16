@@ -105,16 +105,16 @@ SmtcSessionIdentity NeteaseSmtcAdapter::identifySession(const Session& session) 
 
 void NeteaseSmtcAdapter::prepareInitialSnapshot(SmtcSnapshot&) const {}
 
-void NeteaseSmtcAdapter::refreshTimeline(const Session& session,
+void NeteaseSmtcAdapter::refreshTimeline(const PlaybackSample&,
+                                         const TimelineSample& timeline,
                                          SmtcSnapshot& snapshot,
                                          int64_t eventNowMs) {
-    auto timeline = session.GetTimelineProperties();
-    if (!timeline)
+    if (!timeline.valid)
         return;
 
-    const int64_t durationMs = timeSpanMs(timeline.EndTime());
-    const int64_t positionMs = timeSpanMs(timeline.Position());
-    const int64_t reportedAnchorMs = lastUpdatedMs(timeline.LastUpdatedTime());
+    const int64_t durationMs = timeline.durationMs;
+    const int64_t positionMs = timeline.positionMs;
+    const int64_t reportedAnchorMs = timeline.anchorUtcMs;
     const bool placeholderZero = reportedAnchorMs == 0 && positionMs == 0 &&
                                  snapshot.positionMs > 0;
     const int64_t incomingAnchorMs = reportedAnchorMs > 0 ? reportedAnchorMs : eventNowMs;
@@ -153,15 +153,15 @@ void NeteaseSmtcAdapter::refreshTimeline(const Session& session,
         snapshot.anchorUtcMs = eventNowMs;
 }
 
-void NeteaseSmtcAdapter::refreshPlayback(const Session& session,
+void NeteaseSmtcAdapter::refreshPlayback(const PlaybackSample& playback,
+                                         const TimelineSample& timeline,
                                          SmtcSnapshot& snapshot,
                                          int64_t eventNowMs) {
-    auto info = session.GetPlaybackInfo();
-    if (!info)
+    if (!playback.valid)
         return;
 
     const PlaybackStatus previousStatus = snapshot.status;
-    const PlaybackStatus newStatus = mapStatus(info.PlaybackStatus());
+    const PlaybackStatus newStatus = playback.status;
     const bool wasPlaying = previousStatus == PlaybackStatus::Playing;
     const bool nowPlaying = newStatus == PlaybackStatus::Playing;
     const bool leavingPlaying = wasPlaying && !nowPlaying;
@@ -184,11 +184,10 @@ void NeteaseSmtcAdapter::refreshPlayback(const Session& session,
     bool stalePositionRegression = false;
     int64_t newPos = snapshot.positionMs;
     int64_t rawAnchorAge = -1;
-    auto timeline = session.GetTimelineProperties();
-    if (timeline) {
-        snapshot.durationMs = timeSpanMs(timeline.EndTime());
-        newPos = timeSpanMs(timeline.Position());
-        int64_t reportedAnchor = lastUpdatedMs(timeline.LastUpdatedTime());
+    if (timeline.valid) {
+        snapshot.durationMs = timeline.durationMs;
+        newPos = timeline.positionMs;
+        int64_t reportedAnchor = timeline.anchorUtcMs;
         anchorMissing = reportedAnchor == 0;
         rawAnchorAge = anchorMissing ? -1 : eventNowMs - reportedAnchor;
 
@@ -219,7 +218,7 @@ void NeteaseSmtcAdapter::refreshPlayback(const Session& session,
         snapshot.anchorUtcMs = eventNowMs;
     }
 
-    applyPlaybackControls(info, snapshot);
+    applyPlaybackControls(playback, snapshot);
 }
 
 SmtcSnapshot NeteaseSmtcAdapter::snapshot(const SmtcSnapshot& source,

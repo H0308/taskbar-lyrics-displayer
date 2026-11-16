@@ -2,6 +2,7 @@
 #include "app/application.h"
 #include "graphics/gdiplus_runtime.h"
 #include "logging/ui_timing.h"
+#include "ui/dock_backdrop.h"
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -393,6 +394,13 @@ int runApplication() {
         ~TimerResolution() { timeEndPeriod(1); }
     } timerResolution;
     winrt::init_apartment();
+    // 主线程上的 WinRT 线程局部缓存（例如 UISettings）必须在 uninit_apartment() 前释放。
+    struct WinrtThreadResourcesGuard {
+        ~WinrtThreadResourcesGuard() {
+            DockBackdrop::shutdownThreadResources();
+            fluent::releaseThreadThemeResources();
+        }
+    } winrtThreadResourcesGuard;
     graphics::gdiplusStatus();
 
     ConsoleCtrlGuard consoleCtrlGuard;

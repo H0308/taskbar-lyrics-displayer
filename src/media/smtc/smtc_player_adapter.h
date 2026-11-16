@@ -23,10 +23,15 @@ public:
     // 对 refreshAll 读取的原始快照做播放器专属的初始锚点处理。
     virtual void prepareInitialSnapshot(SmtcSnapshot& snapshot) const = 0;
 
-    // 调用方持有 SmtcMonitor::Impl::mtx；适配器不再自行管理会话锁。
-    virtual void refreshTimeline(const Session& session, SmtcSnapshot& snapshot,
+    // 调用方持有 SmtcMonitor::Impl::mtx；WinRT 读取已在锁外转为纯值样本，
+    // 适配器不再在持锁状态下执行 COM 调用或自行管理会话锁。
+    virtual void refreshTimeline(const PlaybackSample& playback,
+                                 const TimelineSample& timeline,
+                                 SmtcSnapshot& snapshot,
                                  int64_t eventNowMs) = 0;
-    virtual void refreshPlayback(const Session& session, SmtcSnapshot& snapshot,
+    virtual void refreshPlayback(const PlaybackSample& playback,
+                                 const TimelineSample& timeline,
+                                 SmtcSnapshot& snapshot,
                                  int64_t eventNowMs) = 0;
 
     // 根据适配器自己的规则生成渲染侧快照。QQ 会在这里使用平滑状态，

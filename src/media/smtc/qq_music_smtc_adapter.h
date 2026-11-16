@@ -12,9 +12,13 @@ public:
     SmtcPlayerType playerType() const noexcept override;
     SmtcSessionIdentity identifySession(const Session& session) const override;
     void prepareInitialSnapshot(SmtcSnapshot& snapshot) const override;
-    void refreshTimeline(const Session& session, SmtcSnapshot& snapshot,
+    void refreshTimeline(const PlaybackSample& playback,
+                         const TimelineSample& timeline,
+                         SmtcSnapshot& snapshot,
                          int64_t eventNowMs) override;
-    void refreshPlayback(const Session& session, SmtcSnapshot& snapshot,
+    void refreshPlayback(const PlaybackSample& playback,
+                         const TimelineSample& timeline,
+                         SmtcSnapshot& snapshot,
                          int64_t eventNowMs) override;
     SmtcSnapshot snapshot(const SmtcSnapshot& source,
                           int64_t nowUtcMs) const override;
