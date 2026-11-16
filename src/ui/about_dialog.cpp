@@ -50,6 +50,8 @@ constexpr int kIdAutoCheckSwitch = 314;
 constexpr int kIdGiteeProjectButton = 315;
 constexpr int kIdGithubSourceButton = 316;
 constexpr int kIdGiteeSourceButton = 317;
+constexpr int kIdReleaseNotesTab = 318;
+constexpr int kIdDisclaimerTab = 319;
 
 constexpr UINT kMsgUpdateReady = WM_APP + 30;
 constexpr UINT kMsgDownloadProgress = WM_APP + 31;
@@ -1002,7 +1004,22 @@ std::vector<MarkdownBlock> parseMarkdown(const std::wstring& markdown) {
     return blocks;
 }
 
-// 关于页的更新日志逻辑模型。它不创建子窗口，只保存解析结果和滚动位置，
+enum class AboutPanelTab {
+    ReleaseNotes,
+    Disclaimer,
+};
+
+const std::wstring& disclaimerMarkdown() {
+    static const std::wstring content =
+        L"1. **开源协议适用范围**：本项目的 **Apache-2.0** 许可证仅适用于本仓库中的自研源代码，不涵盖且不构成对任何第三方接口、服务数据、媒体内容、字体、图标或第三方软件的授权。\n\n"
+        L"2. **非官方关联与商标声明**：本项目为独立开发的桌面辅助工具，与 QQ 音乐、网易云音乐、汽水音乐、酷狗音乐、Spotify、滴答清单（Dida365）以及 BetterNCM、InfLink-rs、LRCLIB、MusicBrainz 等第三方产品、平台或服务均无任何官方关联、合作或背书。程序中涉及的第三方产品名称、品牌标识及运行时从用户本地客户端读取的图标，其商标权与版权均归原权利方所有。\n\n"
+        L"3. **内容权属与接口说明**：本项目自身及仓库不存储、托管或分发任何音乐文件、歌词文本、专辑封面或任务数据。程序仅在用户本地运行时，按需读取本机已播放软件的公开媒体会话、用户本地缓存目录，或向第三方公开接口发起实时展示请求。歌词、专辑封面及文案等内容的著作权归词曲作者、唱片公司及原服务提供方所有；第三方接口的可用性及格式随时可能发生变更，本项目不保证各在线来源长期稳定可用。\n\n"
+        L"4. **使用与再分发责任**：任何个人或组织在使用、修改或再分发本项目（包括基于 Apache-2.0 协议进行的各类商业或非商业分发）时，均须自行确保其行为符合所在国家或地区的法律法规以及相关第三方平台的服务条款，且不得以本项目或原作者名义进行虚假宣传或商业背书。因违反第三方服务条款、接口风控或版权争议所产生的任何后果，均由实际使用方或再分发方自行承担。\n\n"
+        L"5. **无担保与责任限制**：本软件按「现状（AS IS）」提供，不附带任何明示或暗示的适用性或稳定性担保。程序涉及 Windows 系统媒体控制、音频回环捕获、UI Automation 及任务栏窗口交互等系统级操作，在任何情况下，作者均不对因使用、无法使用、修改或分发本软件而导致的任何直接或间接损失（包括但不限于系统异常、数据丢失、账号受限或商业损失）承担法律责任。";
+    return content;
+}
+
+// 关于页的更新日志与免责声明面板逻辑模型。它不创建子窗口，只保存解析结果和滚动位置，
 // 由 AboutDialog 的单一绘制表面调用 paint()。
 class ReleaseNotesModel {
 public:
@@ -1028,22 +1045,37 @@ public:
     }
     void reset() { scrollView_.reset(); parent_ = nullptr; }
 
-    void setRelease(ReleaseInfo release) {
+    AboutPanelTab activeTab() const { return activeTab_; }
+
+    void setActiveTab(AboutPanelTab tab) {
+        if (tab == activeTab_)
+            return;
+        activeTab_ = tab;
         scrollView_.setOffset(0.0f);
         scrollOnlyPaint_ = false;
-        release_ = std::move(release);
-        blocks_ = parseMarkdown(release_->body);
-        message_.clear();
         scrollY_ = 0.0f;
     }
 
+    void setRelease(ReleaseInfo release) {
+        release_ = std::move(release);
+        blocks_ = parseMarkdown(release_->body);
+        message_.clear();
+        if (activeTab_ == AboutPanelTab::ReleaseNotes) {
+            scrollView_.setOffset(0.0f);
+            scrollOnlyPaint_ = false;
+            scrollY_ = 0.0f;
+        }
+    }
+
     void setMessage(const std::wstring& message) {
-        scrollView_.setOffset(0.0f);
-        scrollOnlyPaint_ = false;
         release_.reset();
         blocks_.clear();
         message_ = message;
-        scrollY_ = 0.0f;
+        if (activeTab_ == AboutPanelTab::ReleaseNotes) {
+            scrollView_.setOffset(0.0f);
+            scrollOnlyPaint_ = false;
+            scrollY_ = 0.0f;
+        }
     }
 
     void scrollBy(float delta) { scrollView_.scrollBy(delta); }
@@ -1131,10 +1163,11 @@ public:
         painter.strokeRoundRect(palette.cardStroke, panelRect, 1.0f,
                                 fluent::metrics::cardRadius);
 
+        const bool showDisclaimer = activeTab_ == AboutPanelTab::Disclaimer;
         auto* bodyFormat = painter.textFormat(fluent::font_sizes::label, 400);
         if (bodyFormat)
             bodyFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
-        if (!release_) {
+        if (!showDisclaimer && !release_) {
             scrollView_.layout({}, 0.0f, GetDpiForWindow(parent_));
             const std::wstring& message = message_.empty() ? emptyMessage() : message_;
             painter.drawText(message, bodyFormat,
@@ -1157,10 +1190,15 @@ public:
             !heading2Format || !heading3Format)
             return;
 
-        const auto& release = *release_;
-        std::wstring header = displayVersion(release.version);
-        if (!release.publishedAt.empty())
-            header += L"  ·  " + displayReleaseDate(release.publishedAt);
+        std::wstring header;
+        if (showDisclaimer) {
+            header = L"免责声明  ·  Apache-2.0";
+        } else {
+            const auto& release = *release_;
+            header = displayVersion(release.version);
+            if (!release.publishedAt.empty())
+                header += L"  ·  " + displayReleaseDate(release.publishedAt);
+        }
         painter.drawText(header, headerFormat,
                          D2D1::RectF(rect.left + 16.0f, rect.top + 8.0f,
                                       std::max(rect.left + 16.0f, rect.right - 16.0f),
@@ -1173,9 +1211,10 @@ public:
                          br, 1.0f);
         }
 
+        const auto& activeBlocks = showDisclaimer ? ensureDisclaimerBlocks() : blocks_;
         const float bodyTop = rect.top + 48.0f;
         const float bodyViewHeight = std::max(0.0f, hDip - 48.0f);
-        if (blocks_.empty()) {
+        if (activeBlocks.empty()) {
             scrollView_.layout({}, 0.0f, GetDpiForWindow(parent_));
             painter.drawText(L"暂无发布说明", bodyFormat,
                              D2D1::RectF(rect.left + 16.0f, bodyTop,
@@ -1200,9 +1239,9 @@ public:
         };
 
         std::vector<RenderedBlock> rendered;
-        rendered.reserve(blocks_.size());
+        rendered.reserve(activeBlocks.size());
         float totalHeight = 0.0f;
-        for (const auto& block : blocks_) {
+        for (const auto& block : activeBlocks) {
             RenderedBlock item;
             item.block = &block;
             if (block.kind == MarkdownBlockKind::Rule) {
@@ -1322,13 +1361,21 @@ public:
         }
     }
 
+    const std::vector<MarkdownBlock>& ensureDisclaimerBlocks() {
+        if (disclaimerBlocks_.empty())
+            disclaimerBlocks_ = parseMarkdown(disclaimerMarkdown());
+        return disclaimerBlocks_;
+    }
+
     static const std::wstring& emptyMessage() {
         static const std::wstring message = L"暂无更新日志";
         return message;
     }
 
+    AboutPanelTab activeTab_ = AboutPanelTab::ReleaseNotes;
     std::optional<ReleaseInfo> release_;
     std::vector<MarkdownBlock> blocks_;
+    std::vector<MarkdownBlock> disclaimerBlocks_;
     std::wstring message_;
     float scrollY_ = 0.0f;
     float contentHeight_ = 0.0f;
@@ -1417,7 +1464,8 @@ struct AboutDialog::Impl {
     D2D1_RECT_F infoCardRect{};
     D2D1_RECT_F versionRect{};
     D2D1_RECT_F autoCheckLabelRect{};
-    D2D1_RECT_F releaseTitleRect{};
+    D2D1_RECT_F releaseNotesTabRect{};
+    D2D1_RECT_F disclaimerTabRect{};
     D2D1_RECT_F statusRect{};
     D2D1_RECT_F latestRect{};
     D2D1_RECT_F projectRect{};
@@ -1578,11 +1626,41 @@ struct AboutDialog::Impl {
         }
     }
 
+    void drawPanelTab(fluent::FluentDialogSurface::Painter& painter, const D2D1_RECT_F& rect,
+                      const wchar_t* text, bool selected, int id) {
+        const auto& p = fluent::palette();
+        const bool hovered = hoverId == id;
+        const bool pressed = pressedId == id;
+        if (selected) {
+            painter.fillRoundRect(pressed ? p.controlPressed : hovered ? p.controlHover : p.controlFill,
+                                  rect);
+            painter.strokeRoundRect(p.controlStroke, rect);
+            const float indicatorW = std::min(16.0f, std::max(0.0f, rect.right - rect.left - 16.0f));
+            const float centerX = (rect.left + rect.right) * 0.5f;
+            painter.fillRoundRect(
+                p.accent,
+                D2D1::RectF(centerX - indicatorW * 0.5f, rect.bottom - 2.5f,
+                            centerX + indicatorW * 0.5f, rect.bottom - 0.5f),
+                1.0f);
+        } else if (pressed || hovered) {
+            painter.fillRoundRect(pressed ? p.controlPressed : p.listHover, rect);
+        }
+        if (focusedId == id && focusVisible) {
+            painter.strokeRoundRect(
+                p.accent,
+                D2D1::RectF(rect.left + 1.5f, rect.top + 1.5f, rect.right - 1.5f, rect.bottom - 1.5f),
+                1.5f, std::max(1.0f, fluent::metrics::controlRadius - 1.0f));
+        }
+        auto* format = painter.textFormat(fluent::font_sizes::label, selected ? 600 : 400, true, true);
+        painter.drawText(text, format, rect, selected || hovered ? p.text : p.textSecondary);
+    }
+
     void paint(fluent::FluentDialogSurface::Painter& painter, float, float) {
         const auto& p = fluent::palette();
         painter.drawText(app_info::kName, painter.textFormat(fluent::font_sizes::brandTitle, 600), titleRect,
                          p.text);
-        painter.drawText(L"把歌词带到 Windows 任务栏", painter.textFormat(fluent::font_sizes::label, 400), subtitleRect,
+        painter.drawText(L"把歌词带到 Windows 任务栏 · Apache-2.0 开源项目",
+                         painter.textFormat(fluent::font_sizes::label, 400), subtitleRect,
                          p.textSecondary);
 
         painter.fillRoundRect(p.cardFill, infoCardRect, fluent::metrics::cardRadius);
@@ -1594,7 +1672,11 @@ struct AboutDialog::Impl {
         drawButton(painter, projectRect, L"GitHub", false, kIdProjectButton);
         drawButton(painter, giteeProjectRect, L"Gitee", false, kIdGiteeProjectButton);
 
-        painter.drawText(L"更新日志", painter.textFormat(fluent::font_sizes::body, 600), releaseTitleRect, p.text);
+        const AboutPanelTab activeTab = releaseNotes.activeTab();
+        drawPanelTab(painter, releaseNotesTabRect, L"更新日志",
+                     activeTab == AboutPanelTab::ReleaseNotes, kIdReleaseNotesTab);
+        drawPanelTab(painter, disclaimerTabRect, L"免责声明",
+                     activeTab == AboutPanelTab::Disclaimer, kIdDisclaimerTab);
         painter.drawText(L"更新来源", painter.textFormat(fluent::font_sizes::label, 400), updateSourceLabelRect,
                          p.textSecondary);
         const int selectedSource = updateSourceIndex(updateSource);
@@ -1618,6 +1700,10 @@ struct AboutDialog::Impl {
             return kIdProjectButton;
         if (contains(giteeProjectRect, x, y))
             return kIdGiteeProjectButton;
+        if (contains(releaseNotesTabRect, x, y))
+            return kIdReleaseNotesTab;
+        if (contains(disclaimerTabRect, x, y))
+            return kIdDisclaimerTab;
         if (contains(githubSourceRect, x, y))
             return kIdGithubSourceButton;
         if (contains(giteeSourceRect, x, y))
@@ -1635,6 +1721,7 @@ struct AboutDialog::Impl {
 
     std::vector<int> focusOrder() const {
         std::vector<int> order{kIdAutoCheckSwitch, kIdProjectButton, kIdGiteeProjectButton,
+                               kIdReleaseNotesTab, kIdDisclaimerTab,
                                kIdGithubSourceButton, kIdGiteeSourceButton, kIdCheckButton,
                                kIdReleaseButton, kIdCloseButton};
         order.erase(std::remove_if(order.begin(), order.end(),
@@ -1660,6 +1747,7 @@ struct AboutDialog::Impl {
         if (source == updateSource || !canChangeUpdateSource())
             return;
         updateSource = source;
+        releaseNotes.setActiveTab(AboutPanelTab::ReleaseNotes);
         runtime_log::writef(L"[action][update] source=%s", updateSourceName(updateSource));
         if (onUpdateSourceChanged)
             onUpdateSourceChanged(updateSource == UpdateSource::Gitee);
@@ -1676,6 +1764,12 @@ struct AboutDialog::Impl {
         case kIdGiteeProjectButton:
             openUrl(app_info::kGiteeProjectUrl);
             break;
+        case kIdReleaseNotesTab:
+            releaseNotes.setActiveTab(AboutPanelTab::ReleaseNotes);
+            break;
+        case kIdDisclaimerTab:
+            releaseNotes.setActiveTab(AboutPanelTab::Disclaimer);
+            break;
         case kIdGithubSourceButton:
             selectUpdateSource(UpdateSource::GitHub);
             break;
@@ -1690,6 +1784,7 @@ struct AboutDialog::Impl {
                 onAutoCheckChanged(autoCheckOnStartup);
             break;
         case kIdCheckButton:
+            releaseNotes.setActiveTab(AboutPanelTab::ReleaseNotes);
             runtime_log::writef(L"[action][update] check-request source=%s",
                                 updateSourceName(updateSource));
             startCheck();
@@ -1858,6 +1953,14 @@ struct AboutDialog::Impl {
                 return 0;
             }
             if (wp == VK_LEFT || wp == VK_RIGHT) {
+                if (focusedId == kIdReleaseNotesTab || focusedId == kIdDisclaimerTab) {
+                    const int next = (focusedId == kIdReleaseNotesTab)
+                                         ? kIdDisclaimerTab
+                                         : kIdReleaseNotesTab;
+                    focusedId = next;
+                    onCommand(next);
+                    return 0;
+                }
                 if (focusedId == kIdGithubSourceButton || focusedId == kIdGiteeSourceButton) {
                     if (canChangeUpdateSource()) {
                         const int current = focusedId == kIdGiteeSourceButton ? 1 : 0;
@@ -1994,6 +2097,7 @@ struct AboutDialog::Impl {
         versionText = std::wstring(L"当前版本：") + displayVersion(app_info::kVersion);
         statusText = L"点击“检查更新”获取最新版本";
         latestText.clear();
+        releaseNotes.setActiveTab(AboutPanelTab::ReleaseNotes);
         releaseNotes.setMessage(L"点击“检查更新”加载更新日志");
     }
 
@@ -2052,7 +2156,8 @@ struct AboutDialog::Impl {
                                 w - pad - closeW - gap - releaseW - gap, btnY + btnH);
 
         const float releaseTitleY = cardY + cardH + fluent::metrics::sectionGap;
-        const float notesY = releaseTitleY + 22.0f + fluent::metrics::compactGap;
+        const float tabH = 26.0f;
+        const float notesY = releaseTitleY + tabH + fluent::metrics::compactGap;
         const float statusH = 22.0f;
         const float latestH = 20.0f;
         const float latestY = btnY - gap - latestH;
@@ -2064,24 +2169,31 @@ struct AboutDialog::Impl {
         const float sourceGroupW = sourceLabelW + sourceGap + sourceOptionW + sourceGap +
                                    sourceOptionW;
         const float sourceX = std::max(pad, w - pad - sourceGroupW);
-        releaseTitleRect = D2D1::RectF(pad, releaseTitleY,
-                                       std::max(pad, sourceX - gap), releaseTitleY + 22.0f);
+        const float tabW = 74.0f;
+        const float tabGap = 6.0f;
+        releaseNotesTabRect = D2D1::RectF(pad, releaseTitleY,
+                                          std::min(pad + tabW, std::max(pad, sourceX - gap)),
+                                          releaseTitleY + tabH);
+        const float disclaimerX = releaseNotesTabRect.right + tabGap;
+        disclaimerTabRect = D2D1::RectF(disclaimerX, releaseTitleY,
+                                        std::min(disclaimerX + tabW, std::max(disclaimerX, sourceX - gap)),
+                                        releaseTitleY + tabH);
         updateSourceLabelRect = D2D1::RectF(sourceX, releaseTitleY, sourceX + sourceLabelW,
-                                            releaseTitleY + 22.0f);
+                                            releaseTitleY + tabH);
         const float githubX = sourceX + sourceLabelW + sourceGap;
         githubSourceRect = D2D1::RectF(githubX, releaseTitleY, githubX + sourceOptionW,
-                                       releaseTitleY + 22.0f);
+                                       releaseTitleY + tabH);
         const float giteeX = githubX + sourceOptionW + sourceGap;
         giteeSourceRect = D2D1::RectF(giteeX, releaseTitleY, giteeX + sourceOptionW,
-                                      releaseTitleY + 22.0f);
+                                      releaseTitleY + tabH);
         notesRect = D2D1::RectF(pad, notesY, std::max(pad, w - pad),
                                 std::max(notesY + 80.0f, notesBottom));
         statusRect = D2D1::RectF(pad, statusY, std::max(pad, w - pad), statusY + statusH);
         latestRect = D2D1::RectF(pad, latestY, std::max(pad, w - pad), latestY + latestH);
         fluent::offsetDialogRects(content.offsetX, {
             &autoSwitchRect, &titleRect, &subtitleRect, &infoCardRect,
-            &versionRect, &autoCheckLabelRect, &releaseTitleRect, &statusRect,
-            &latestRect, &projectRect, &giteeProjectRect, &updateSourceLabelRect,
+            &versionRect, &autoCheckLabelRect, &releaseNotesTabRect, &disclaimerTabRect,
+            &statusRect, &latestRect, &projectRect, &giteeProjectRect, &updateSourceLabelRect,
             &githubSourceRect, &giteeSourceRect, &checkRect, &releaseRect,
             &closeRect, &notesRect});
 
