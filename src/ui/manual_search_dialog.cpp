@@ -160,7 +160,7 @@ struct ManualSearchDialog::Impl {
     std::vector<float> previewRowHeights;
     std::vector<float> previewRowOffsets;
     float previewMeasuredWidth = -1.0f;
-    float previewMeasuredSecondaryHeight = -1.0f;
+    int previewMeasuredSecondaryMask = -1;
     UINT previewMeasuredDpi = 0;
     SongInfo previewInfo;
     std::wstring previewCapabilityLabel;
@@ -680,17 +680,25 @@ struct ManualSearchDialog::Impl {
         return kPreviewHeaderHeight + (previewCapabilityLabel.empty() ? 0.0f : 24.0f);
     }
 
+    int previewSecondaryMask() const {
+        return (previewShowRomanization ? 1 : 0) | (previewShowTranslation ? 2 : 0);
+    }
+
     int previewSecondaryLineCount() const {
         return (previewShowRomanization ? 1 : 0) + (previewShowTranslation ? 1 : 0);
     }
 
-    float previewSecondaryHeight() const {
-        return previewSecondaryLineCount() *
-               (kPreviewSecondaryLineHeight + kPreviewSecondaryGap);
+    int previewSecondaryLineCount(const LyricLine& line) const {
+        return ((previewShowRomanization && !line.romanization.empty()) ? 1 : 0) +
+               ((previewShowTranslation && !line.translation.empty()) ? 1 : 0);
+    }
+
+    float previewSecondaryHeight(int secondaryCount) const {
+        return secondaryCount * (kPreviewSecondaryLineHeight + kPreviewSecondaryGap);
     }
 
     float previewLyricRowHeight() const {
-        return kLyricRowHeightDip + previewSecondaryHeight();
+        return kLyricRowHeightDip + previewSecondaryHeight(previewSecondaryLineCount());
     }
 
     float measurePreviewMainHeight(fluent::FluentDialogSurface::Painter& painter,
@@ -946,9 +954,9 @@ struct ManualSearchDialog::Impl {
                               const LyricLine& line, const D2D1_RECT_F& rowRect,
                               float mainHeight, bool current) {
         const auto& p = fluent::palette();
-        const int secondaryCount = previewSecondaryLineCount();
+        const int secondaryCount = previewSecondaryLineCount(line);
         const float contentHeight =
-            mainHeight + secondaryCount * (kPreviewSecondaryLineHeight + kPreviewSecondaryGap);
+            mainHeight + previewSecondaryHeight(secondaryCount);
         const float top = rowRect.top +
                           std::max(0.0f, (rowRect.bottom - rowRect.top - contentHeight) * 0.5f);
         const D2D1_RECT_F mainRect =
@@ -961,13 +969,13 @@ struct ManualSearchDialog::Impl {
 
         float secondaryTop = mainRect.bottom + kPreviewSecondaryGap;
         auto drawSecondary = [&](const std::wstring& text) {
-            if (!text.empty()) {
-                painter.drawTrimmedText(
-                    text, painter.textFormat(fluent::font_sizes::caption, 400, true, true),
-                    D2D1::RectF(rowRect.left, secondaryTop, rowRect.right,
-                                secondaryTop + kPreviewSecondaryLineHeight),
-                    p.textSecondary);
-            }
+            if (text.empty())
+                return;
+            painter.drawTrimmedText(
+                text, painter.textFormat(fluent::font_sizes::caption, 400, true, true),
+                D2D1::RectF(rowRect.left, secondaryTop, rowRect.right,
+                            secondaryTop + kPreviewSecondaryLineHeight),
+                p.textSecondary);
             secondaryTop += kPreviewSecondaryLineHeight + kPreviewSecondaryGap;
         };
         if (previewShowRomanization)
@@ -1313,9 +1321,9 @@ struct ManualSearchDialog::Impl {
         const float bodyBottom = std::max(bodyTop, previewRect.bottom - 2.0f);
         const float availableHeight = std::max(0.0f, bodyBottom - bodyTop);
 
-        const float secondaryHeight = previewSecondaryHeight();
+        const int secondaryMask = previewSecondaryMask();
         if (previewMeasuredWidth != lyricWidth ||
-            previewMeasuredSecondaryHeight != secondaryHeight ||
+            previewMeasuredSecondaryMask != secondaryMask ||
             previewMeasuredDpi != surface.dpi()) {
             previewMainHeights.resize(total);
             previewRowHeights.resize(total);
@@ -1323,12 +1331,14 @@ struct ManualSearchDialog::Impl {
             for (int index = 0; index < total; ++index) {
                 previewMainHeights[index] =
                     measurePreviewMainHeight(painter, previewLines[index].text, lyricWidth);
-                previewRowHeights[index] = previewMainHeights[index] + secondaryHeight;
+                previewRowHeights[index] =
+                    previewMainHeights[index] +
+                    previewSecondaryHeight(previewSecondaryLineCount(previewLines[index]));
                 previewRowOffsets[index + 1] =
                     previewRowOffsets[index] + previewRowHeights[index];
             }
             previewMeasuredWidth = lyricWidth;
-            previewMeasuredSecondaryHeight = secondaryHeight;
+            previewMeasuredSecondaryMask = secondaryMask;
             previewMeasuredDpi = surface.dpi();
             previewContentDirty = true;
         }
