@@ -99,7 +99,7 @@
     <!-- 亮点条 -->
     <section class="highlights">
       <div class="container highlights-grid">
-        <div class="hl reveal"><strong>C++ 原生</strong><span>无 Electron、WebView 和 .NET/WPF 运行时，日常使用占用内存20~80MB</span></div>
+        <div class="hl reveal"><strong>C++ 原生</strong><span>无 Electron、WebView 和 .NET/WPF 运行时，日常使用占用内存20~80MB<sup class="feature-footnote"><a href="#memory-note" aria-label="查看内存占用说明">1</a></sup></span></div>
         <div class="hl reveal"><strong>多播放器支持</strong><span>QQ 音乐、网易云音乐、汽水音乐、Spotify，自动识别当前播放来源</span></div>
         <div class="hl reveal"><strong>逐字高亮</strong><span>逐字时间轴按像素进度平滑填充</span></div>
         <div class="hl reveal"><strong>音频频谱</strong><span>只捕获当前播放器的音频，不受其他软件发声影响</span></div>
@@ -195,7 +195,7 @@
             <p>通用字体与软件界面字体均可自由定制，支持独立选择界面字体或跟随通用字体；字号、颜色、光晕与描边均可调整，支持底深顶浅的已播放色连续渐变，深浅色模式可分别配置。字号列表提供推荐值与边界提示。</p>
           </div>
           <div class="explore-item reveal">
-            <h3>智能避让布局<sup class="feature-footnote"><a href="#windows10-note" aria-label="查看 Windows 10 兼容性提示">1</a></sup></h3>
+            <h3>智能避让布局<sup class="feature-footnote"><a href="#windows10-note" aria-label="查看 Windows 10 兼容性提示">2</a></sup></h3>
             <p>自动避开小组件与搜索框，空间不足时迁移空闲区，恢复后自动回归。</p>
           </div>
           <div class="explore-item reveal">
@@ -216,18 +216,18 @@
           </div>
           <div class="explore-item reveal">
             <h3>三种任务栏展示模式</h3>
-            <p>内嵌、沉浸与 Dock 模式<sup class="feature-footnote"><a href="#windows10-note" aria-label="查看 Windows 10 兼容性提示">1</a></sup>自由切换，按使用场景选择歌词的展示方式。</p>
+            <p>内嵌、沉浸与 Dock 模式<sup class="feature-footnote"><a href="#windows10-note" aria-label="查看 Windows 10 兼容性提示">2</a></sup>自由切换，按使用场景选择歌词的展示方式。</p>
           </div>
           <div class="explore-item reveal">
-            <h3>沉浸模式控制中心<sup class="feature-footnote"><a href="#windows10-note" aria-label="查看 Windows 10 兼容性提示">1</a></sup></h3>
+            <h3>沉浸模式控制中心<sup class="feature-footnote"><a href="#windows10-note" aria-label="查看 Windows 10 兼容性提示">2</a></sup></h3>
             <p>居中显示歌词，提供播放控制、时间日期与完整托盘菜单；鼠标停在控件以外即淡出让出任务栏。</p>
           </div>
           <div class="explore-item reveal">
-            <h3>Dock 工作区<sup class="feature-footnote"><a href="#windows10-note" aria-label="查看 Windows 10 兼容性提示">1</a></sup></h3>
+            <h3>Dock 工作区<sup class="feature-footnote"><a href="#windows10-note" aria-label="查看 Windows 10 兼容性提示">2</a></sup></h3>
             <p>通过 Windows AppBar 占用屏幕顶部或底部工作区，独立显示歌词、频谱与控制区域。</p>
           </div>
           <div class="explore-item reveal">
-            <h3>任务栏资源监视<sup class="feature-footnote"><a href="#windows10-note" aria-label="查看 Windows 10 兼容性提示">1</a></sup></h3>
+            <h3>任务栏资源监视<sup class="feature-footnote"><a href="#windows10-note" aria-label="查看 Windows 10 兼容性提示">2</a></sup></h3>
             <p>Dock 自带资源区，横向内嵌模式也可开启。显示 CPU、内存及可选的网络、GPU、CPU 频率指标，滚轮翻页查看。</p>
           </div>
           <div class="explore-item reveal">
@@ -280,12 +280,13 @@
       </div>
     </section>
 
-    <!-- 兼容性提示 -->
-    <section class="site-notice" aria-label="兼容性提示">
+    <!-- 补充说明与兼容性提示 -->
+    <section class="site-notice" aria-label="补充说明与兼容性提示">
       <div class="container">
-        <div class="site-notice-inner" id="windows10-note">
+        <div class="site-notice-inner">
           <ol class="site-notice-list">
-            <li>Windows 10 22H2 任务栏防遮挡可能无法正常工作；沉浸模式与 Dock 模式尚未在 Windows 10 22H2 实机验证。</li>
+            <li id="memory-note">20~80 MB 仅指任务栏歌词核心功能在后台常驻运行时的日常内存占用（具体随是否开启音频频谱、动态背景、歌词特效、封面模糊及沉浸／Dock 多显示器模式而波动），不包括打开设置、字体选择、字体颜色、手动搜索歌词、关于或运行日志等图形界面后的情况；上述独立窗口开启后会初始化额外的 Mica 与 Direct2D／DirectWrite 绘制表面及预览、字体枚举或日志缓存，关闭窗口后对应界面资源即会释放。</li>
+            <li id="windows10-note">Windows 10 22H2 任务栏防遮挡可能无法正常工作；沉浸模式与 Dock 模式尚未在 Windows 10 22H2 实机验证。</li>
           </ol>
         </div>
       </div>
