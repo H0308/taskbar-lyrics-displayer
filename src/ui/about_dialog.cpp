@@ -13,6 +13,7 @@
 
 #include <windowsx.h>
 #include <shellapi.h>
+#include <wrl/client.h>
 
 #include <algorithm>
 #include <atomic>
@@ -88,6 +89,91 @@ void openUrl(const wchar_t* url) {
     ShellExecuteW(nullptr, L"open", url, nullptr, nullptr, SW_SHOWNORMAL);
 }
 
+enum class AboutButtonIcon { None, GitHub, Gitee };
+
+// 在 16x16 坐标系中构造 GitHub Octocat 圆形镂空剪影（外圆与猫头轮廓组成单条闭合环路）。
+Microsoft::WRL::ComPtr<ID2D1PathGeometry> createGitHubIconGeometry(ID2D1Factory* factory) {
+    if (!factory)
+        return {};
+    Microsoft::WRL::ComPtr<ID2D1PathGeometry> geometry;
+    if (FAILED(factory->CreatePathGeometry(&geometry)) || !geometry)
+        return {};
+
+    Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
+    if (FAILED(geometry->Open(&sink)) || !sink)
+        return {};
+
+    constexpr float kCircleRadius = 7.6f;
+    const D2D1_POINT_2F leftFoot{5.95f, 15.3183f};
+    const D2D1_POINT_2F rightFoot{10.05f, 15.3183f};
+
+    sink->BeginFigure(leftFoot, D2D1_FIGURE_BEGIN_FILLED);
+    sink->AddArc(D2D1::ArcSegment(rightFoot, D2D1::SizeF(kCircleRadius, kCircleRadius), 0.0f,
+                                  D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_LARGE));
+    // 右侧躯干 -> 右脸颊 -> 右耳 -> 头顶 -> 左耳 -> 左脸颊 -> 左侧 S 形尾巴 -> 左脚
+    sink->AddBezier(D2D1::BezierSegment({10.05f, 14.6f}, {10.1f, 13.0f}, {9.75f, 11.85f}));
+    sink->AddBezier(D2D1::BezierSegment({11.6f, 11.6f}, {12.65f, 10.4f}, {12.65f, 8.35f}));
+    sink->AddBezier(D2D1::BezierSegment({12.65f, 7.5f}, {12.55f, 6.9f}, {12.35f, 6.45f}));
+    sink->AddBezier(D2D1::BezierSegment({12.65f, 5.65f}, {12.65f, 4.75f}, {12.35f, 4.15f}));
+    sink->AddBezier(D2D1::BezierSegment({11.65f, 4.15f}, {10.95f, 4.65f}, {10.35f, 5.15f}));
+    sink->AddBezier(D2D1::BezierSegment({9.65f, 4.9f}, {8.85f, 4.8f}, {8.0f, 4.8f}));
+    sink->AddBezier(D2D1::BezierSegment({7.15f, 4.8f}, {6.35f, 4.9f}, {5.65f, 5.15f}));
+    sink->AddBezier(D2D1::BezierSegment({5.05f, 4.65f}, {4.35f, 4.15f}, {3.65f, 4.15f}));
+    sink->AddBezier(D2D1::BezierSegment({3.35f, 4.75f}, {3.35f, 5.65f}, {3.65f, 6.45f}));
+    sink->AddBezier(D2D1::BezierSegment({3.45f, 6.9f}, {3.35f, 7.5f}, {3.35f, 8.35f}));
+    sink->AddBezier(D2D1::BezierSegment({3.35f, 10.4f}, {4.4f, 11.6f}, {6.25f, 11.85f}));
+    sink->AddBezier(D2D1::BezierSegment({6.05f, 12.2f}, {5.95f, 12.6f}, {5.95f, 13.05f}));
+    sink->AddBezier(D2D1::BezierSegment({4.75f, 13.3f}, {3.85f, 12.65f}, {2.85f, 11.85f}));
+    sink->AddBezier(D2D1::BezierSegment({3.25f, 11.75f}, {3.95f, 12.2f}, {4.35f, 12.85f}));
+    sink->AddBezier(D2D1::BezierSegment({4.75f, 13.5f}, {5.25f, 13.9f}, {5.95f, 13.95f}));
+    sink->AddBezier(D2D1::BezierSegment({5.95f, 14.4f}, {5.95f, 14.9f}, leftFoot));
+    sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+
+    if (FAILED(sink->Close()))
+        return {};
+    return geometry;
+}
+
+// 在 16x16 坐标系中构造 Gitee 标志性圆角几何 G 轮廓。
+Microsoft::WRL::ComPtr<ID2D1PathGeometry> createGiteeIconGeometry(ID2D1Factory* factory) {
+    if (!factory)
+        return {};
+    Microsoft::WRL::ComPtr<ID2D1PathGeometry> geometry;
+    if (FAILED(factory->CreatePathGeometry(&geometry)) || !geometry)
+        return {};
+
+    Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
+    if (FAILED(geometry->Open(&sink)) || !sink)
+        return {};
+
+    sink->BeginFigure({12.2f, 3.8f}, D2D1_FIGURE_BEGIN_FILLED);
+    sink->AddLine({7.5f, 3.8f});
+    sink->AddArc(D2D1::ArcSegment({3.8f, 7.5f}, D2D1::SizeF(3.7f, 3.7f), 0.0f,
+                                  D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+    sink->AddLine({3.8f, 11.45f});
+    sink->AddArc(D2D1::ArcSegment({4.55f, 12.2f}, D2D1::SizeF(0.75f, 0.75f), 0.0f,
+                                  D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+    sink->AddLine({11.45f, 12.2f});
+    sink->AddArc(D2D1::ArcSegment({12.2f, 11.45f}, D2D1::SizeF(0.75f, 0.75f), 0.0f,
+                                  D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+    sink->AddLine({12.2f, 7.25f});
+    sink->AddLine({7.5f, 7.25f});
+    sink->AddLine({7.5f, 8.8f});
+    sink->AddLine({10.55f, 8.8f});
+    sink->AddLine({10.55f, 10.55f});
+    sink->AddLine({5.45f, 10.55f});
+    sink->AddLine({5.45f, 7.5f});
+    sink->AddArc(D2D1::ArcSegment({7.5f, 5.45f}, D2D1::SizeF(2.05f, 2.05f), 0.0f,
+                                  D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+    sink->AddLine({12.2f, 5.45f});
+    sink->AddLine({12.2f, 3.8f});
+    sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+
+    if (FAILED(sink->Close()))
+        return {};
+    return geometry;
+}
+
 } // namespace
 
 struct AboutDialog::Impl {
@@ -144,6 +230,8 @@ struct AboutDialog::Impl {
     int pressedId = 0;
     int focusedId = kIdAutoCheckSwitch;
     bool focusVisible = false;
+    Microsoft::WRL::ComPtr<ID2D1PathGeometry> githubIconGeometry;
+    Microsoft::WRL::ComPtr<ID2D1PathGeometry> giteeIconGeometry;
 
     static LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         Impl* self = nullptr;
@@ -177,8 +265,45 @@ struct AboutDialog::Impl {
         return true;
     }
 
+    void drawButtonIcon(fluent::FluentDialogSurface::Painter& painter, const D2D1_RECT_F& iconRect,
+                        AboutButtonIcon icon, D2D1_COLOR_F textColor) {
+        auto* rt = painter.target();
+        if (!rt || icon == AboutButtonIcon::None)
+            return;
+
+        Microsoft::WRL::ComPtr<ID2D1Factory> factory;
+        rt->GetFactory(&factory);
+        if (!factory)
+            return;
+
+        if (icon == AboutButtonIcon::GitHub && !githubIconGeometry)
+            githubIconGeometry = createGitHubIconGeometry(factory.Get());
+        if (icon == AboutButtonIcon::Gitee && !giteeIconGeometry)
+            giteeIconGeometry = createGiteeIconGeometry(factory.Get());
+
+        D2D1_MATRIX_3X2_F savedTransform{};
+        rt->GetTransform(&savedTransform);
+        const float scale = (iconRect.right - iconRect.left) / 16.0f;
+        rt->SetTransform(D2D1::Matrix3x2F::Scale(scale, scale) *
+                         D2D1::Matrix3x2F::Translation(iconRect.left, iconRect.top) *
+                         savedTransform);
+
+        if (icon == AboutButtonIcon::GitHub && githubIconGeometry) {
+            if (auto* brush = painter.brush(textColor))
+                rt->FillGeometry(githubIconGeometry.Get(), brush);
+        } else if (icon == AboutButtonIcon::Gitee && giteeIconGeometry) {
+            if (auto* redBrush = painter.brush(fluent::toD2D(RGB(0xC7, 0x1D, 0x23))))
+                rt->FillEllipse(D2D1::Ellipse({8.0f, 8.0f}, 7.6f, 7.6f), redBrush);
+            if (auto* whiteBrush = painter.brush(D2D1::ColorF(D2D1::ColorF::White)))
+                rt->FillGeometry(giteeIconGeometry.Get(), whiteBrush);
+        }
+
+        rt->SetTransform(savedTransform);
+    }
+
     void drawButton(fluent::FluentDialogSurface::Painter& painter, const D2D1_RECT_F& rect,
-                    const std::wstring& text, bool accent, int id) {
+                    const std::wstring& text, bool accent, int id,
+                    AboutButtonIcon icon = AboutButtonIcon::None) {
         const auto& p = fluent::palette();
         const bool enabled = isEnabled(id);
         const bool hovered = enabled && hoverId == id;
@@ -203,6 +328,28 @@ struct AboutDialog::Impl {
                                     D2D1::RectF(rect.left + 1.5f, rect.top + 1.5f,
                                                 rect.right - 1.5f, rect.bottom - 1.5f),
                                     1.5f, std::max(1.0f, fluent::metrics::controlRadius - 1.0f));
+        }
+        if (icon != AboutButtonIcon::None) {
+            auto* leftFormat = painter.textFormat(fluent::font_sizes::button, 400, false, true);
+            constexpr float kIconSize = 14.0f;
+            constexpr float kIconGap = 5.0f;
+            const float textW = leftFormat ? painter.measureTextWidth(text, leftFormat) : 0.0f;
+            const float groupW = kIconSize + kIconGap + textW;
+            const float centerX = (rect.left + rect.right) * 0.5f;
+            const float centerY = (rect.top + rect.bottom) * 0.5f;
+            const float groupLeft = std::max(rect.left + 6.0f, centerX - groupW * 0.5f);
+            const D2D1_RECT_F iconRect =
+                D2D1::RectF(groupLeft, centerY - kIconSize * 0.5f,
+                            groupLeft + kIconSize, centerY + kIconSize * 0.5f);
+            drawButtonIcon(painter, iconRect, icon, textColor);
+            if (leftFormat) {
+                painter.drawText(
+                    text, leftFormat,
+                    D2D1::RectF(groupLeft + kIconSize + kIconGap, rect.top,
+                                rect.right - 4.0f, rect.bottom),
+                    textColor);
+            }
+            return;
         }
         auto* format = painter.textFormat(fluent::font_sizes::button, 400, true, true);
         painter.drawText(text, format,
@@ -330,8 +477,10 @@ struct AboutDialog::Impl {
         painter.drawText(L"启动时自动检查更新", painter.textFormat(fluent::font_sizes::label, 400), autoCheckLabelRect,
                          p.textSecondary);
         drawToggle(painter, autoSwitchRect, autoCheckOnStartup);
-        drawButton(painter, projectRect, L"GitHub", false, kIdProjectButton);
-        drawButton(painter, giteeProjectRect, L"Gitee", false, kIdGiteeProjectButton);
+        drawButton(painter, projectRect, L"GitHub", false, kIdProjectButton,
+                   AboutButtonIcon::GitHub);
+        drawButton(painter, giteeProjectRect, L"Gitee", false, kIdGiteeProjectButton,
+                   AboutButtonIcon::Gitee);
 
         const AboutPanelTab activeTab = releaseNotes.activeTab();
         drawPanelTab(painter, releaseNotesTabRect, L"更新日志",
@@ -749,6 +898,8 @@ struct AboutDialog::Impl {
             releaseNotes.reset();
             discardPendingUpdateResults(hwnd);
             discardPendingDownloadMessages(hwnd);
+            githubIconGeometry.Reset();
+            giteeIconGeometry.Reset();
             surface.discard();
             hwnd = nullptr;
             if (notifyHwnd)
@@ -792,7 +943,7 @@ struct AboutDialog::Impl {
         const float contentW = std::max(20.0f, w - contentX - pad - 16.0f);
         versionRect = D2D1::RectF(contentX, cardY + 14.0f, contentX + contentW,
                                    cardY + 36.0f);
-        const float projectW = 72.0f;
+        const float projectW = 84.0f;
         const float projectGap = 8.0f;
         projectRect = D2D1::RectF(contentX, cardY + 54.0f, contentX + projectW,
                                   cardY + 86.0f);
@@ -803,9 +954,10 @@ struct AboutDialog::Impl {
         const float switchW = 40.0f;
         const float switchH = 20.0f;
         const float switchX = w - pad - 16.0f - switchW;
+        const float autoCheckLabelLeft = giteeProjectRect.right + 12.0f;
         autoCheckLabelRect = D2D1::RectF(
-            contentX + 164.0f, cardY + 60.0f,
-            std::max(contentX + 184.0f, switchX - 8.0f), cardY + 80.0f);
+            autoCheckLabelLeft, cardY + 60.0f,
+            std::max(autoCheckLabelLeft + 20.0f, switchX - 8.0f), cardY + 80.0f);
         autoSwitchRect = D2D1::RectF(switchX, cardY + 60.0f + (32.0f - switchH) / 2.0f,
                                      switchX + switchW,
                                      cardY + 60.0f + (32.0f - switchH) / 2.0f + switchH);
