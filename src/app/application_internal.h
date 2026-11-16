@@ -9,6 +9,7 @@
 #include "ui/taskbar_host.h"
 #include "ui/app_icon.h"
 #include "ui/about_dialog.h"
+#include "update/startup_update_check.h"
 #include "ui/manual_search_dialog.h"
 #include "ui/font_picker_dialog.h"
 #include "ui/font_color_dialog.h"

@@ -6,20 +6,7 @@
 #include <memory>
 #include <string>
 
-// 启动检查只接收网络结果，不创建关于窗口或绘图资源。
-class StartupUpdateCheck {
-public:
-    StartupUpdateCheck(bool useGiteeUpdateSource,
-                       std::function<void(const std::wstring&)> onAvailable);
-    ~StartupUpdateCheck();
-    StartupUpdateCheck(const StartupUpdateCheck&) = delete;
-    StartupUpdateCheck& operator=(const StartupUpdateCheck&) = delete;
-
-private:
-    friend class AboutDialog;
-    struct Impl;
-    std::unique_ptr<Impl> impl_;
-};
+class StartupUpdateCheck;
 
 // 软件关于窗口：显示应用信息，并从用户选择的 GitHub/Gitee Release 检查正式版本更新。
 class AboutDialog {

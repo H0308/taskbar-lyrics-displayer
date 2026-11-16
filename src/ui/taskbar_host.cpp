@@ -3,6 +3,8 @@
 #include "lyric/lyric_provider.h"
 #include "media/player_source.h"
 #include "ui/taskbar/vinyl_animation.h"
+#include "ui/taskbar/vinyl_renderer.h"
+#include "ui/taskbar/idle_background_renderer.h"
 #include "ui/taskbar/lyric_transition.h"
 #include "ui/taskbar/scene_transition.h"
 #include "ui/taskbar/lyric_typesetter.h"
@@ -164,12 +166,6 @@ constexpr float kDockResourceZoneGap = 10.0f;
 constexpr float kDockResourceRightPadding = 3.0f;
 constexpr float kDockPetSeatW = 42.0f;
 constexpr float kPetLaneMinWidthDip = 44.0f;
-constexpr float kVinylRotationDegPerSecond = 30.0f; // 黑胶唱片转速：12 秒一圈，保持视觉克制
-constexpr float kVinylArmParkedAngle = -18.0f;
-constexpr ULONGLONG kVinylArmDurationMs = 240;
-constexpr float kVinylHaloWidth = 0.5f;
-constexpr float kVinylOuterRatio = 0.40f; // 唱片直径约为底座边长的 80%，四边各留约 10%
-constexpr float kVinylInnerRatio = 0.25f; // 圆形专辑封面半径 / 封面槽边长
 
 // 读取注册表 DWORD，失败返回默认值
 
@@ -600,10 +596,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushLyricDim_;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushLyricGlow_;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushLyricOutline_;
-    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushVinylBase_;
-    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushVinylGroove_;
-    Microsoft::WRL::ComPtr<ID2D1LinearGradientBrush> brushVinylSurface_;
-    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushTurntable_;
+    taskbar_detail::TaskbarVinylRenderer vinylRenderer_;
     COLORREF lyricColor_ = RGB(49, 194, 124);         // 已播放颜色，默认 QQ 绿
     COLORREF lyricUnplayedColor_ = RGB(49, 194, 124); // 逐字未播放颜色
     int lyricUnplayedAlphaPct_ = 45;                  // 逐字未播放不透明度（%）
@@ -664,7 +657,6 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     Microsoft::WRL::ComPtr<ID2D1StrokeStyle> dragPreviewStroke_;
     bool spectrumVisible_ = false;
     Microsoft::WRL::ComPtr<ID2D1RoundedRectangleGeometry> coverClip_;
-    Microsoft::WRL::ComPtr<ID2D1EllipseGeometry> vinylCoverClip_;
     Microsoft::WRL::ComPtr<ID2D1Layer> coverLayer_;
     // 滚动歌词左缘渐隐：固定两停止点，渐变轴每帧按滚动偏移更新
     // 右缘渐隐带：完全位于歌词区右缘之外的留白（到频谱/窗口边缘的间隙），
@@ -1690,47 +1682,6 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                                                 : RenderState::DeviceResourcePhase::Uninitialized);
     }
 
-    // 盘面底色在绘制时跟随专辑，反光以半透明黑白叠加，保留专辑色相。
-    void createAlbumCoverBrushes() {
-        auto* rt = renderer.renderTarget();
-        if (!rt)
-            return;
-        brushVinylBase_.Reset();
-        brushVinylGroove_.Reset();
-        brushVinylSurface_.Reset();
-        brushTurntable_.Reset();
-        rt->CreateSolidColorBrush(D2D1::ColorF(0.055f, 0.060f, 0.068f),
-                                  brushVinylBase_.ReleaseAndGetAddressOf());
-        rt->CreateSolidColorBrush(D2D1::ColorF(0.70f, 0.72f, 0.75f, 0.16f),
-                                  brushVinylGroove_.ReleaseAndGetAddressOf());
-        const D2D1_GRADIENT_STOP stops[] = {
-            {0.00f, D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.20f)},
-            {0.22f, D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.26f)},
-            {0.38f, D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.10f)},
-            {0.52f, D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.45f)},
-            {0.76f, D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.20f)},
-            {1.00f, D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.15f)},
-        };
-        ID2D1GradientStopCollection* collection = nullptr;
-        if (SUCCEEDED(rt->CreateGradientStopCollection(stops, _countof(stops), D2D1_GAMMA_2_2,
-                                                       D2D1_EXTEND_MODE_CLAMP, &collection))) {
-            rt->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(
-                                              D2D1::Point2F(0.0f, 0.0f), D2D1::Point2F(1.0f, 1.0f)),
-                                          collection, brushVinylSurface_.ReleaseAndGetAddressOf());
-            collection->Release();
-        }
-        rt->CreateSolidColorBrush(D2D1::ColorF(0.07f, 0.08f, 0.09f),
-                                  brushTurntable_.ReleaseAndGetAddressOf());
-    }
-
-    void releaseAlbumCoverEffectResources() {
-        brushVinylBase_.Reset();
-        brushVinylGroove_.Reset();
-        brushVinylSurface_.Reset();
-        brushTurntable_.Reset();
-        vinylCoverClip_.Reset();
-    }
-
     // 歌词与黑胶画刷：随用户颜色重建，与主题画刷解耦
     void createLyricBrushes() {
         if (updateDepth_ != 0) {
@@ -1771,9 +1722,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         spectrum_.setContext(spectrumContext(rt));
         spectrum_.createBrushes();
         if (albumCoverEffect_ == AlbumCoverEffect::Vinyl)
-            createAlbumCoverBrushes();
+            vinylRenderer_.createBrushes(rt);
         else
-            releaseAlbumCoverEffectResources();
+            vinylRenderer_.releaseResources();
     }
 
     void setFontGlowColors(COLORREF glow, COLORREF outline) {
@@ -2391,9 +2342,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         vinyl_.resetClock(monotonicNowMs());
         requestInvalidation(RenderInvalidation::Geometry);
         if (effect == AlbumCoverEffect::Vinyl)
-            createAlbumCoverBrushes();
+            vinylRenderer_.createBrushes(renderer.renderTarget());
         else
-            releaseAlbumCoverEffectResources();
+            vinylRenderer_.releaseResources();
         updateVinylRotation();
         requestFrameAndFlush();
     }
@@ -3080,326 +3031,21 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return taskbarDynamicBackgroundVisible() && clientAnimations_;
     }
 
-    void drawIdleQuoteBackground(float w, float h, const D2D1_RECT_F& region) {
-        auto* rt = renderer.renderTarget();
-        if (!rt || w <= 0.0f || h <= 0.0f)
-            return;
-
-        const float effectW = w;
-
-        const float time = static_cast<float>(frameNowMs_ % 600000ULL) / 1000.0f;
-        auto* warm = brushIdleWarm_.Get() ? brushIdleWarm_.Get() : brushText_.Get();
-        auto* cool = brushIdleCool_.Get() ? brushIdleCool_.Get() : brushText_.Get();
-        auto* accent = brushIdleAccent_.Get() ? brushIdleAccent_.Get() : brushText_.Get();
-        if (!warm && !cool && !accent)
-            return;
-
-        auto drawWithOpacity = [](ID2D1SolidColorBrush* brush, float opacity, const auto& draw) {
-            if (!brush)
-                return;
-            const float previous = brush->GetOpacity();
-            brush->SetOpacity(std::clamp(opacity, 0.0f, 1.0f));
-            draw();
-            brush->SetOpacity(previous);
-        };
-
-        rt->PushAxisAlignedClip(region, D2D1_ANTIALIAS_MODE_ALIASED);
-        switch (idleQuoteBackground_) {
-        case IdleQuoteBackground::FallingLeaves: {
-            struct Leaf {
-                float x;
-                float y;
-                float size;
-                float fallSpeed;
-                float drift;
-                float phase;
-                float angle;
-            };
-            static constexpr Leaf leaves[] = {
-                {0.03f, -0.22f, 3.6f, 9.4f, 0.12f, 0.4f, -24.0f},
-                {0.10f, 0.46f, 3.0f, 7.2f, 0.16f, 2.1f, 18.0f},
-                {0.17f, 0.06f, 4.3f, 12.0f, 0.10f, 4.0f, 42.0f},
-                {0.24f, 0.78f, 2.8f, 8.6f, 0.14f, 1.2f, -12.0f},
-                {0.31f, -0.04f, 3.8f, 10.8f, 0.17f, 3.5f, 28.0f},
-                {0.38f, 0.30f, 3.1f, 7.8f, 0.11f, 5.1f, -36.0f},
-                {0.45f, 0.93f, 4.6f, 11.2f, 0.15f, 0.9f, 12.0f},
-                {0.52f, 0.14f, 2.9f, 8.2f, 0.18f, 2.8f, -48.0f},
-                {0.59f, 0.61f, 3.7f, 10.0f, 0.12f, 4.6f, 34.0f},
-                {0.66f, -0.28f, 3.2f, 7.0f, 0.16f, 1.6f, -8.0f},
-                {0.73f, 0.38f, 4.1f, 12.6f, 0.10f, 3.9f, 52.0f},
-                {0.80f, 0.84f, 2.7f, 8.8f, 0.14f, 5.4f, -30.0f},
-                {0.87f, 0.18f, 3.5f, 9.8f, 0.17f, 2.6f, 20.0f},
-                {0.95f, 0.56f, 4.4f, 11.8f, 0.11f, 0.7f, -42.0f},
-            };
-            const float loopH = h + 16.0f;
-            for (size_t i = 0; i < _countof(leaves); ++i) {
-                float y = std::fmod(leaves[i].y * h + time * leaves[i].fallSpeed, loopH);
-                if (y < 0.0f)
-                    y += loopH;
-                y -= 8.0f;
-                float x = leaves[i].x * effectW +
-                          std::sin(time * 0.62f + leaves[i].phase) * leaves[i].drift * effectW;
-                x = std::fmod(x + effectW, effectW);
-                if (x < 0.0f)
-                    x += effectW;
-                const D2D1_POINT_2F center = D2D1::Point2F(x, y);
-                const float angle =
-                    leaves[i].angle + std::sin(time * 0.88f + leaves[i].phase) * 24.0f;
-                drawWithOpacity(warm, 0.22f + (i % 4) * 0.045f, [&] {
-                    D2D1_MATRIX_3X2_F previous{};
-                    rt->GetTransform(&previous);
-                    rt->SetTransform(D2D1::Matrix3x2F::Rotation(angle, center));
-                    rt->FillEllipse(D2D1::Ellipse(center, leaves[i].size, leaves[i].size * 0.46f),
-                                    warm);
-                    rt->DrawLine(D2D1::Point2F(x - leaves[i].size * 0.52f, y),
-                                 D2D1::Point2F(x + leaves[i].size * 0.52f, y), warm, 0.70f);
-                    rt->SetTransform(previous);
-                });
-            }
-            break;
-        }
-        case IdleQuoteBackground::TwinklingStars: {
-            struct Star {
-                float x;
-                float y;
-                float radius;
-                float phase;
-                float speed;
-            };
-            static constexpr Star stars[] = {
-                {0.03f, 0.18f, 0.92f, 0.2f, 1.25f}, {0.07f, 0.68f, 0.78f, 2.4f, 0.92f},
-                {0.12f, 0.42f, 1.18f, 4.1f, 1.46f}, {0.16f, 0.86f, 0.84f, 1.1f, 0.78f},
-                {0.21f, 0.08f, 0.76f, 3.2f, 1.12f}, {0.25f, 0.56f, 1.06f, 5.0f, 1.36f},
-                {0.30f, 0.30f, 0.88f, 0.6f, 0.86f}, {0.34f, 0.76f, 0.74f, 2.9f, 1.58f},
-                {0.39f, 0.16f, 1.10f, 4.7f, 1.04f}, {0.43f, 0.92f, 0.82f, 1.8f, 1.32f},
-                {0.48f, 0.46f, 0.96f, 3.7f, 0.74f}, {0.52f, 0.12f, 0.76f, 5.6f, 1.18f},
-                {0.56f, 0.70f, 1.24f, 1.5f, 1.42f}, {0.60f, 0.34f, 0.80f, 3.0f, 0.88f},
-                {0.64f, 0.84f, 1.02f, 4.4f, 1.24f}, {0.68f, 0.22f, 0.72f, 0.9f, 1.60f},
-                {0.72f, 0.52f, 1.14f, 2.1f, 1.02f}, {0.76f, 0.06f, 0.86f, 5.2f, 1.38f},
-                {0.80f, 0.76f, 1.00f, 3.4f, 0.80f}, {0.84f, 0.38f, 0.78f, 1.7f, 1.50f},
-                {0.88f, 0.16f, 1.20f, 4.8f, 1.14f}, {0.92f, 0.62f, 0.82f, 2.6f, 0.96f},
-                {0.96f, 0.30f, 1.08f, 0.7f, 1.28f}, {0.985f, 0.90f, 0.74f, 5.8f, 0.72f},
-            };
-            for (size_t i = 0; i < _countof(stars); ++i) {
-                const float twinkle =
-                    0.5f + 0.5f * std::sin(time * stars[i].speed + stars[i].phase);
-                const D2D1_POINT_2F center = D2D1::Point2F(stars[i].x * effectW, stars[i].y * h);
-                const float radius = stars[i].radius * (0.72f + twinkle * 0.52f);
-                drawWithOpacity(cool, 0.14f + twinkle * 0.30f, [&] {
-                    rt->FillEllipse(D2D1::Ellipse(center, radius, radius), cool);
-                    if (i % 4 == 0 && twinkle > 0.52f) {
-                        const float ray = radius * (2.4f + twinkle * 1.5f);
-                        rt->DrawLine(D2D1::Point2F(center.x - ray, center.y),
-                                     D2D1::Point2F(center.x + ray, center.y), cool, 0.70f);
-                        rt->DrawLine(D2D1::Point2F(center.x, center.y - ray),
-                                     D2D1::Point2F(center.x, center.y + ray), cool, 0.70f);
-                    }
-                });
-            }
-            break;
-        }
-        case IdleQuoteBackground::BinaryRain: {
-            if (typesetter_.resources().fmtSecondary_.Get()) {
-                const int columns = std::clamp(static_cast<int>(effectW / 23.0f), 5, 10);
-                const float columnW = effectW / static_cast<float>(columns);
-                const float rowGap = std::max(9.0f, h / 3.6f);
-                const ULONGLONG bitTick = frameNowMs_ / 190ULL;
-                for (int col = 0; col < columns; ++col) {
-                    const float head =
-                        std::fmod(time * (7.0f + static_cast<float>(col % 3) * 2.0f) +
-                                      static_cast<float>(col) * 8.0f,
-                                  h + rowGap * 4.0f) -
-                        rowGap * 2.0f;
-                    for (int row = -1; row < 5; ++row) {
-                        const float y = head + static_cast<float>(row) * rowGap;
-                        if (y < -rowGap || y > h)
-                            continue;
-                        const bool one = ((bitTick + static_cast<ULONGLONG>(col * 13 + row * 7 +
-                                                                            col * row * 3)) &
-                                          1ULL) != 0;
-                        wchar_t digit[2] = {one ? L'1' : L'0', L'\0'};
-                        const float trail =
-                            std::clamp(1.0f - std::fabs(y - head) / (rowGap * 3.5f), 0.0f, 1.0f);
-                        const float opacity = 0.045f + trail * 0.16f;
-                        const D2D1_RECT_F rect = D2D1::RectF(
-                            columnW * (static_cast<float>(col) + 0.5f) - 4.0f, y,
-                            columnW * (static_cast<float>(col) + 0.5f) + 4.0f, y + rowGap + 2.0f);
-                        drawWithOpacity(accent, opacity, [&] {
-                            rt->DrawTextW(digit, 1, typesetter_.resources().fmtSecondary_.Get(),
-                                          rect, accent, D2D1_DRAW_TEXT_OPTIONS_CLIP,
-                                          DWRITE_MEASURING_MODE_NATURAL);
-                        });
-                    }
-                }
-            }
-            break;
-        }
-        case IdleQuoteBackground::FloatingParticles: {
-            struct Particle {
-                float x;
-                float y;
-                float radius;
-                float speed;
-                float amplitude;
-                float phase;
-            };
-            static constexpr Particle particles[] = {
-                {0.02f, 0.28f, 1.18f, 4.0f, 0.18f, 0.4f}, {0.07f, 0.74f, 0.92f, 5.5f, 0.14f, 2.3f},
-                {0.12f, 0.48f, 1.48f, 2.8f, 0.20f, 4.2f}, {0.17f, 0.12f, 1.00f, 4.8f, 0.13f, 1.2f},
-                {0.22f, 0.86f, 1.26f, 3.3f, 0.17f, 3.5f}, {0.27f, 0.38f, 0.86f, 6.2f, 0.22f, 5.0f},
-                {0.32f, 0.66f, 1.38f, 3.7f, 0.16f, 0.9f}, {0.37f, 0.22f, 0.96f, 5.2f, 0.19f, 2.8f},
-                {0.42f, 0.80f, 1.10f, 3.1f, 0.14f, 4.8f}, {0.47f, 0.52f, 1.56f, 4.6f, 0.18f, 1.7f},
-                {0.52f, 0.08f, 0.90f, 5.8f, 0.21f, 3.9f}, {0.57f, 0.92f, 1.32f, 2.6f, 0.15f, 5.4f},
-                {0.62f, 0.34f, 1.16f, 4.3f, 0.20f, 1.5f}, {0.67f, 0.70f, 0.88f, 6.0f, 0.13f, 3.1f},
-                {0.72f, 0.18f, 1.44f, 3.4f, 0.17f, 4.5f}, {0.77f, 0.84f, 1.02f, 4.9f, 0.22f, 0.7f},
-                {0.82f, 0.44f, 1.30f, 2.9f, 0.16f, 2.0f}, {0.87f, 0.06f, 0.94f, 5.6f, 0.19f, 3.6f},
-                {0.92f, 0.62f, 1.50f, 3.9f, 0.14f, 5.1f}, {0.97f, 0.30f, 1.08f, 4.5f, 0.20f, 1.0f},
-            };
-            for (size_t i = 0; i < _countof(particles); ++i) {
-                float x = std::fmod(particles[i].x * effectW + time * particles[i].speed, effectW);
-                if (x < 0.0f)
-                    x += effectW;
-                const float y = particles[i].y * h + std::sin(time * 0.72f + particles[i].phase) *
-                                                         particles[i].amplitude * h;
-                const float pulse =
-                    0.5f + 0.5f * std::sin(time * (1.1f + i * 0.04f) + particles[i].phase);
-                auto* brush = i % 3 == 0 ? accent : cool;
-                drawWithOpacity(brush, 0.15f + pulse * 0.26f, [&] {
-                    const float radius = particles[i].radius * (0.72f + pulse * 0.48f);
-                    rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(x, y), radius, radius), brush);
-                    if (i % 2 == 0) {
-                        rt->DrawLine(D2D1::Point2F(x - particles[i].speed * 0.7f, y),
-                                     D2D1::Point2F(x - radius, y), brush, 0.65f);
-                    }
-                });
-            }
-            break;
-        }
-        case IdleQuoteBackground::None:
-        default:
-            break;
-        }
-        rt->PopAxisAlignedClip();
-    }
-
     void drawVinylCover(float coverX, float coverY, float s) {
-        auto* rt = drawTarget();
-        if (!rt || s <= 0.0f)
-            return;
-
-        // 使用任务栏内容主题，与普通设置窗口的主题来源独立。
-        const auto deckFill =
-            lightTheme_ ? D2D1::ColorF(0.97f, 0.975f, 0.98f) : D2D1::ColorF(0.07f, 0.08f, 0.09f);
-        const auto deckStroke =
-            lightTheme_ ? D2D1::ColorF(0.77f, 0.79f, 0.81f) : D2D1::ColorF(0.27f, 0.28f, 0.30f);
-        const auto platterRim =
-            lightTheme_ ? D2D1::ColorF(0.82f, 0.84f, 0.86f) : D2D1::ColorF(0.37f, 0.39f, 0.42f);
-        const auto armShadow = lightTheme_ ? D2D1::ColorF(0.45f, 0.47f, 0.49f, 0.60f)
-                                           : D2D1::ColorF(0.02f, 0.025f, 0.03f);
-        const auto metal =
-            lightTheme_ ? D2D1::ColorF(0.86f, 0.88f, 0.90f) : D2D1::ColorF(0.65f, 0.67f, 0.69f);
-        const auto pivotFill = lightTheme_ ? D2D1::ColorF(0.99f, 0.99f, 0.99f) : metal;
-        const auto cartridge =
-            lightTheme_ ? D2D1::ColorF(0.95f, 0.96f, 0.97f) : D2D1::ColorF(0.12f, 0.13f, 0.15f);
-
-        D2D1_POINT_2F center = D2D1::Point2F(coverX + s * 0.5f, coverY + s * 0.5f);
-        float outerRadius = std::max(1.0f, s * kVinylOuterRatio);
-        float haloWidth = std::min(kVinylHaloWidth, outerRadius * 0.25f);
-        float recordRadius = std::max(0.5f, outerRadius - haloWidth);
-        float innerRadius = vinylInnerRadius(s);
-        D2D1_ELLIPSE outer{center, outerRadius, outerRadius};
-        D2D1_ELLIPSE record{center, recordRadius, recordRadius};
-        D2D1_ELLIPSE inner{center, innerRadius, innerRadius};
-
-        // 固定唱机底座始终位于原封面槽内，不随盘面旋转，也不挤占歌曲文字。
-        if (brushTurntable_.Get()) {
-            const auto deck =
-                D2D1::RoundedRect(D2D1::RectF(coverX, coverY, coverX + s, coverY + s), 4.0f, 4.0f);
-            brushTurntable_->SetColor(deckFill);
-            rt->FillRoundedRectangle(deck, brushTurntable_.Get());
-            brushTurntable_->SetColor(deckStroke);
-            rt->DrawRoundedRectangle(deck, brushTurntable_.Get(), 0.6f);
-        }
-
-        // 光照固定在唱机上，盘面和封面在光照下旋转。
-        D2D1_MATRIX_3X2_F previous{};
-        rt->GetTransform(&previous);
-        if (brushTurntable_.Get()) {
-            brushTurntable_->SetColor(platterRim);
-            rt->FillEllipse(outer, brushTurntable_.Get());
-        }
-        if (brushVinylBase_.Get()) {
-            brushVinylBase_->SetColor(media.hasDominantColor
-                                          ? fluent::toD2D(media.dominantColor)
-                                          : (lightTheme_ ? D2D1::ColorF(0.72f, 0.73f, 0.74f)
-                                                         : D2D1::ColorF(0.055f, 0.060f, 0.068f)));
-            rt->FillEllipse(record, brushVinylBase_.Get());
-        }
-        if (brushVinylSurface_.Get()) {
-            brushVinylSurface_->SetStartPoint(
-                D2D1::Point2F(center.x - recordRadius * 0.8f, center.y - recordRadius * 0.6f));
-            brushVinylSurface_->SetEndPoint(
-                D2D1::Point2F(center.x + recordRadius * 0.8f, center.y + recordRadius * 0.6f));
-            rt->FillEllipse(record, brushVinylSurface_.Get());
-        }
-        rt->SetTransform(D2D1::Matrix3x2F::Rotation(vinyl_.angle(), center) * previous);
-
-        if (brushVinylGroove_.Get()) {
-            brushVinylGroove_->SetColor(lightTheme_ ? D2D1::ColorF(0.25f, 0.27f, 0.29f, 0.20f)
-                                                    : D2D1::ColorF(0.70f, 0.72f, 0.75f, 0.16f));
-            // 细窄的低对比唱纹，避免小尺寸下粗同心圆看起来像一圈圈边框。
-            for (float radius = innerRadius + 0.9f; radius < recordRadius - 0.4f; radius += 1.1f) {
-                rt->DrawEllipse(D2D1_ELLIPSE{center, radius, radius}, brushVinylGroove_.Get(),
-                                0.35f);
-            }
-        }
-
-        D2D1_RECT_F innerRect = D2D1::RectF(center.x - innerRadius, center.y - innerRadius,
-                                            center.x + innerRadius, center.y + innerRadius);
-        if (cover_.bitmap() && vinylCoverClip_.Get() && coverLayer_.Get()) {
-            rt->PushLayer(D2D1::LayerParameters1(D2D1::InfiniteRect(), vinylCoverClip_.Get(),
-                                                 D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
-                                                 D2D1::Matrix3x2F::Translation(coverX, coverY)),
-                          coverLayer_.Get());
-            rt->DrawBitmap(cover_.bitmap(), innerRect, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
-            rt->PopLayer();
-        } else if (brushDim_.Get()) {
-            rt->FillEllipse(inner, brushDim_.Get());
-        }
-        if (brushVinylGroove_.Get())
-            rt->DrawEllipse(inner, brushVinylGroove_.Get(), 0.8f);
-        if (brushVinylBase_.Get()) {
-            brushVinylBase_->SetColor(lightTheme_ ? D2D1::ColorF(0.78f, 0.80f, 0.82f)
-                                                  : D2D1::ColorF(0.035f, 0.04f, 0.05f));
-            rt->FillEllipse(
-                D2D1_ELLIPSE{center, std::max(0.8f, s * 0.025f), std::max(0.8f, s * 0.025f)},
-                brushVinylBase_.Get());
-        }
-        rt->SetTransform(previous);
-
-        // 唱臂绕固定支点收放，盘面旋转与唱臂动作分别计时。
-        if (brushTurntable_.Get()) {
-            const auto point = [&](float x, float y) {
-                return D2D1::Point2F(coverX + s * x, coverY + s * y);
-            };
-            const auto pivot = point(0.85f, 0.17f);
-            const auto elbow = point(0.81f, 0.55f);
-            const auto stylus = point(0.73f, 0.75f);
-            rt->SetTransform(D2D1::Matrix3x2F::Rotation(vinyl_.armAngle(), pivot) * previous);
-            brushTurntable_->SetColor(armShadow);
-            rt->FillEllipse(D2D1::Ellipse(pivot, s * 0.075f, s * 0.075f), brushTurntable_.Get());
-            rt->DrawLine(pivot, elbow, brushTurntable_.Get(), std::max(1.2f, s * 0.045f));
-            rt->DrawLine(elbow, stylus, brushTurntable_.Get(), std::max(1.2f, s * 0.045f));
-            brushTurntable_->SetColor(metal);
-            rt->DrawLine(pivot, elbow, brushTurntable_.Get(), std::max(0.65f, s * 0.023f));
-            rt->DrawLine(elbow, stylus, brushTurntable_.Get(), std::max(0.65f, s * 0.023f));
-            brushTurntable_->SetColor(pivotFill);
-            rt->FillEllipse(D2D1::Ellipse(pivot, s * 0.035f, s * 0.035f), brushTurntable_.Get());
-            brushTurntable_->SetColor(cartridge);
-            rt->DrawLine(point(0.75f, 0.70f), point(0.71f, 0.79f), brushTurntable_.Get(),
-                         std::max(1.5f, s * 0.07f));
-            rt->SetTransform(previous);
-        }
+        vinylRenderer_.draw({
+            .rt = drawTarget(),
+            .coverBitmap = cover_.bitmap(),
+            .coverLayer = coverLayer_.Get(),
+            .fallbackDimBrush = brushDim_.Get(),
+            .coverX = coverX,
+            .coverY = coverY,
+            .coverSize = s,
+            .discAngle = vinyl_.angle(),
+            .armAngle = vinyl_.armAngle(),
+            .lightTheme = lightTheme_,
+            .hasDominantColor = media.hasDominantColor,
+            .dominantColor = media.dominantColor,
+        });
     }
 
     void drawPlatformIcon(float coverX, float coverY, float s) {
@@ -3667,10 +3313,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         brushLyricDim_.Reset();
         brushLyricGlow_.Reset();
         brushLyricOutline_.Reset();
-        brushVinylBase_.Reset();
-        brushVinylGroove_.Reset();
-        brushVinylSurface_.Reset();
-        brushTurntable_.Reset();
+        vinylRenderer_.releaseResources();
         brushProgressBg_.Reset();
         brushBackground_.Reset();
         brushIdleWarm_.Reset();
@@ -3682,7 +3325,6 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         lyricTextRenderer_.discardDeviceResources();
         karaoke_.clearGeometry();
         coverClip_.Reset();
-        vinylCoverClip_.Reset();
         coverLayer_.Reset();
         songInfoDividerBrush_.Reset();
         media_control::release(controlGeometry);
@@ -4289,13 +3931,6 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                                 monotonicNowMs());
     }
 
-    float vinylInnerRadius(float s) const {
-        float outerRadius = std::max(1.0f, s * kVinylOuterRatio);
-        float recordRadius =
-            std::max(0.5f, outerRadius - std::min(kVinylHaloWidth, outerRadius * 0.25f));
-        return std::min(s * kVinylInnerRatio, std::max(1.0f, recordRadius - 1.0f));
-    }
-
     // ---------- 图标几何 ----------
 
     void ensureGeometry() {
@@ -4308,19 +3943,14 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (coverClip_.Get()) {
             coverClip_.Reset();
         }
-        if (vinylCoverClip_.Get()) {
-            vinylCoverClip_.Reset();
-        }
+        vinylRenderer_.releaseClipGeometry();
         media_control::release(controlGeometry);
 
         float s = coverSize();
         D2D1_ROUNDED_RECT rr{D2D1::RectF(0, 0, s, s), 4.0f, 4.0f};
         d2d->CreateRoundedRectangleGeometry(rr, coverClip_.ReleaseAndGetAddressOf());
-        if (albumCoverEffect_ == AlbumCoverEffect::Vinyl) {
-            D2D1_ELLIPSE coverEllipse{D2D1::Point2F(s * 0.5f, s * 0.5f), vinylInnerRadius(s),
-                                      vinylInnerRadius(s)};
-            d2d->CreateEllipseGeometry(coverEllipse, vinylCoverClip_.ReleaseAndGetAddressOf());
-        }
+        if (albumCoverEffect_ == AlbumCoverEffect::Vinyl)
+            vinylRenderer_.createClipGeometry(d2d, s);
 
         if (!media_control::create(d2d, controlGeometry))
             requestInvalidation(RenderInvalidation::Geometry);
@@ -6068,8 +5698,22 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
     void drawTaskbarDynamicBackground(float w, float h) {
         const auto regions = taskbarDynamicBackgroundRegions(w, h);
-        for (size_t i = 0; i < regions.count; ++i)
-            drawIdleQuoteBackground(w, h, regions.rects[i]);
+        auto* rt = renderer.renderTarget();
+        for (size_t i = 0; i < regions.count; ++i) {
+            taskbar_detail::drawIdleQuoteBackground({
+                .rt = rt,
+                .style = idleQuoteBackground_,
+                .width = w,
+                .height = h,
+                .region = regions.rects[i],
+                .frameNowMs = frameNowMs_,
+                .brushWarm = brushIdleWarm_.Get(),
+                .brushCool = brushIdleCool_.Get(),
+                .brushAccent = brushIdleAccent_.Get(),
+                .fallbackTextBrush = brushText_.Get(),
+                .binaryFontFormat = typesetter_.resources().fmtSecondary_.Get(),
+            });
+        }
     }
 
     void drawTaskbarBackground(float w, float h, float progressExtent, bool vertical,

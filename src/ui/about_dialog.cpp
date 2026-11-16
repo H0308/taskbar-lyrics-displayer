@@ -1,51 +1,36 @@
 #include "about_dialog.h"
-#include "ui/font_sizes.h"
 
 #include "app_info.h"
+#include "logging/runtime_logger.h"
 #include "ui/app_icon.h"
 #include "ui/dialog_notify.h"
 #include "ui/fluent_dialog_surface.h"
 #include "ui/fluent_theme.h"
-#include "ui/ui_dispatcher.h"
-#include "logging/runtime_logger.h"
-
-#include <curl/curl.h>
-#include <nlohmann/json.hpp>
+#include "ui/font_sizes.h"
+#include "ui/release_notes_view.h"
+#include "update/startup_update_check.h"
+#include "update/update_service.h"
 
 #include <windowsx.h>
-#include <winhttp.h>
+#include <shellapi.h>
 
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
-#include <cwchar>
-#include <filesystem>
-#include <fstream>
-#include <iterator>
+#include <memory>
 #include <optional>
-#include <shellapi.h>
 #include <string>
-#include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
 namespace {
 
-constexpr int kIdInfoCard = 301;
-constexpr int kIdVersionLabel = 302;
-constexpr int kIdReleaseTitleLabel = 303;
 constexpr int kIdProjectButton = 304;
-constexpr int kIdStatusLabel = 305;
-constexpr int kIdLatestLabel = 306;
 constexpr int kIdCheckButton = 307;
 constexpr int kIdReleaseButton = 308;
 constexpr int kIdCloseButton = 309;
-constexpr int kIdTitleLabel = 310;
-constexpr int kIdSubtitleLabel = 311;
 constexpr int kIdReleaseNotes = 312;
-constexpr int kIdAutoCheckLabel = 313;
 constexpr int kIdAutoCheckSwitch = 314;
 constexpr int kIdGiteeProjectButton = 315;
 constexpr int kIdGithubSourceButton = 316;
@@ -62,71 +47,6 @@ constexpr float kMinClientHeightDip = 460.0f;
 constexpr float kMinClientAspectRatio = 520.0f / 620.0f;
 constexpr DWORD kDialogStyle = WS_CAPTION | WS_SYSMENU | WS_THICKFRAME;
 constexpr DWORD kDialogExStyle = WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE;
-
-std::atomic<uint64_t> gNextRequestId{0};
-
-enum class UpdateState {
-    Current,
-    Available,
-    NoRelease,
-    Failed,
-};
-
-const wchar_t* updateStateName(UpdateState state) {
-    switch (state) {
-    case UpdateState::Current: return L"current";
-    case UpdateState::Available: return L"available";
-    case UpdateState::NoRelease: return L"no-release";
-    case UpdateState::Failed: return L"failed";
-    default: return L"unknown";
-    }
-}
-
-enum class UpdateSource {
-    GitHub,
-    Gitee,
-};
-
-const wchar_t* updateSourceName(UpdateSource source) {
-    return source == UpdateSource::Gitee ? L"Gitee" : L"GitHub";
-}
-
-const char* updateSourceApi(UpdateSource source) {
-    return source == UpdateSource::Gitee ? app_info::kGiteeLatestReleaseApi
-                                        : app_info::kLatestReleaseApi;
-}
-
-const wchar_t* updateSourceReleasePage(UpdateSource source) {
-    return source == UpdateSource::Gitee ? app_info::kGiteeLatestReleasePage
-                                         : app_info::kLatestReleasePage;
-}
-
-int updateSourceIndex(UpdateSource source) {
-    return source == UpdateSource::Gitee ? 1 : 0;
-}
-
-UpdateSource updateSourceFromIndex(int index) {
-    return index == 1 ? UpdateSource::Gitee : UpdateSource::GitHub;
-}
-
-struct ReleaseInfo {
-    std::wstring version;
-    std::wstring publishedAt;
-    std::wstring body;
-    std::wstring releaseUrl;
-    std::wstring installerUrl;
-    std::wstring installerName;
-    int64_t installerSize = 0;
-};
-
-struct UpdatePayload {
-    uint64_t requestId = 0;
-    UpdateState state = UpdateState::Failed;
-    std::wstring version;
-    std::wstring releaseUrl;
-    std::wstring detail;
-    std::optional<ReleaseInfo> release;
-};
 
 struct DownloadProgressPayload {
     uint64_t requestId = 0;
@@ -146,7 +66,7 @@ void discardPendingUpdateResults(HWND hwnd) {
         return;
     MSG msg{};
     while (PeekMessageW(&msg, hwnd, kMsgUpdateReady, kMsgUpdateReady, PM_REMOVE))
-        delete reinterpret_cast<UpdatePayload*>(msg.lParam);
+        delete reinterpret_cast<update_service::UpdateCheckResult*>(msg.lParam);
 }
 
 void discardPendingDownloadMessages(HWND hwnd) {
@@ -163,1271 +83,12 @@ void discardPendingDownloadMessages(HWND hwnd) {
     }
 }
 
-std::wstring wideOf(const std::string& s) {
-    if (s.empty())
-        return {};
-    int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-    if (n <= 0)
-        return {};
-    std::wstring w(n, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), w.data(), n);
-    return w;
-}
-
-std::string utf8Of(const std::wstring& w) {
-    if (w.empty())
-        return {};
-    const int size = WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()),
-                                         nullptr, 0, nullptr, nullptr);
-    if (size <= 0)
-        return {};
-    std::string s(size, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), s.data(), size,
-                        nullptr, nullptr);
-    return s;
-}
-
-std::wstring trimProxyValue(std::wstring value) {
-    const size_t begin = value.find_first_not_of(L" \t");
-    if (begin == std::wstring::npos)
-        return {};
-    const size_t end = value.find_last_not_of(L" \t");
-    return value.substr(begin, end - begin + 1);
-}
-
-std::wstring selectHttpsProxy(const std::wstring& proxyList) {
-    std::wstring fallback;
-    size_t begin = 0;
-    while (begin <= proxyList.size()) {
-        const size_t separator = proxyList.find(L';', begin);
-        const size_t length = separator == std::wstring::npos
-                                  ? proxyList.size() - begin
-                                  : separator - begin;
-        const std::wstring item = trimProxyValue(proxyList.substr(begin, length));
-        if (!item.empty()) {
-            const size_t equals = item.find(L'=');
-            if (equals == std::wstring::npos) {
-                if (fallback.empty())
-                    fallback = item;
-            } else {
-                const std::wstring scheme = trimProxyValue(item.substr(0, equals));
-                const std::wstring value = trimProxyValue(item.substr(equals + 1));
-                if (_wcsicmp(scheme.c_str(), L"https") == 0 && !value.empty())
-                    return value;
-                if (_wcsicmp(scheme.c_str(), L"http") == 0 && fallback.empty())
-                    fallback = value;
-                if (_wcsicmp(scheme.c_str(), L"socks") == 0 && fallback.empty() &&
-                    !value.empty())
-                    fallback = L"socks5h://" + value;
-            }
-        }
-        if (separator == std::wstring::npos)
-            break;
-        begin = separator + 1;
-    }
-    return fallback;
-}
-
-std::string proxyUrlForCurl(const std::wstring& value) {
-    const std::wstring proxy = trimProxyValue(value);
-    if (proxy.empty())
-        return {};
-    if (proxy.find(L"://") != std::wstring::npos)
-        return utf8Of(proxy);
-    return "http://" + utf8Of(proxy);
-}
-
-void freeProxyConfig(WINHTTP_CURRENT_USER_IE_PROXY_CONFIG& config) {
-    if (config.lpszAutoConfigUrl)
-        GlobalFree(config.lpszAutoConfigUrl);
-    if (config.lpszProxy)
-        GlobalFree(config.lpszProxy);
-    if (config.lpszProxyBypass)
-        GlobalFree(config.lpszProxyBypass);
-    config = {};
-}
-
-void freeProxyInfo(WINHTTP_PROXY_INFO& info) {
-    if (info.lpszProxy)
-        GlobalFree(info.lpszProxy);
-    if (info.lpszProxyBypass)
-        GlobalFree(info.lpszProxyBypass);
-    info = {};
-}
-
-std::string systemProxyForUrl(const std::wstring& url) {
-    WINHTTP_CURRENT_USER_IE_PROXY_CONFIG config{};
-    if (!WinHttpGetIEProxyConfigForCurrentUser(&config))
-        return {};
-
-    std::wstring selectedProxy;
-    const bool hasAutoProxy = config.fAutoDetect || config.lpszAutoConfigUrl != nullptr;
-    if (hasAutoProxy) {
-        HINTERNET session = WinHttpOpen(L"QQMusicLyric", WINHTTP_ACCESS_TYPE_NO_PROXY,
-                                         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-        if (session) {
-            WinHttpSetTimeouts(session, 3000, 3000, 3000, 3000);
-            WINHTTP_AUTOPROXY_OPTIONS options{};
-            if (config.fAutoDetect) {
-                options.dwFlags |= WINHTTP_AUTOPROXY_AUTO_DETECT;
-                options.dwAutoDetectFlags = WINHTTP_AUTO_DETECT_TYPE_DHCP |
-                                            WINHTTP_AUTO_DETECT_TYPE_DNS_A;
-            }
-            if (config.lpszAutoConfigUrl) {
-                options.dwFlags |= WINHTTP_AUTOPROXY_CONFIG_URL;
-                options.lpszAutoConfigUrl = config.lpszAutoConfigUrl;
-            }
-
-            WINHTTP_PROXY_INFO info{};
-            if (WinHttpGetProxyForUrl(session, url.c_str(), &options, &info)) {
-                if (info.dwAccessType == WINHTTP_ACCESS_TYPE_NAMED_PROXY && info.lpszProxy)
-                    selectedProxy = selectHttpsProxy(info.lpszProxy);
-                freeProxyInfo(info);
-                WinHttpCloseHandle(session);
-                freeProxyConfig(config);
-                return proxyUrlForCurl(selectedProxy);
-            }
-            WinHttpCloseHandle(session);
-        }
-    }
-
-    if (config.lpszProxy)
-        selectedProxy = selectHttpsProxy(config.lpszProxy);
-    freeProxyConfig(config);
-    return proxyUrlForCurl(selectedProxy);
-}
-
-size_t curlWrite(char* ptr, size_t size, size_t nmemb, void* userdata) {
-    auto* out = static_cast<std::string*>(userdata);
-    size_t total = size * nmemb;
-    constexpr size_t kMaxResponseBytes = 4 * 1024 * 1024;
-    if (out->size() > kMaxResponseBytes || total > kMaxResponseBytes - out->size())
-        return 0;
-    out->append(ptr, total);
-    return total;
-}
-
-size_t curlFileWrite(char* ptr, size_t size, size_t nmemb, void* userdata) {
-    auto* out = static_cast<std::ofstream*>(userdata);
-    const size_t total = size * nmemb;
-    out->write(ptr, static_cast<std::streamsize>(total));
-    return out->good() ? total : 0;
-}
-
-struct DownloadContext {
-    HWND hwnd = nullptr;
-    uint64_t requestId = 0;
-    int64_t expectedBytes = 0;
-    std::shared_ptr<std::atomic_bool> cancelled;
-    std::atomic<int> lastPercent{-1};
-};
-
-void postDownloadProgress(HWND hwnd, uint64_t requestId, int percent) {
-    auto* payload = new DownloadProgressPayload{requestId, percent};
-    if (!PostMessageW(hwnd, kMsgDownloadProgress, 0, reinterpret_cast<LPARAM>(payload)))
-        delete payload;
-}
-
-void postDownloadFinished(HWND hwnd, uint64_t requestId, bool success, bool cancelled,
-                          std::wstring path, std::wstring detail) {
-    auto* payload = new DownloadFinishedPayload{requestId, success, cancelled, std::move(path),
-                                                std::move(detail)};
-    if (!PostMessageW(hwnd, kMsgDownloadFinished, 0, reinterpret_cast<LPARAM>(payload))) {
-        if (payload->success && !payload->path.empty())
-            DeleteFileW(payload->path.c_str());
-        delete payload;
-    }
-}
-
-int downloadProgress(void* userdata, curl_off_t dltotal, curl_off_t dlnow,
-                     curl_off_t, curl_off_t) {
-    auto* context = static_cast<DownloadContext*>(userdata);
-    if (context->cancelled && context->cancelled->load(std::memory_order_relaxed))
-        return 1;
-
-    const curl_off_t total = dltotal > 0 ? dltotal : context->expectedBytes;
-    if (total <= 0)
-        return 0;
-
-    const int percent = static_cast<int>(std::clamp<curl_off_t>(
-        dlnow * 100 / total, 0, 100));
-    if (context->lastPercent.exchange(percent, std::memory_order_relaxed) != percent)
-        postDownloadProgress(context->hwnd, context->requestId, percent);
-    return 0;
-}
-
-std::wstring makeTempInstallerPath(const std::wstring& installerName) {
-    if (installerName.empty())
-        return {};
-
-    wchar_t tempDir[MAX_PATH]{};
-    DWORD length = GetTempPathW(static_cast<DWORD>(std::size(tempDir)), tempDir);
-    if (length == 0 || length >= std::size(tempDir))
-        return {};
-
-    std::wstring path = tempDir;
-    if (!path.empty() && path.back() != L'\\')
-        path += L'\\';
-    path += installerName;
-    DeleteFileW(path.c_str());
-    return path;
-}
-
-void downloadInstaller(HWND hwnd, uint64_t requestId, std::wstring url,
-                       std::wstring outputPath, int64_t expectedBytes, std::wstring sourceName,
-                       std::shared_ptr<std::atomic_bool> cancelled) {
-    std::thread([hwnd, requestId, url = std::move(url), outputPath = std::move(outputPath),
-                 expectedBytes, sourceName = std::move(sourceName),
-                 cancelled = std::move(cancelled)]() mutable {
-        const std::string urlUtf8 = utf8Of(url);
-        if (urlUtf8.empty()) {
-            DeleteFileW(outputPath.c_str());
-            postDownloadFinished(hwnd, requestId, false, false, {}, L"更新安装器下载地址无效");
-            return;
-        }
-        const std::string proxy = systemProxyForUrl(url);
-
-        std::ofstream output(std::filesystem::path(outputPath),
-                             std::ios::binary | std::ios::trunc);
-        if (!output) {
-            postDownloadFinished(hwnd, requestId, false, false, {}, L"无法创建临时安装器文件");
-            return;
-        }
-
-        CURL* curl = curl_easy_init();
-        if (!curl) {
-            output.close();
-            DeleteFileW(outputPath.c_str());
-            postDownloadFinished(hwnd, requestId, false, false, {}, L"无法初始化下载请求");
-            return;
-        }
-
-        DownloadContext context{hwnd, requestId, expectedBytes, cancelled};
-        constexpr char kUserAgent[] = "QQMusicLyric";
-        curl_slist* headers = nullptr;
-        headers = curl_slist_append(headers, "Accept: application/octet-stream");
-
-        curl_easy_setopt(curl, CURLOPT_URL, urlUtf8.c_str());
-        curl_easy_setopt(curl, CURLOPT_PROXY, proxy.c_str());
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlFileWrite);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &output);
-        curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, downloadProgress);
-        curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &context);
-        curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-        curl_easy_setopt(curl, CURLOPT_USERAGENT, kUserAgent);
-        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-        curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
-        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 10000L);
-        curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1024L);
-        curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 60L);
-
-        CURLcode rc = curl_easy_perform(curl);
-        long responseCode = 0;
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
-        if (headers)
-            curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
-        output.close();
-
-        const bool wasCancelled = cancelled && cancelled->load(std::memory_order_relaxed);
-        if (wasCancelled || rc == CURLE_ABORTED_BY_CALLBACK) {
-            DeleteFileW(outputPath.c_str());
-            return;
-        }
-        if (rc != CURLE_OK) {
-            DeleteFileW(outputPath.c_str());
-            postDownloadFinished(hwnd, requestId, false, false, {},
-                                 L"下载失败：" + wideOf(curl_easy_strerror(rc)));
-            return;
-        }
-        if (responseCode < 200 || responseCode >= 300) {
-            DeleteFileW(outputPath.c_str());
-            postDownloadFinished(hwnd, requestId, false, false, {},
-                                 L"下载失败：" + sourceName + L" 返回 HTTP " +
-                                     std::to_wstring(responseCode));
-            return;
-        }
-
-        std::error_code ec;
-        const auto actualBytes = std::filesystem::file_size(std::filesystem::path(outputPath), ec);
-        if (ec || actualBytes == 0 ||
-            (expectedBytes > 0 && actualBytes != static_cast<uintmax_t>(expectedBytes))) {
-            DeleteFileW(outputPath.c_str());
-            postDownloadFinished(hwnd, requestId, false, false, {}, L"下载文件大小校验失败");
-            return;
-        }
-
-        postDownloadProgress(hwnd, requestId, 100);
-        postDownloadFinished(hwnd, requestId, true, false, std::move(outputPath), {});
-    }).detach();
-}
-
-std::optional<std::vector<int>> parseVersion(const std::wstring& value) {
-    if (value.empty())
-        return std::nullopt;
-
-    size_t begin = (value.front() == L'v' || value.front() == L'V') ? 1 : 0;
-    if (begin == value.size())
-        return std::nullopt;
-
-    std::vector<int> parts;
-    size_t pos = begin;
-    while (pos < value.size()) {
-        size_t end = value.find(L'.', pos);
-        if (end == std::wstring::npos)
-            end = value.size();
-        if (end == pos)
-            return std::nullopt;
-
-        int number = 0;
-        for (size_t i = pos; i < end; ++i) {
-            if (value[i] < L'0' || value[i] > L'9')
-                return std::nullopt;
-            number = number * 10 + static_cast<int>(value[i] - L'0');
-        }
-        parts.push_back(number);
-        pos = end == value.size() ? value.size() : end + 1;
-    }
-    return parts.empty() ? std::nullopt : std::optional<std::vector<int>>(std::move(parts));
-}
-
-int compareVersions(const std::vector<int>& lhs, const std::vector<int>& rhs) {
-    size_t count = std::max(lhs.size(), rhs.size());
-    for (size_t i = 0; i < count; ++i) {
-        int l = i < lhs.size() ? lhs[i] : 0;
-        int r = i < rhs.size() ? rhs[i] : 0;
-        if (l != r)
-            return l < r ? -1 : 1;
-    }
-    return 0;
-}
-
-std::wstring displayVersion(const std::wstring& version) {
-    if (!version.empty() && (version.front() == L'v' || version.front() == L'V'))
-        return version.substr(1);
-    return version;
-}
-
-std::wstring displayReleaseDate(const std::wstring& value) {
-    return value.size() >= 10 ? value.substr(0, 10) : value;
-}
-
 void openUrl(const wchar_t* url) {
     runtime_log::writef(L"[action][about] open-url url=%s", url ? url : L"");
     ShellExecuteW(nullptr, L"open", url, nullptr, nullptr, SW_SHOWNORMAL);
 }
 
-void openUrl(const std::wstring& url) {
-    if (!url.empty())
-        openUrl(url.c_str());
-}
-
-void requestLatestRelease(uint64_t requestId, UpdateSource source,
-                          std::function<void(UpdatePayload)> onResult) {
-    std::thread([requestId, source, onResult = std::move(onResult)] {
-        const auto publish = [&](UpdateState state, std::wstring version = {},
-                                 std::wstring releaseUrl = {}, std::wstring detail = {},
-                                 std::optional<ReleaseInfo> release = std::nullopt) {
-            onResult(UpdatePayload{requestId, state, std::move(version), std::move(releaseUrl),
-                                   std::move(detail), std::move(release)});
-        };
-        CURL* curl = curl_easy_init();
-        if (!curl) {
-            publish(UpdateState::Failed, {}, {}, L"无法初始化网络请求");
-            return;
-        }
-
-        const std::wstring sourceName = updateSourceName(source);
-        std::string body;
-        constexpr char kUserAgent[] = "QQMusicLyric";
-        curl_slist* headers = nullptr;
-        if (source == UpdateSource::GitHub) {
-            headers = curl_slist_append(headers, "Accept: application/vnd.github+json");
-            headers = curl_slist_append(headers, "X-GitHub-Api-Version: 2022-11-28");
-        }
-
-        curl_easy_setopt(curl, CURLOPT_URL, updateSourceApi(source));
-        // 版本 API 保持直连；只让体积较大的安装器下载读取系统代理，避免代理节点对
-        // 代码托管平台的 API 返回异常。空字符串会显式禁用环境变量代理。
-        curl_easy_setopt(curl, CURLOPT_PROXY, "");
-        if (headers)
-            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWrite);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
-        curl_easy_setopt(curl, CURLOPT_USERAGENT, kUserAgent);
-        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-        curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
-        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 5000L);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 10000L);
-
-        CURLcode rc = curl_easy_perform(curl);
-        long responseCode = 0;
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
-        if (headers)
-            curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
-
-        if (rc != CURLE_OK) {
-            publish(UpdateState::Failed, {}, {},
-                    L"网络请求失败：" + wideOf(curl_easy_strerror(rc)));
-            return;
-        }
-        if (responseCode == 404) {
-            publish(UpdateState::NoRelease, {}, {},
-                    sourceName + L" 尚未发布可供检查的正式版本");
-            return;
-        }
-        if (responseCode != 200) {
-            publish(UpdateState::Failed, {}, {},
-                    sourceName + L" 返回 HTTP " + std::to_wstring(responseCode));
-            return;
-        }
-
-        auto json = nlohmann::json::parse(body, nullptr, false);
-        if (json.is_discarded() || !json.is_object()) {
-            publish(UpdateState::Failed, {}, {}, L"无法读取 " + sourceName + L" 返回的数据");
-            return;
-        }
-
-        if (!json.contains("tag_name") || !json["tag_name"].is_string()) {
-            publish(UpdateState::Failed, {}, {}, L"最新版本信息不完整");
-            return;
-        }
-
-        const std::string versionTag = json["tag_name"].get<std::string>();
-        ReleaseInfo latestRelease;
-        latestRelease.version = wideOf(versionTag);
-        // Gitee v5 的 latest Release 响应可能没有 html_url，使用已知发布页作为回退。
-        if (json.contains("html_url") && json["html_url"].is_string())
-            latestRelease.releaseUrl = wideOf(json["html_url"].get<std::string>());
-        else
-            latestRelease.releaseUrl = updateSourceReleasePage(source);
-        if (json.contains("published_at") && json["published_at"].is_string())
-            latestRelease.publishedAt = wideOf(json["published_at"].get<std::string>());
-        if (json.contains("body") && json["body"].is_string())
-            latestRelease.body = wideOf(json["body"].get<std::string>());
-
-        std::string installerVersion = versionTag;
-        if (!installerVersion.empty() &&
-            (installerVersion.front() == 'v' || installerVersion.front() == 'V'))
-            installerVersion.erase(installerVersion.begin());
-        const std::string expectedInstaller =
-            "WindowsTaskbarLyrics-" + installerVersion + "-Setup.exe";
-        if (json.contains("assets") && json["assets"].is_array()) {
-            for (const auto& asset : json["assets"]) {
-                if (!asset.is_object() || !asset.contains("name") ||
-                    !asset["name"].is_string() || asset["name"].get<std::string>() != expectedInstaller ||
-                    !asset.contains("browser_download_url") ||
-                    !asset["browser_download_url"].is_string())
-                    continue;
-                latestRelease.installerName = wideOf(asset["name"].get<std::string>());
-                latestRelease.installerUrl =
-                    wideOf(asset["browser_download_url"].get<std::string>());
-                if (asset.contains("size") && asset["size"].is_number_integer())
-                    latestRelease.installerSize = asset["size"].get<int64_t>();
-                break;
-            }
-        }
-
-        std::wstring version = latestRelease.version;
-        std::wstring releaseUrl = latestRelease.releaseUrl;
-        auto remoteVersion = parseVersion(version);
-        auto localVersion = parseVersion(app_info::kVersion);
-        if (version.empty() || !remoteVersion || !localVersion) {
-            publish(UpdateState::Failed, {}, {}, L"最新版本标签格式无法识别");
-            return;
-        }
-
-        UpdateState state = compareVersions(*remoteVersion, *localVersion) > 0
-                                ? UpdateState::Available
-                                : UpdateState::Current;
-        publish(state, std::move(version), std::move(releaseUrl), {}, std::move(latestRelease));
-    }).detach();
-}
-
-void requestLatestRelease(HWND hwnd, uint64_t requestId, UpdateSource source) {
-    requestLatestRelease(requestId, source, [hwnd](UpdatePayload result) {
-        auto* payload = new UpdatePayload(std::move(result));
-        if (!PostMessageW(hwnd, kMsgUpdateReady, 0, reinterpret_cast<LPARAM>(payload)))
-            delete payload;
-    });
-}
-
-uint64_t nextRequestId() {
-    return gNextRequestId.fetch_add(1, std::memory_order_relaxed) + 1;
-}
-
-struct MarkdownSpanStyle {
-    bool bold = false;
-    bool italic = false;
-    bool strike = false;
-    bool code = false;
-    bool link = false;
-
-    bool operator==(const MarkdownSpanStyle& other) const {
-        return bold == other.bold && italic == other.italic && strike == other.strike &&
-               code == other.code && link == other.link;
-    }
-};
-
-struct MarkdownSpan {
-    size_t start = 0;
-    size_t length = 0;
-    MarkdownSpanStyle style;
-};
-
-enum class MarkdownBlockKind {
-    Paragraph,
-    Heading,
-    Bullet,
-    Ordered,
-    Quote,
-    Code,
-    Rule,
-};
-
-struct MarkdownBlock {
-    MarkdownBlockKind kind = MarkdownBlockKind::Paragraph;
-    int level = 0;
-    int number = 0;
-    std::wstring prefix;
-    std::wstring text;
-    std::vector<MarkdownSpan> spans;
-};
-
-std::wstring trimMarkdown(std::wstring_view value) {
-    size_t begin = 0;
-    while (begin < value.size() && (value[begin] == L' ' || value[begin] == L'\t'))
-        ++begin;
-    size_t end = value.size();
-    while (end > begin && (value[end - 1] == L' ' || value[end - 1] == L'\t'))
-        --end;
-    return std::wstring(value.substr(begin, end - begin));
-}
-
-bool isMarkdownWord(wchar_t ch) {
-    return (ch >= L'a' && ch <= L'z') || (ch >= L'A' && ch <= L'Z') ||
-           (ch >= L'0' && ch <= L'9') || ch == L'_';
-}
-
-bool isMarkdownRule(std::wstring_view value) {
-    std::wstring compact;
-    for (wchar_t ch : value) {
-        if (ch != L' ' && ch != L'\t')
-            compact.push_back(ch);
-    }
-    if (compact.size() < 3)
-        return false;
-    wchar_t marker = compact.front();
-    if (marker != L'-' && marker != L'*' && marker != L'_')
-        return false;
-    return std::all_of(compact.begin(), compact.end(), [marker](wchar_t ch) {
-        return ch == marker;
-    });
-}
-
-bool parseMarkdownHeading(std::wstring_view line, int* level, std::wstring* text) {
-    size_t count = 0;
-    while (count < line.size() && count < 6 && line[count] == L'#')
-        ++count;
-    if (count == 0 || count >= line.size() || line[count] != L' ')
-        return false;
-
-    std::wstring heading = trimMarkdown(line.substr(count + 1));
-    while (!heading.empty() && heading.back() == L'#')
-        heading.pop_back();
-    *level = static_cast<int>(count);
-    *text = trimMarkdown(heading);
-    return true;
-}
-
-bool parseMarkdownBullet(std::wstring_view line, int* depth, std::wstring* text) {
-    size_t pos = 0;
-    while (pos < line.size() && (line[pos] == L' ' || line[pos] == L'\t'))
-        ++pos;
-    if (pos + 1 >= line.size() ||
-        (line[pos] != L'-' && line[pos] != L'*' && line[pos] != L'+') ||
-        line[pos + 1] != L' ')
-        return false;
-    *depth = static_cast<int>(pos / 2);
-    *text = trimMarkdown(line.substr(pos + 2));
-    return true;
-}
-
-bool parseMarkdownOrdered(std::wstring_view line, int* depth, int* number,
-                          std::wstring* text) {
-    size_t pos = 0;
-    while (pos < line.size() && (line[pos] == L' ' || line[pos] == L'\t'))
-        ++pos;
-    size_t digitBegin = pos;
-    int parsedNumber = 0;
-    while (pos < line.size() && line[pos] >= L'0' && line[pos] <= L'9') {
-        parsedNumber = parsedNumber * 10 + static_cast<int>(line[pos] - L'0');
-        ++pos;
-    }
-    if (pos == digitBegin || pos + 1 >= line.size() ||
-        (line[pos] != L'.' && line[pos] != L')') || line[pos + 1] != L' ')
-        return false;
-    *depth = static_cast<int>(digitBegin / 2);
-    *number = parsedNumber;
-    *text = trimMarkdown(line.substr(pos + 2));
-    return true;
-}
-
-void appendMarkdownText(MarkdownBlock& block, std::wstring_view text,
-                        const MarkdownSpanStyle& style) {
-    if (text.empty())
-        return;
-    size_t start = block.text.size();
-    block.text.append(text);
-    if (!block.spans.empty() && block.spans.back().style == style &&
-        block.spans.back().start + block.spans.back().length == start) {
-        block.spans.back().length += text.size();
-    } else {
-        block.spans.push_back(MarkdownSpan{start, text.size(), style});
-    }
-}
-
-void parseMarkdownInline(std::wstring_view source, MarkdownBlock& block,
-                         MarkdownSpanStyle style = {}) {
-    size_t plainStart = 0;
-    auto flushPlain = [&](size_t end) {
-        if (end > plainStart)
-            appendMarkdownText(block, source.substr(plainStart, end - plainStart), style);
-    };
-
-    size_t i = 0;
-    while (i < source.size()) {
-        if (source[i] == L'\\' && i + 1 < source.size()) {
-            flushPlain(i);
-            appendMarkdownText(block, source.substr(i + 1, 1), style);
-            i += 2;
-            plainStart = i;
-            continue;
-        }
-
-        if (source[i] == L'`') {
-            size_t close = source.find(L'`', i + 1);
-            if (close != std::wstring_view::npos && close > i + 1) {
-                flushPlain(i);
-                MarkdownSpanStyle codeStyle = style;
-                codeStyle.code = true;
-                appendMarkdownText(block, source.substr(i + 1, close - i - 1), codeStyle);
-                i = close + 1;
-                plainStart = i;
-                continue;
-            }
-        }
-
-        std::wstring_view marker;
-        if (i + 1 < source.size() &&
-            ((source[i] == L'*' && source[i + 1] == L'*') ||
-             (source[i] == L'_' && source[i + 1] == L'_') ||
-             (source[i] == L'~' && source[i + 1] == L'~'))) {
-            marker = source.substr(i, 2);
-            size_t close = source.find(marker, i + 2);
-            if (close != std::wstring_view::npos && close > i + 2) {
-                flushPlain(i);
-                MarkdownSpanStyle nested = style;
-                if (marker[0] == L'~')
-                    nested.strike = true;
-                else
-                    nested.bold = true;
-                parseMarkdownInline(source.substr(i + 2, close - i - 2), block, nested);
-                i = close + 2;
-                plainStart = i;
-                continue;
-            }
-        }
-
-        if (source[i] == L'[') {
-            size_t closeLabel = source.find(L"](", i + 1);
-            if (closeLabel != std::wstring_view::npos) {
-                size_t closeUrl = source.find(L')', closeLabel + 2);
-                if (closeUrl != std::wstring_view::npos && closeUrl > i + 1) {
-                    flushPlain(i);
-                    MarkdownSpanStyle linkStyle = style;
-                    linkStyle.link = true;
-                    parseMarkdownInline(source.substr(i + 1, closeLabel - i - 1), block,
-                                        linkStyle);
-                    i = closeUrl + 1;
-                    plainStart = i;
-                    continue;
-                }
-            }
-        }
-
-        if (source[i] == L'*' || source[i] == L'_') {
-            if (source[i] == L'_' && i > 0 && i + 1 < source.size() &&
-                isMarkdownWord(source[i - 1]) && isMarkdownWord(source[i + 1])) {
-                ++i;
-                continue;
-            }
-            size_t close = source.find(source[i], i + 1);
-            if (close != std::wstring_view::npos && close > i + 1) {
-                flushPlain(i);
-                MarkdownSpanStyle nested = style;
-                nested.italic = true;
-                parseMarkdownInline(source.substr(i + 1, close - i - 1), block, nested);
-                i = close + 1;
-                plainStart = i;
-                continue;
-            }
-        }
-        ++i;
-    }
-    flushPlain(source.size());
-}
-
-std::vector<MarkdownBlock> parseMarkdown(const std::wstring& markdown) {
-    std::vector<MarkdownBlock> blocks;
-    std::vector<std::wstring> lines;
-    size_t start = 0;
-    while (start <= markdown.size()) {
-        size_t end = markdown.find(L'\n', start);
-        if (end == std::wstring::npos)
-            end = markdown.size();
-        std::wstring line = markdown.substr(start, end - start);
-        if (!line.empty() && line.back() == L'\r')
-            line.pop_back();
-        lines.push_back(std::move(line));
-        if (end == markdown.size())
-            break;
-        start = end + 1;
-    }
-
-    std::wstring paragraph;
-    bool inFence = false;
-    MarkdownBlock codeBlock;
-    auto flushParagraph = [&] {
-        if (paragraph.empty())
-            return;
-        MarkdownBlock block;
-        block.kind = MarkdownBlockKind::Paragraph;
-        parseMarkdownInline(paragraph, block);
-        blocks.push_back(std::move(block));
-        paragraph.clear();
-    };
-    auto addInlineBlock = [&](MarkdownBlockKind kind, const std::wstring& text,
-                              const std::wstring& prefix, int level, int number) {
-        MarkdownBlock block;
-        block.kind = kind;
-        block.prefix = prefix;
-        block.level = level;
-        block.number = number;
-        parseMarkdownInline(text, block);
-        blocks.push_back(std::move(block));
-    };
-
-    for (const auto& line : lines) {
-        std::wstring trimmed = trimMarkdown(line);
-        bool fenceLine = trimmed.rfind(L"```", 0) == 0 || trimmed.rfind(L"~~~", 0) == 0;
-        if (inFence) {
-            if (fenceLine) {
-                blocks.push_back(std::move(codeBlock));
-                codeBlock = MarkdownBlock{};
-                inFence = false;
-            } else {
-                if (!codeBlock.text.empty())
-                    codeBlock.text.push_back(L'\n');
-                codeBlock.text += line;
-            }
-            continue;
-        }
-        if (fenceLine) {
-            flushParagraph();
-            inFence = true;
-            codeBlock = MarkdownBlock{};
-            codeBlock.kind = MarkdownBlockKind::Code;
-            continue;
-        }
-        if (trimmed.empty()) {
-            flushParagraph();
-            continue;
-        }
-
-        if (trimmed.front() == L'>') {
-            flushParagraph();
-            std::wstring quote = trimMarkdown(trimmed.substr(1));
-            addInlineBlock(MarkdownBlockKind::Quote, quote, L"│ ", 0, 0);
-            continue;
-        }
-
-        int headingLevel = 0;
-        std::wstring headingText;
-        if (parseMarkdownHeading(trimmed, &headingLevel, &headingText)) {
-            flushParagraph();
-            addInlineBlock(MarkdownBlockKind::Heading, headingText, L"", headingLevel, 0);
-            continue;
-        }
-        if (isMarkdownRule(trimmed)) {
-            flushParagraph();
-            MarkdownBlock block;
-            block.kind = MarkdownBlockKind::Rule;
-            blocks.push_back(std::move(block));
-            continue;
-        }
-
-        int depth = 0;
-        std::wstring listText;
-        if (parseMarkdownBullet(line, &depth, &listText)) {
-            flushParagraph();
-            std::wstring prefix(static_cast<size_t>(depth) * 2, L' ');
-            if (listText.size() >= 3 && listText[0] == L'[' && listText[2] == L']' &&
-                (listText[1] == L' ' || listText[1] == L'x' || listText[1] == L'X')) {
-                prefix += listText[1] == L' ' ? L"☐ " : L"☑ ";
-                listText = trimMarkdown(listText.substr(3));
-            } else {
-                prefix += L"• ";
-            }
-            addInlineBlock(MarkdownBlockKind::Bullet, listText, prefix, depth, 0);
-            continue;
-        }
-
-        int number = 0;
-        if (parseMarkdownOrdered(line, &depth, &number, &listText)) {
-            flushParagraph();
-            std::wstring prefix(static_cast<size_t>(depth) * 2, L' ');
-            prefix += std::to_wstring(number) + L". ";
-            addInlineBlock(MarkdownBlockKind::Ordered, listText, prefix, depth, number);
-            continue;
-        }
-
-        if (!paragraph.empty())
-            paragraph.push_back(L' ');
-        paragraph += trimmed;
-    }
-    flushParagraph();
-    if (inFence)
-        blocks.push_back(std::move(codeBlock));
-    return blocks;
-}
-
-enum class AboutPanelTab {
-    ReleaseNotes,
-    Disclaimer,
-};
-
-const std::wstring& disclaimerMarkdown() {
-    static const std::wstring content =
-        L"1. **开源协议适用范围**：本项目的 **Apache-2.0** 许可证仅适用于本仓库中的自研源代码，不涵盖且不构成对任何第三方接口、服务数据、媒体内容、字体、图标或第三方软件的授权。\n\n"
-        L"2. **非官方关联与商标声明**：本项目为独立开发的桌面辅助工具，与 QQ 音乐、网易云音乐、汽水音乐、酷狗音乐、Spotify、滴答清单（Dida365）以及 BetterNCM、InfLink-rs、LRCLIB、MusicBrainz 等第三方产品、平台或服务均无任何官方关联、合作或背书。程序中涉及的第三方产品名称、品牌标识及运行时从用户本地客户端读取的图标，其商标权与版权均归原权利方所有。\n\n"
-        L"3. **内容权属与接口说明**：本项目自身及仓库不存储、托管或分发任何音乐文件、歌词文本、专辑封面或任务数据。程序仅在用户本地运行时，按需读取本机已播放软件的公开媒体会话、用户本地缓存目录，或向第三方公开接口发起实时展示请求。歌词、专辑封面及文案等内容的著作权归词曲作者、唱片公司及原服务提供方所有；第三方接口的可用性及格式随时可能发生变更，本项目不保证各在线来源长期稳定可用。\n\n"
-        L"4. **使用与再分发责任**：任何个人或组织在使用、修改或再分发本项目（包括基于 Apache-2.0 协议进行的各类商业或非商业分发）时，均须自行确保其行为符合所在国家或地区的法律法规以及相关第三方平台的服务条款，且不得以本项目或原作者名义进行虚假宣传或商业背书。因违反第三方服务条款、接口风控或版权争议所产生的任何后果，均由实际使用方或再分发方自行承担。\n\n"
-        L"5. **无担保与责任限制**：本软件按「现状（AS IS）」提供，不附带任何明示或暗示的适用性或稳定性担保。程序涉及 Windows 系统媒体控制、音频回环捕获、UI Automation 及任务栏窗口交互等系统级操作，在任何情况下，作者均不对因使用、无法使用、修改或分发本软件而导致的任何直接或间接损失（包括但不限于系统异常、数据丢失、账号受限或商业损失）承担法律责任。";
-    return content;
-}
-
-// 关于页的更新日志与免责声明面板逻辑模型。它不创建子窗口，只保存解析结果和滚动位置，
-// 由 AboutDialog 的单一绘制表面调用 paint()。
-class ReleaseNotesModel {
-public:
-    bool create(HWND parent) {
-        parent_ = parent;
-        return scrollView_.create(parent, 0x6301, [this](float position, bool redraw) {
-            scrollY_ = position;
-            scrollOnlyPaint_ = !redraw;
-            const float scale = fluent::dipScale(GetDpiForWindow(parent_));
-            const RECT dirty{
-                static_cast<LONG>(std::floor((redraw ? panelRect_.left : scrollbarRight_ - 10.0f) * scale)),
-                static_cast<LONG>(std::floor(panelRect_.top * scale)),
-                static_cast<LONG>(std::ceil((scrollbarRight_ + 4.0f) * scale)),
-                static_cast<LONG>(std::ceil(panelRect_.bottom * scale))};
-            InvalidateRect(parent_, &dirty, FALSE);
-        });
-    }
-    bool tick(WPARAM timer) { return scrollView_.tick(timer); }
-    void stop() {
-        scrollY_ = scrollView_.offset();
-        scrollView_.stop();
-        scrollOnlyPaint_ = false;
-    }
-    void reset() { scrollView_.reset(); parent_ = nullptr; }
-
-    AboutPanelTab activeTab() const { return activeTab_; }
-
-    void setActiveTab(AboutPanelTab tab) {
-        if (tab == activeTab_)
-            return;
-        activeTab_ = tab;
-        scrollView_.setOffset(0.0f);
-        scrollOnlyPaint_ = false;
-        scrollY_ = 0.0f;
-    }
-
-    void setRelease(ReleaseInfo release) {
-        release_ = std::move(release);
-        blocks_ = parseMarkdown(release_->body);
-        message_.clear();
-        if (activeTab_ == AboutPanelTab::ReleaseNotes) {
-            scrollView_.setOffset(0.0f);
-            scrollOnlyPaint_ = false;
-            scrollY_ = 0.0f;
-        }
-    }
-
-    void setMessage(const std::wstring& message) {
-        release_.reset();
-        blocks_.clear();
-        message_ = message;
-        if (activeTab_ == AboutPanelTab::ReleaseNotes) {
-            scrollView_.setOffset(0.0f);
-            scrollOnlyPaint_ = false;
-            scrollY_ = 0.0f;
-        }
-    }
-
-    void scrollBy(float delta) { scrollView_.scrollBy(delta); }
-    float contentHeight() const { return contentHeight_; }
-    bool dragging() const { return dragging_; }
-    void endDrag() { dragging_ = false; }
-    bool beginScroll(float x, float y) {
-        scrollY_ = scrollView_.offset();
-        scrollView_.stop();
-        if (maxScroll_ <= 0.0f || x < scrollTrack_.left - 4.5f ||
-            x > scrollTrack_.right + 4.5f || y < scrollTrack_.top || y > scrollTrack_.bottom)
-            return false;
-        if (y >= scrollThumb_.top && y <= scrollThumb_.bottom) {
-            dragging_ = true;
-            dragOffset_ = y - scrollThumb_.top;
-        } else {
-            scrollY_ = std::clamp(scrollY_ + (y < scrollThumb_.top ? -viewHeight_ : viewHeight_),
-                                  0.0f, maxScroll_);
-        }
-        return true;
-    }
-    void dragTo(float y) {
-        const float travel = scrollTrack_.bottom - scrollTrack_.top -
-                             (scrollThumb_.bottom - scrollThumb_.top);
-        if (dragging_ && travel > 0.0f)
-            scrollY_ = std::clamp((y - scrollTrack_.top - dragOffset_) / travel,
-                                  0.0f, 1.0f) * maxScroll_;
-    }
-
-private:
-    void applyMarkdownStyles(IDWriteTextLayout* layout, const MarkdownBlock& block,
-                             ID2D1SolidColorBrush* linkBrush) {
-        for (const auto& span : block.spans) {
-            if (span.length == 0)
-                continue;
-
-            DWRITE_TEXT_RANGE range{
-                static_cast<UINT32>(block.prefix.size() + span.start),
-                static_cast<UINT32>(span.length)};
-            if (span.style.bold)
-                layout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, range);
-            if (span.style.italic)
-                layout->SetFontStyle(DWRITE_FONT_STYLE_ITALIC, range);
-            if (span.style.strike)
-                layout->SetStrikethrough(TRUE, range);
-            if (span.style.code) {
-                layout->SetFontFamilyName(L"Consolas", range);
-                layout->SetFontSize(fluent::font_sizes::code, range);
-            }
-            if (span.style.link) {
-                layout->SetUnderline(TRUE, range);
-                if (linkBrush)
-                    layout->SetDrawingEffect(linkBrush, range);
-            }
-        }
-    }
-
-public:
-    void paint(fluent::FluentDialogSurface::Painter& painter, const D2D1_RECT_F& rect,
-               float scrollbarRight) {
-        if (rect.left != panelRect_.left || rect.top != panelRect_.top ||
-            rect.right != panelRect_.right || rect.bottom != panelRect_.bottom)
-            scrollOnlyPaint_ = false;
-        panelRect_ = rect;
-        scrollbarRight_ = scrollbarRight;
-        if (scrollOnlyPaint_) {
-            scrollOnlyPaint_ = false;
-            drawScrollBar(painter, rect, scrollbarRight);
-            return;
-        }
-        scrollTrack_ = {};
-        scrollThumb_ = {};
-        maxScroll_ = 0.0f;
-        ID2D1RenderTarget* rt = painter.target();
-        if (!rt)
-            return;
-
-        const auto& palette = fluent::palette();
-        const float wDip = std::max(0.0f, rect.right - rect.left);
-        const float hDip = std::max(0.0f, rect.bottom - rect.top);
-        D2D1_RECT_F panelRect = D2D1::RectF(
-            rect.left + 0.5f, rect.top + 0.5f, std::max(rect.left + 0.5f, rect.right - 0.5f),
-            std::max(rect.top + 0.5f, rect.bottom - 0.5f));
-        painter.fillRoundRect(palette.cardFill, panelRect, fluent::metrics::cardRadius);
-        painter.strokeRoundRect(palette.cardStroke, panelRect, 1.0f,
-                                fluent::metrics::cardRadius);
-
-        const bool showDisclaimer = activeTab_ == AboutPanelTab::Disclaimer;
-        auto* bodyFormat = painter.textFormat(fluent::font_sizes::label, 400);
-        if (bodyFormat)
-            bodyFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
-        if (!showDisclaimer && !release_) {
-            scrollView_.layout({}, 0.0f, GetDpiForWindow(parent_));
-            const std::wstring& message = message_.empty() ? emptyMessage() : message_;
-            painter.drawText(message, bodyFormat,
-                             D2D1::RectF(rect.left + 16.0f, rect.top + 12.0f,
-                                          std::max(rect.left + 16.0f, rect.right - 16.0f),
-                                          std::max(rect.top + 12.0f, rect.bottom - 12.0f)),
-                             palette.textSecondary);
-            contentHeight_ = hDip;
-            return;
-        }
-
-        auto* factory = painter.dwrite();
-        auto* headerFormat = painter.textFormat(fluent::font_sizes::body, 600);
-        auto* codeFormat = painter.textFormat(fluent::font_sizes::code, 400, false, false, L"Consolas");
-        auto* heading1Format = painter.textFormat(fluent::font_sizes::heading, 700);
-        auto* heading2Format = painter.textFormat(fluent::font_sizes::subheading, 700);
-        auto* heading3Format = painter.textFormat(fluent::font_sizes::body, 600);
-        ID2D1SolidColorBrush* linkBrush = painter.createBrush(palette.accent);
-        if (!factory || !bodyFormat || !headerFormat || !codeFormat || !heading1Format ||
-            !heading2Format || !heading3Format)
-            return;
-
-        std::wstring header;
-        if (showDisclaimer) {
-            header = L"免责声明  ·  Apache-2.0";
-        } else {
-            const auto& release = *release_;
-            header = displayVersion(release.version);
-            if (!release.publishedAt.empty())
-                header += L"  ·  " + displayReleaseDate(release.publishedAt);
-        }
-        painter.drawText(header, headerFormat,
-                         D2D1::RectF(rect.left + 16.0f, rect.top + 8.0f,
-                                      std::max(rect.left + 16.0f, rect.right - 16.0f),
-                                      rect.top + 31.0f),
-                         palette.text);
-        if (auto* br = painter.brush(palette.separator)) {
-            rt->DrawLine(D2D1::Point2F(rect.left + 16.0f, rect.top + 39.0f),
-                          D2D1::Point2F(std::max(rect.left + 16.0f, rect.right - 16.0f),
-                                        rect.top + 39.0f),
-                         br, 1.0f);
-        }
-
-        const auto& activeBlocks = showDisclaimer ? ensureDisclaimerBlocks() : blocks_;
-        const float bodyTop = rect.top + 48.0f;
-        const float bodyViewHeight = std::max(0.0f, hDip - 48.0f);
-        if (activeBlocks.empty()) {
-            scrollView_.layout({}, 0.0f, GetDpiForWindow(parent_));
-            painter.drawText(L"暂无发布说明", bodyFormat,
-                             D2D1::RectF(rect.left + 16.0f, bodyTop,
-                                          std::max(rect.left + 16.0f, rect.right - 16.0f),
-                                          std::max(bodyTop + 18.0f, rect.bottom - 12.0f)),
-                             palette.textSecondary);
-            contentHeight_ = bodyViewHeight;
-            return;
-        }
-
-        codeFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
-        headerFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
-        heading1Format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
-        heading2Format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
-        heading3Format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
-
-        struct RenderedBlock {
-            const MarkdownBlock* block = nullptr;
-            IDWriteTextLayout* layout = nullptr;
-            float height = 0.0f;
-            float gap = 0.0f;
-        };
-
-        std::vector<RenderedBlock> rendered;
-        rendered.reserve(activeBlocks.size());
-        float totalHeight = 0.0f;
-        for (const auto& block : activeBlocks) {
-            RenderedBlock item;
-            item.block = &block;
-            if (block.kind == MarkdownBlockKind::Rule) {
-                item.height = 12.0f;
-                item.gap = 8.0f;
-                rendered.push_back(item);
-                totalHeight += item.height + item.gap;
-                continue;
-            }
-
-            IDWriteTextFormat* format = bodyFormat;
-            if (block.kind == MarkdownBlockKind::Code) {
-                format = codeFormat;
-            } else if (block.kind == MarkdownBlockKind::Heading) {
-                format = block.level <= 1 ? heading1Format
-                                         : block.level == 2 ? heading2Format : heading3Format;
-            }
-            std::wstring displayText = block.prefix + block.text;
-            const float textWidth = block.kind == MarkdownBlockKind::Code
-                                        ? std::max(1.0f, wDip - 48.0f)
-                                        : std::max(1.0f, wDip - 32.0f);
-            item.layout = painter.textLayout(displayText, format, textWidth, 100000.0f);
-            if (item.layout) {
-                DWRITE_TEXT_METRICS textMetrics{};
-                item.layout->GetMetrics(&textMetrics);
-                item.height = std::max(18.0f, textMetrics.height);
-                if (block.kind == MarkdownBlockKind::Code)
-                    item.height += 12.0f;
-                if (block.kind != MarkdownBlockKind::Code)
-                    applyMarkdownStyles(item.layout, block, linkBrush);
-            } else {
-                item.height = block.kind == MarkdownBlockKind::Code ? 30.0f : 18.0f;
-            }
-
-            item.gap = block.kind == MarkdownBlockKind::Code
-                           ? 12.0f
-                           : block.kind == MarkdownBlockKind::Heading ? 8.0f : 6.0f;
-            rendered.push_back(item);
-            totalHeight += item.height + item.gap;
-        }
-
-        if (!rendered.empty())
-            totalHeight = std::max(0.0f, totalHeight - rendered.back().gap);
-        contentHeight_ = totalHeight;
-        const float maxScroll = std::max(0.0f, contentHeight_ - bodyViewHeight);
-        maxScroll_ = maxScroll;
-        viewHeight_ = bodyViewHeight;
-        scrollY_ = std::clamp(scrollY_, 0.0f, maxScroll);
-
-        scrollView_.layout(D2D1::RectF(rect.left + 2.0f, bodyTop,
-                                       rect.right - 2.0f, rect.bottom - 2.0f),
-                           std::max(0.0f, contentHeight_ - 2.0f), GetDpiForWindow(parent_));
-        if (!scrollView_.animating())
-            scrollView_.setOffset(scrollY_);
-        scrollY_ = scrollView_.offset();
-        scrollView_.paint([&](fluent::FluentDialogSurface::Painter& painter,
-                              const D2D1_RECT_F& paintBounds, float position) {
-        auto* rt = painter.target();
-        auto* linkBrush = painter.createBrush(palette.accent);
-        painter.fillRoundRect(palette.cardFill, paintBounds, 0.0f);
-        float y = bodyTop - position;
-        for (const auto& item : rendered) {
-            const auto& block = *item.block;
-            if (block.kind == MarkdownBlockKind::Rule) {
-                if (y + item.height >= paintBounds.top && y <= paintBounds.bottom) {
-                    if (auto* br = painter.brush(palette.separator)) {
-                        const float lineY = y + item.height / 2.0f;
-                        rt->DrawLine(D2D1::Point2F(rect.left + 16.0f, lineY),
-                                     D2D1::Point2F(std::max(rect.left + 16.0f, rect.right - 16.0f),
-                                                   lineY),
-                                     br, 1.0f);
-                    }
-                }
-            } else if (item.layout && y + item.height >= paintBounds.top && y <= paintBounds.bottom) {
-                applyMarkdownStyles(item.layout, block, linkBrush);
-                if (block.kind == MarkdownBlockKind::Code) {
-                    D2D1_RECT_F codeRect = D2D1::RectF(
-                        rect.left + 16.0f, y, std::max(rect.left + 16.0f, rect.right - 16.0f),
-                        y + item.height);
-                    painter.fillRoundRect(palette.cardFillSolid, codeRect, 6.0f);
-                    painter.strokeRoundRect(palette.cardStroke, codeRect, 1.0f, 6.0f);
-                    painter.drawTextLayout(item.layout,
-                                           D2D1::Point2F(rect.left + 24.0f, y + 6.0f),
-                                           palette.text);
-                } else {
-                    painter.drawTextLayout(
-                        item.layout, D2D1::Point2F(rect.left + 16.0f, y),
-                        block.kind == MarkdownBlockKind::Quote ? palette.textSecondary
-                                                               : palette.text);
-                }
-            }
-            y += item.height + item.gap;
-        }
-        });
-        drawScrollBar(painter, rect, scrollbarRight);
-    }
-
-    void drawScrollBar(fluent::FluentDialogSurface::Painter& painter,
-                       const D2D1_RECT_F& rect, float scrollbarRight) {
-        const auto& palette = fluent::palette();
-        const float bodyTop = rect.top + 48.0f;
-        const float bodyViewHeight = std::max(0.0f, rect.bottom - bodyTop);
-        const float maxScroll = maxScroll_;
-        if (contentHeight_ > bodyViewHeight && bodyViewHeight > 0.0f) {
-            const float trackTop = bodyTop + 8.0f;
-            const float trackHeight = std::max(0.0f, bodyViewHeight - 16.0f);
-            const float thumbHeight =
-                std::min(trackHeight, std::max(24.0f, trackHeight * bodyViewHeight / contentHeight_));
-            const float thumbTravel = std::max(0.0f, trackHeight - thumbHeight);
-            const float thumbTop =
-                trackTop + (maxScroll > 0.0f ? scrollY_ / maxScroll * thumbTravel : 0.0f);
-            scrollTrack_ = D2D1::RectF(scrollbarRight - 3.0f, trackTop,
-                                       scrollbarRight, trackTop + trackHeight);
-            scrollThumb_ = D2D1::RectF(scrollTrack_.left, thumbTop,
-                                       scrollTrack_.right, thumbTop + thumbHeight);
-            painter.fillRoundRect(palette.textSecondary, scrollThumb_, 1.5f);
-        }
-    }
-
-    const std::vector<MarkdownBlock>& ensureDisclaimerBlocks() {
-        if (disclaimerBlocks_.empty())
-            disclaimerBlocks_ = parseMarkdown(disclaimerMarkdown());
-        return disclaimerBlocks_;
-    }
-
-    static const std::wstring& emptyMessage() {
-        static const std::wstring message = L"暂无更新日志";
-        return message;
-    }
-
-    AboutPanelTab activeTab_ = AboutPanelTab::ReleaseNotes;
-    std::optional<ReleaseInfo> release_;
-    std::vector<MarkdownBlock> blocks_;
-    std::vector<MarkdownBlock> disclaimerBlocks_;
-    std::wstring message_;
-    float scrollY_ = 0.0f;
-    float contentHeight_ = 0.0f;
-    D2D1_RECT_F scrollTrack_{};
-    D2D1_RECT_F scrollThumb_{};
-    float maxScroll_ = 0.0f;
-    float viewHeight_ = 0.0f;
-    float dragOffset_ = 0.0f;
-    bool dragging_ = false;
-    HWND parent_ = nullptr;
-    fluent::CompositedScrollView scrollView_;
-    bool scrollOnlyPaint_ = false;
-    D2D1_RECT_F panelRect_{};
-    float scrollbarRight_ = 0.0f;
-};
-
 } // namespace
-
-struct StartupUpdateCheck::Impl {
-    UiDispatcher dispatcher;
-    UpdateSource source = UpdateSource::GitHub;
-    std::optional<UpdatePayload> result;
-};
-
-StartupUpdateCheck::StartupUpdateCheck(
-    bool useGiteeUpdateSource, std::function<void(const std::wstring&)> onAvailable)
-    : impl_(std::make_unique<Impl>()) {
-    impl_->source = useGiteeUpdateSource ? UpdateSource::Gitee : UpdateSource::GitHub;
-    const uint64_t request = nextRequestId();
-    runtime_log::writef(L"[action][update] check-start source=%s request=%llu",
-                        updateSourceName(impl_->source), static_cast<unsigned long long>(request));
-    std::function<void(UpdatePayload)> receive =
-        [this, onAvailable = std::move(onAvailable)](UpdatePayload result) {
-            runtime_log::writef(L"[action][update] check-result state=%s version=%s source=%s",
-                                updateStateName(result.state), result.version.c_str(),
-                                updateSourceName(impl_->source));
-            if (result.state != UpdateState::Available)
-                return;
-            const std::wstring version = displayVersion(result.version);
-            // 仅保留新版本结果；普通结果和网络响应在本次回调结束后释放。
-            impl_->result = std::move(result);
-            if (onAvailable)
-                onAvailable(version);
-        };
-    requestLatestRelease(request, impl_->source,
-                         impl_->dispatcher.callback(std::move(receive)));
-}
-
-StartupUpdateCheck::~StartupUpdateCheck() {
-    // 后台请求只持有派发器的弱引用，关闭队列后不能再调用 App 或本对象。
-    impl_->dispatcher.close();
-}
 
 struct AboutDialog::Impl {
     HINSTANCE inst = nullptr;
@@ -1439,18 +100,18 @@ struct AboutDialog::Impl {
     bool installingUpdate = false;
     bool autoCheckOnStartup = true;
     bool downloadAfterCheck = false;
-    UpdateSource updateSource = UpdateSource::GitHub;
+    update_service::UpdateSource updateSource = update_service::UpdateSource::GitHub;
     uint64_t activeRequest = 0;
     std::wstring releaseUrl = app_info::kLatestReleasePage;
     std::function<void(bool)> onAutoCheckChanged;
     std::function<void(bool)> onUpdateSourceChanged;
     std::function<bool(const std::wstring&)> onInstallUpdate;
-    std::optional<ReleaseInfo> latestRelease;
+    std::optional<update_service::ReleaseInfo> latestRelease;
     std::shared_ptr<std::atomic_bool> downloadCancel;
     std::wstring downloadedInstallerPath;
 
     fluent::FluentDialogSurface surface;
-    ReleaseNotesModel releaseNotes;
+    ReleaseNotesView releaseNotes;
     std::wstring versionText;
     std::wstring statusText;
     std::wstring latestText;
@@ -1679,7 +340,7 @@ struct AboutDialog::Impl {
                      activeTab == AboutPanelTab::Disclaimer, kIdDisclaimerTab);
         painter.drawText(L"更新来源", painter.textFormat(fluent::font_sizes::label, 400), updateSourceLabelRect,
                          p.textSecondary);
-        const int selectedSource = updateSourceIndex(updateSource);
+        const int selectedSource = update_service::updateSourceIndex(updateSource);
         drawUpdateSourceRadio(painter, githubSourceRect, L"GitHub",
                               selectedSource == 0, kIdGithubSourceButton);
         drawUpdateSourceRadio(painter, giteeSourceRect, L"Gitee",
@@ -1743,14 +404,15 @@ struct AboutDialog::Impl {
         surface.invalidate();
     }
 
-    void selectUpdateSource(UpdateSource source) {
+    void selectUpdateSource(update_service::UpdateSource source) {
         if (source == updateSource || !canChangeUpdateSource())
             return;
         updateSource = source;
         releaseNotes.setActiveTab(AboutPanelTab::ReleaseNotes);
-        runtime_log::writef(L"[action][update] source=%s", updateSourceName(updateSource));
+        runtime_log::writef(L"[action][update] source=%s",
+                            update_service::updateSourceName(updateSource));
         if (onUpdateSourceChanged)
-            onUpdateSourceChanged(updateSource == UpdateSource::Gitee);
+            onUpdateSourceChanged(updateSource == update_service::UpdateSource::Gitee);
         checking = false;
         startCheck();
     }
@@ -1771,10 +433,10 @@ struct AboutDialog::Impl {
             releaseNotes.setActiveTab(AboutPanelTab::Disclaimer);
             break;
         case kIdGithubSourceButton:
-            selectUpdateSource(UpdateSource::GitHub);
+            selectUpdateSource(update_service::UpdateSource::GitHub);
             break;
         case kIdGiteeSourceButton:
-            selectUpdateSource(UpdateSource::Gitee);
+            selectUpdateSource(update_service::UpdateSource::Gitee);
             break;
         case kIdAutoCheckSwitch:
             autoCheckOnStartup = !autoCheckOnStartup;
@@ -1786,7 +448,7 @@ struct AboutDialog::Impl {
         case kIdCheckButton:
             releaseNotes.setActiveTab(AboutPanelTab::ReleaseNotes);
             runtime_log::writef(L"[action][update] check-request source=%s",
-                                updateSourceName(updateSource));
+                                update_service::updateSourceName(updateSource));
             startCheck();
             break;
         case kIdReleaseButton:
@@ -1966,7 +628,7 @@ struct AboutDialog::Impl {
                         const int current = focusedId == kIdGiteeSourceButton ? 1 : 0;
                         const int next = (current + (wp == VK_RIGHT ? 1 : -1) + 2) % 2;
                         focusedId = next == 1 ? kIdGiteeSourceButton : kIdGithubSourceButton;
-                        selectUpdateSource(updateSourceFromIndex(next));
+                        selectUpdateSource(update_service::updateSourceFromIndex(next));
                     }
                     return 0;
                 }
@@ -1990,12 +652,14 @@ struct AboutDialog::Impl {
                 onCommand(LOWORD(wp));
             return 0;
         case kMsgUpdateReady: {
-            std::unique_ptr<UpdatePayload> result(reinterpret_cast<UpdatePayload*>(lp));
+            std::unique_ptr<update_service::UpdateCheckResult> result(
+                reinterpret_cast<update_service::UpdateCheckResult*>(lp));
             if (!result || result->requestId != activeRequest)
                 return 0;
             runtime_log::writef(L"[action][update] check-result state=%s version=%s source=%s",
-                                updateStateName(result->state), result->version.c_str(),
-                                updateSourceName(updateSource));
+                                update_service::updateStateName(result->state),
+                                result->version.c_str(),
+                                update_service::updateSourceName(updateSource));
             const bool shouldDownloadAfterCheck = downloadAfterCheck;
             downloadAfterCheck = false;
             checking = false;
@@ -2003,17 +667,17 @@ struct AboutDialog::Impl {
             releaseButtonEnabled = false;
             releaseButtonAccent = false;
             releaseButtonText = L"无可用更新";
-            if (result->release)
-            {
+            if (result->release) {
                 latestRelease = *result->release;
                 releaseNotes.setRelease(std::move(*result->release));
-            }
-            else
+            } else {
                 releaseNotes.setMessage(result->detail.empty() ? L"暂无更新日志" : result->detail);
-            std::wstring visibleVersion = displayVersion(result->version);
-            if (result->state == UpdateState::Available) {
-                releaseUrl = result->releaseUrl.empty() ? updateSourceReleasePage(updateSource)
-                                                        : result->releaseUrl;
+            }
+            const std::wstring visibleVersion = update_service::displayVersion(result->version);
+            if (result->state == update_service::UpdateState::Available) {
+                releaseUrl = result->releaseUrl.empty()
+                                 ? update_service::updateSourceReleasePage(updateSource)
+                                 : result->releaseUrl;
                 if (latestRelease && !latestRelease->installerUrl.empty()) {
                     statusText = L"发现新版本：" + visibleVersion + L"，点击“下载更新”";
                     releaseButtonText = L"下载更新";
@@ -2023,18 +687,20 @@ struct AboutDialog::Impl {
                     statusText = L"发现新版本，但该 Release 没有对应安装器";
                 }
                 latestText = L"最新版本：" + visibleVersion;
-            } else if (result->state == UpdateState::Current) {
-                releaseUrl = result->releaseUrl.empty() ? updateSourceReleasePage(updateSource)
-                                                        : result->releaseUrl;
+            } else if (result->state == update_service::UpdateState::Current) {
+                releaseUrl = result->releaseUrl.empty()
+                                 ? update_service::updateSourceReleasePage(updateSource)
+                                 : result->releaseUrl;
                 statusText = L"当前已是最新版本";
                 latestText = L"当前正式版本：" + visibleVersion;
             } else {
-                releaseUrl = updateSourceReleasePage(updateSource);
+                releaseUrl = update_service::updateSourceReleasePage(updateSource);
                 statusText = result->detail;
                 latestText.clear();
             }
             surface.invalidate();
-            if (shouldDownloadAfterCheck && result->state == UpdateState::Available &&
+            if (shouldDownloadAfterCheck &&
+                result->state == update_service::UpdateState::Available &&
                 latestRelease && !latestRelease->installerUrl.empty())
                 startDownload();
             return 0;
@@ -2094,7 +760,7 @@ struct AboutDialog::Impl {
     }
 
     void createControls() {
-        versionText = std::wstring(L"当前版本：") + displayVersion(app_info::kVersion);
+        versionText = std::wstring(L"当前版本：") + update_service::displayVersion(app_info::kVersion);
         statusText = L"点击“检查更新”获取最新版本";
         latestText.clear();
         releaseNotes.setActiveTab(AboutPanelTab::ReleaseNotes);
@@ -2212,7 +878,8 @@ struct AboutDialog::Impl {
             return;
 
         clearDownloadedInstaller();
-        const std::wstring outputPath = makeTempInstallerPath(latestRelease->installerName);
+        const std::wstring outputPath =
+            update_service::makeTempInstallerPath(latestRelease->installerName);
         if (outputPath.empty()) {
             runtime_log::writef(L"[action][update] download-start result=failed reason=temp-path");
             statusText = L"无法创建下载临时文件";
@@ -2225,17 +892,36 @@ struct AboutDialog::Impl {
         releaseButtonAccent = false;
         releaseButtonText = L"下载中…";
         statusText = L"正在准备下载更新安装器…";
-        activeRequest = nextRequestId();
+        activeRequest = update_service::nextRequestId();
         downloadCancel = std::make_shared<std::atomic_bool>(false);
         runtime_log::writef(L"[action][update] download-start source=%s version=%s url=%s "
                             L"size=%llu output=%s",
-                            updateSourceName(updateSource), latestRelease->version.c_str(),
+                            update_service::updateSourceName(updateSource),
+                            latestRelease->version.c_str(),
                             latestRelease->installerUrl.c_str(),
                             static_cast<unsigned long long>(latestRelease->installerSize),
                             outputPath.c_str());
-        downloadInstaller(hwnd, activeRequest, latestRelease->installerUrl, outputPath,
-                          latestRelease->installerSize, updateSourceName(updateSource),
-                          downloadCancel);
+        HWND target = hwnd;
+        const uint64_t requestId = activeRequest;
+        update_service::DownloadCallbacks callbacks;
+        callbacks.onProgress = [target, requestId](int percent) {
+            auto* payload = new DownloadProgressPayload{requestId, percent};
+            if (!PostMessageW(target, kMsgDownloadProgress, 0, reinterpret_cast<LPARAM>(payload)))
+                delete payload;
+        };
+        callbacks.onFinished = [target, requestId](bool success, bool cancelled, std::wstring path,
+                                                     std::wstring detail) {
+            auto* payload = new DownloadFinishedPayload{requestId, success, cancelled,
+                                                        std::move(path), std::move(detail)};
+            if (!PostMessageW(target, kMsgDownloadFinished, 0, reinterpret_cast<LPARAM>(payload))) {
+                if (payload->success && !payload->path.empty())
+                    DeleteFileW(payload->path.c_str());
+                delete payload;
+            }
+        };
+        update_service::downloadInstaller(
+            latestRelease->installerUrl, outputPath, latestRelease->installerSize,
+            update_service::updateSourceName(updateSource), downloadCancel, std::move(callbacks));
         surface.invalidate();
     }
 
@@ -2268,15 +954,22 @@ struct AboutDialog::Impl {
         releaseButtonEnabled = false;
         releaseButtonAccent = false;
         releaseButtonText = L"无可用更新";
-        activeRequest = nextRequestId();
-        releaseUrl = updateSourceReleasePage(updateSource);
+        activeRequest = update_service::nextRequestId();
+        releaseUrl = update_service::updateSourceReleasePage(updateSource);
         // 打开瞬间只保留一处即时反馈；旧结果（更新日志/版本标签/按钮高亮）
         // 留到 kMsgUpdateReady 统一刷新。
-        statusText = L"正在检查" + std::wstring(updateSourceName(updateSource)) + L"更新…";
+        statusText = L"正在检查" +
+                     std::wstring(update_service::updateSourceName(updateSource)) + L"更新…";
         runtime_log::writef(L"[action][update] check-start source=%s request=%llu",
-                            updateSourceName(updateSource),
+                            update_service::updateSourceName(updateSource),
                             static_cast<unsigned long long>(activeRequest));
-        requestLatestRelease(hwnd, activeRequest, updateSource);
+        HWND target = hwnd;
+        update_service::requestLatestRelease(
+            activeRequest, updateSource, [target](update_service::UpdateCheckResult result) {
+                auto* payload = new update_service::UpdateCheckResult(std::move(result));
+                if (!PostMessageW(target, kMsgUpdateReady, 0, reinterpret_cast<LPARAM>(payload)))
+                    delete payload;
+            });
     }
 
     void destroy() {
@@ -2310,7 +1003,8 @@ bool AboutDialog::create(HINSTANCE inst, HWND parent, bool autoCheckOnStartup,
     impl_->notifyHwnd = parent; // 仅用于关闭通知；托盘窗口不能作为普通窗口的可见所有者。
     impl_->inst = inst;
     impl_->autoCheckOnStartup = autoCheckOnStartup;
-    impl_->updateSource = useGiteeUpdateSource ? UpdateSource::Gitee : UpdateSource::GitHub;
+    impl_->updateSource = useGiteeUpdateSource ? update_service::UpdateSource::Gitee
+                                               : update_service::UpdateSource::GitHub;
     impl_->onAutoCheckChanged = std::move(onAutoCheckChanged);
     impl_->onUpdateSourceChanged = std::move(onUpdateSourceChanged);
     impl_->onInstallUpdate = std::move(onInstallUpdate);
@@ -2324,8 +1018,8 @@ bool AboutDialog::create(HINSTANCE inst, HWND parent, bool autoCheckOnStartup,
     impl_->releaseButtonEnabled = false;
     impl_->releaseButtonAccent = false;
     impl_->releaseButtonText = L"无可用更新";
-    impl_->activeRequest = nextRequestId();
-    impl_->releaseUrl = updateSourceReleasePage(impl_->updateSource);
+    impl_->activeRequest = update_service::nextRequestId();
+    impl_->releaseUrl = update_service::updateSourceReleasePage(impl_->updateSource);
 
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
@@ -2358,12 +1052,12 @@ bool AboutDialog::create(HINSTANCE inst, HWND parent, bool autoCheckOnStartup,
     app_icon::applyWindowIcon(impl_->hwnd);
 
     // 弹窗触发下载时复用启动检查结果；界面仍只在用户打开时创建。
-    if (startupCheck && startupCheck->impl_->source == impl_->updateSource &&
-        startupCheck->impl_->result) {
-        auto result = std::make_unique<UpdatePayload>(std::move(*startupCheck->impl_->result));
-        startupCheck->impl_->result.reset();
-        impl_->activeRequest = result->requestId;
-        impl_->handle(kMsgUpdateReady, 0, reinterpret_cast<LPARAM>(result.release()));
+    if (startupCheck) {
+        if (auto available = startupCheck->takeAvailableResult(impl_->updateSource)) {
+            impl_->activeRequest = available->requestId;
+            auto result = std::make_unique<update_service::UpdateCheckResult>(std::move(*available));
+            impl_->handle(kMsgUpdateReady, 0, reinterpret_cast<LPARAM>(result.release()));
+        }
     }
     return true;
 }

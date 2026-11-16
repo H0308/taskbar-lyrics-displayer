@@ -5,6 +5,7 @@
 #include "ui/dock_pet.h"
 #include <d2d1_1.h>
 #include <dwrite.h>
+#include <wrl/client.h>
 #include <array>
 #include <span>
 
@@ -13,7 +14,7 @@ using PopupPage = media_popup_detail::Page;
 using namespace media_popup_detail;
 // 本次绘制所借用的页面数据与公共资源；不保存窗口或拥有者指针。
 struct PagePaintResources {
-    std::span<ID2D1Bitmap* const> idleIconBitmaps;
+    std::span<const Microsoft::WRL::ComPtr<ID2D1Bitmap>> idleIconBitmaps;
     DockPet& pet;
     ID2D1SolidColorBrush* brushStroke;
     ID2D1SolidColorBrush* brushText;

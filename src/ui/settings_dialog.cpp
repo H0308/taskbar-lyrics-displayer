@@ -14,6 +14,7 @@
 #include "ui/settings/artwork.h"
 #include "ui/settings/ids.h"
 #include "ui/settings/row.h"
+#include "ui/settings/row_painters.h"
 #include "ui/settings/sections.h"
 #include "ui/settings/section_labels.h"
 #include "ui/settings/section_metrics.h"
@@ -68,26 +69,16 @@ constexpr float kTitleHintGap = 2.0f;
 constexpr float kHintBottomPadding = 8.0f;
 constexpr float kHintMeasureHeight = 10000.0f;
 constexpr float kRowGap = 8.0f;
-constexpr float kModeGridGap = 8.0f;
-constexpr float kModeGridCardH = 56.0f;
 constexpr float kModeGridTopGap = 10.0f;
 constexpr float kModeGridNoteGap = 12.0f;
-constexpr float kSpectrumStyleCardH = 96.0f;
-constexpr float kSpectrumStyleCardGap = 8.0f;
 constexpr float kSpectrumBackgroundArtworkMaxW = 144.0f;
 constexpr float kSpectrumBackgroundArtworkMinW = 96.0f;
 constexpr float kSpectrumBackgroundArtworkH = 34.0f;
 constexpr float kSpectrumEffectArtworkH = 44.0f;
 constexpr float kSpectrumBackgroundArtworkGap = 12.0f;
 constexpr float kCoverEffectCardH = 72.0f;
-constexpr float kCoverEffectCardGap = 8.0f;
-constexpr float kSongToastPositionCardW = 156.0f;
 constexpr float kSongToastPositionCardH = 92.0f;
-constexpr float kSongToastPositionCardGap = 8.0f;
 constexpr float kHoverControlStyleCardH = 156.0f;
-constexpr float kSliderValueW = 62.0f;
-constexpr float kSliderValueGap = 10.0f;
-constexpr float kSliderSuffixW = 16.0f;
 constexpr float kScrollBarWidth = 3.0f;
 constexpr float kScrollBarHitWidth = 12.0f;
 constexpr float kScrollBarInset = 8.0f;
@@ -98,16 +89,9 @@ constexpr float kRowIconTextGap = 10.0f;
 constexpr float kRowIconSlotW = kRowIconSize + kRowIconTextGap;
 constexpr float kPageTitleIconSize = 20.0f;
 constexpr float kPageTitleIconTextGap = 10.0f;
-constexpr float kIdleAppsListTop = 76.0f;
 constexpr float kIdleAppActionW = 58.0f;
 constexpr float kIdleAppActionGap = 8.0f;
-constexpr float kIdleAppInfoRightInset = 144.0f;
-constexpr float kIdleAppNamesToggleW = 40.0f;
-constexpr float kIdleAppNamesToggleLabelW = 56.0f;
-constexpr float kIdleAppNamesToggleGap = 8.0f;
 constexpr float kIdleAppDragThreshold = 5.0f;
-constexpr float kIdleQuoteBackgroundCardH = 112.0f;
-constexpr float kIdleQuoteBackgroundCardGap = 8.0f;
 
 constexpr DWORD kDialogStyle = WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME;
 constexpr DWORD kDialogExStyle = WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE;
@@ -376,28 +360,6 @@ struct SettingsDialog::Impl {
         idleAppDropIndex = std::clamp(index, 0, static_cast<int>(count));
         return true;
     }
-
-
-
-    static D2D1_RECT_F sliderValueRect(const Row& row) {
-        const float trackRight = row.controlRect.right - kSliderValueW;
-        return D2D1::RectF(trackRight + kSliderValueGap, row.controlRect.top,
-                           row.controlRect.right, row.controlRect.bottom);
-    }
-
-    static D2D1_RECT_F sliderNumberRect(const Row& row) {
-        const auto rect = sliderValueRect(row);
-        return D2D1::RectF(rect.left + 4.0f, rect.top + 1.0f,
-                           rect.right - 4.0f - kSliderSuffixW, rect.bottom - 1.0f);
-    }
-
-
-
-
-
-
-
-
 
 
 
@@ -1443,722 +1405,23 @@ struct SettingsDialog::Impl {
                          p.textSecondary);
     }
 
-    void drawButton(fluent::FluentDialogSurface::Painter& painter, const Row& row) {
-        const auto& p = painter.colors();
-        const bool hovered = hoverId == row.id;
-        const bool pressed = pressedId == row.id;
-        D2D1_COLOR_F fill = pressed ? p.controlPressed : hovered ? p.controlHover : p.controlFill;
-        D2D1_COLOR_F textColor = row.enabled ? p.text : p.disabled;
-        if (!row.enabled)
-            fill = p.listHover;
-        painter.fillRoundRect(fill, row.controlRect);
-        painter.strokeRoundRect(p.controlStroke, row.controlRect);
-        if (focusedId == row.id && focusVisible && row.enabled) {
-            painter.strokeRoundRect(
-                p.accent,
-                D2D1::RectF(row.controlRect.left + 1.5f, row.controlRect.top + 1.5f,
-                            row.controlRect.right - 1.5f, row.controlRect.bottom - 1.5f),
-                1.5f, fluent::metrics::controlRadius - 1.0f);
-        }
-        if (row.id == kIdFloatingCardBackgroundColor) {
-            auto* format = painter.textFormat(fluent::font_sizes::body, 400, false, true);
-            constexpr float kPreviewSize = 18.0f;
-            constexpr float kPreviewGap = 8.0f;
-            const float textW = format ? painter.measureTextWidth(row.controlText, format) : 0.0f;
-            const float groupW = kPreviewSize + kPreviewGap + textW;
-            const float centerX = (row.controlRect.left + row.controlRect.right) * 0.5f;
-            const float centerY = (row.controlRect.top + row.controlRect.bottom) * 0.5f;
-            const float groupLeft = centerX - groupW * 0.5f;
-            const D2D1_RECT_F previewRect =
-                D2D1::RectF(groupLeft, centerY - kPreviewSize * 0.5f,
-                            groupLeft + kPreviewSize, centerY + kPreviewSize * 0.5f);
-            painter.fillRoundRect(fluent::toD2D(sections_.state.floatingCardBackgroundColor),
-                                  previewRect, 4.0f);
-            painter.strokeRoundRect(row.enabled ? p.cardStroke : p.disabled, previewRect, 1.0f,
-                                    4.0f);
-            if (format) {
-                painter.drawText(
-                    row.controlText, format,
-                    D2D1::RectF(groupLeft + kPreviewSize + kPreviewGap, row.controlRect.top,
-                                row.controlRect.right - 4.0f, row.controlRect.bottom),
-                    textColor);
-            }
-            return;
-        }
-        painter.drawText(row.controlText, painter.textFormat(fluent::font_sizes::button, 400, true, true),
-                         D2D1::RectF(row.controlRect.left + 4.0f, row.controlRect.top,
-                                     row.controlRect.right - 4.0f, row.controlRect.bottom),
-                         textColor);
-    }
-
-    void drawToggle(fluent::FluentDialogSurface::Painter& painter, const Row& row,
-                    bool hovered, bool focused) {
-        const auto& p = painter.colors();
-        const bool enabled = row.enabled;
-        const float trackH = std::min(20.0f, row.controlRect.bottom - row.controlRect.top);
-        const float centerY = (row.controlRect.top + row.controlRect.bottom) * 0.5f;
-        const D2D1_RECT_F track = D2D1::RectF(
-            row.controlRect.left + 0.5f, centerY - trackH * 0.5f,
-            row.controlRect.right - 0.5f, centerY + trackH * 0.5f);
-        const float radius = trackH * 0.5f;
-        const float knobR = trackH * 0.5f - 3.5f;
-        const float knobX = row.checked ? track.right - trackH * 0.5f
-                                        : track.left + trackH * 0.5f;
-        if (!enabled) {
-            painter.fillRoundRect(p.listHover, track, radius);
-            painter.strokeRoundRect(p.controlStroke, track, 1.0f, radius);
-        } else if (row.checked) {
-            painter.fillRoundRect(hovered ? p.accentHover : p.accent, track, radius);
-        } else {
-            painter.fillRoundRect(hovered ? p.controlHover : p.controlFill, track, radius);
-            painter.strokeRoundRect(p.textSecondary, track, 1.0f, radius);
-        }
-        if (auto* br = painter.brush(!enabled ? p.disabled
-                                               : row.checked ? p.textOnAccent : p.textSecondary)) {
-            painter.target()->FillEllipse(D2D1::Ellipse(D2D1::Point2F(knobX, centerY), knobR, knobR),
-                                             br);
-        }
-        if (focused && enabled) {
-            painter.strokeRoundRect(
-                p.accent,
-                D2D1::RectF(track.left + 1.5f, track.top + 1.5f,
-                            track.right - 1.5f, track.bottom - 1.5f),
-                1.5f, std::max(1.0f, radius - 1.5f));
-        }
-    }
-
-    void drawToggle(fluent::FluentDialogSurface::Painter& painter, const Row& row) {
-        drawToggle(painter, row, hoverId == row.id, focusedId == row.id && focusVisible);
-    }
-
-    void drawSlider(fluent::FluentDialogSurface::Painter& painter, const Row& row) {
-        const auto& p = painter.colors();
-        const float centerY = (row.controlRect.top + row.controlRect.bottom) * 0.5f;
-        constexpr float trackH = 4.0f;
-        const float trackLeft = row.controlRect.left;
-        const float trackRight = row.controlRect.right - kSliderValueW;
-        const float range = static_cast<float>(std::max(1, row.maxValue - row.minValue));
-        const float t = std::clamp(
-            (static_cast<float>(row.value - row.minValue) / range), 0.0f, 1.0f);
-        const float knobX = trackLeft + (trackRight - trackLeft) * t;
-        const D2D1_RECT_F track =
-            D2D1::RectF(trackLeft, centerY - trackH * 0.5f, trackRight,
-                        centerY + trackH * 0.5f);
-        const D2D1_RECT_F filled =
-            D2D1::RectF(track.left, track.top, knobX, track.bottom);
-        painter.fillRoundRect(row.enabled ? p.controlFill : p.listHover, track, trackH * 0.5f);
-        if (knobX > track.left)
-            painter.fillRoundRect(row.enabled ? p.accent : p.disabled, filled, trackH * 0.5f);
-        if (auto* br = painter.brush(row.enabled
-                                         ? (hoverId == row.id ? p.accentHover : p.accent)
-                                         : p.disabled)) {
-            painter.target()->FillEllipse(D2D1::Ellipse(D2D1::Point2F(knobX, centerY), 7.0f, 7.0f),
-                                                       br);
-        }
-        const bool editing = slider_.state().open && slider_.state().rowId == row.id;
-        const auto valueRect = sliderValueRect(row);
-        const auto numberRect = sliderNumberRect(row);
-        painter.fillRoundRect(row.enabled ? p.controlFill : p.listHover, valueRect);
-        painter.strokeRoundRect(editing ? p.accent : p.controlStroke, valueRect);
-        auto* numberFormat = painter.textFormat(fluent::font_sizes::caption, 600, true, true);
-        const std::wstring number = editing ? slider_.state().text : std::to_wstring(row.value);
-        painter.target()->PushAxisAlignedClip(numberRect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-        if (editing && numberFormat) {
-            const float textWidth = painter.measureTextWidth(number, numberFormat);
-            const float textLeft = (numberRect.left + numberRect.right - textWidth) * 0.5f;
-            for (size_t i = 0; i <= number.size(); ++i)
-                slider_.setCaretStop(
-                    i, std::clamp(textLeft +
-                                      painter.measureTextWidth(number.substr(0, i), numberFormat),
-                                  numberRect.left + 1.0f, numberRect.right - 1.0f));
-            const size_t first = std::min(slider_.state().caret, slider_.state().anchor);
-            const size_t last = std::max(slider_.state().caret, slider_.state().anchor);
-            if (first != last)
-                painter.fillRoundRect(
-                    p.listSelected,
-                    D2D1::RectF(slider_.state().caretStops[first], numberRect.top + 4.0f,
-                                slider_.state().caretStops[last], numberRect.bottom - 4.0f),
-                    1.0f);
-        }
-        painter.drawText(number, numberFormat, numberRect, row.enabled ? p.text : p.disabled);
-        if (editing && slider_.state().caretVisible &&
-            slider_.state().caret == slider_.state().anchor) {
-            if (auto* brush = painter.brush(p.accent))
-                painter.target()->FillRectangle(
-                    D2D1::RectF(slider_.state().caretStops[slider_.state().caret],
-                                numberRect.top + 5.0f,
-                                slider_.state().caretStops[slider_.state().caret] + 1.0f,
-                                numberRect.bottom - 5.0f),
-                    brush);
-        }
-        painter.target()->PopAxisAlignedClip();
-        painter.drawText(row.valueSuffix, painter.textFormat(fluent::font_sizes::caption, 600, true, true),
-                         D2D1::RectF(numberRect.right, numberRect.top,
-                                     valueRect.right - 4.0f, numberRect.bottom),
-                         row.enabled ? p.text : p.disabled);
-        if (focusedId == row.id && focusVisible && row.enabled)
-            painter.strokeRoundRect(p.accent,
-                                    D2D1::RectF(track.left - 3.0f, track.top - 5.0f,
-                                                track.right + 3.0f, track.bottom + 5.0f),
-                                    1.0f, 5.0f);
-    }
-
-    void drawRadioCardBackground(fluent::FluentDialogSurface::Painter& painter, const Row& row,
-                                 const D2D1_RECT_F& card, bool selected, bool hovered,
-                                 bool pressed) const {
-        const auto& p = painter.colors();
-        D2D1_COLOR_F fill = p.controlFill;
-        if (!row.enabled)
-            fill = p.listHover;
-        else if (pressed)
-            fill = p.controlPressed;
-        else if (selected)
-            fill = p.listSelected;
-        else if (hovered)
-            fill = p.controlHover;
-        painter.fillRoundRect(fill, card, fluent::metrics::controlRadius);
-
-        const bool focused = focusedId == row.id && focusVisible && row.enabled;
-        if (selected) {
-            painter.strokeRoundRect(row.enabled ? (hovered ? p.accentHover : p.accent)
-                                                 : p.disabled,
-                                    card, focused ? 2.0f : 1.5f,
-                                    fluent::metrics::controlRadius);
-        } else {
-            painter.strokeRoundRect(p.cardStroke, card, 1.0f,
-                                    fluent::metrics::controlRadius);
-        }
-    }
-
-    void drawRadioIndicator(fluent::FluentDialogSurface::Painter& painter, const Row& row,
-                            const D2D1_RECT_F& card, bool selected, bool hovered, bool pressed,
-                            float rightInset, float topInset) const {
-        const auto& p = painter.colors();
-        const D2D1_POINT_2F radioCenter =
-            D2D1::Point2F(card.right - rightInset, card.top + topInset);
-        if (!row.enabled) {
-            if (auto* brush = painter.brush(p.disabled))
-                painter.target()->DrawEllipse(D2D1::Ellipse(radioCenter, 6.0f, 6.0f), brush,
-                                              1.0f);
-            if (selected) {
-                if (auto* brush = painter.brush(p.disabled))
-                    painter.target()->FillEllipse(D2D1::Ellipse(radioCenter, 2.0f, 2.0f),
-                                                  brush);
-            }
-        } else if (selected) {
-            if (auto* brush = painter.brush(hovered || pressed ? p.accentHover : p.accent))
-                painter.target()->FillEllipse(D2D1::Ellipse(radioCenter, 6.0f, 6.0f), brush);
-            if (auto* brush = painter.brush(p.textOnAccent))
-                painter.target()->FillEllipse(D2D1::Ellipse(radioCenter, 2.0f, 2.0f), brush);
-        } else if (auto* brush = painter.brush(hovered ? p.text : p.textSecondary)) {
-            painter.target()->DrawEllipse(D2D1::Ellipse(radioCenter, 6.0f, 6.0f), brush,
-                                          pressed ? 1.5f : 1.0f);
-        }
-    }
-
-    void drawSpectrumStyleRadio(fluent::FluentDialogSurface::Painter& painter, Row& row) {
-        const auto& p = painter.colors();
-        auto* titleFormat = painter.textFormat(fluent::font_sizes::label, 500, true, true);
-        if (!titleFormat)
-            return;
-
-        const float gridW = row.controlRect.right - row.controlRect.left;
-        row.optionRects.clear();
-        const size_t count = row.options.size();
-        if (count == 0)
-            return;
-        const size_t columns = std::min<size_t>(count, 3);
-        const float cardW = (gridW - kSpectrumStyleCardGap * static_cast<float>(columns - 1)) /
-                            static_cast<float>(columns);
-        for (size_t i = 0; i < count; ++i) {
-            const float left = row.controlRect.left + static_cast<float>(i % columns) *
-                               (cardW + kSpectrumStyleCardGap);
-            const float top = row.controlRect.top + static_cast<float>(i / columns) *
-                              (kSpectrumStyleCardH + kSpectrumStyleCardGap);
-            const D2D1_RECT_F card = D2D1::RectF(left, top, left + cardW,
-                                             top + kSpectrumStyleCardH);
-            row.optionRects.push_back(card);
-
-            const bool selected = static_cast<int>(i) == row.selected;
-            const bool hovered = row.enabled && hoverId == row.id &&
-                                 hoverOption == static_cast<int>(i);
-            const bool pressed = row.enabled && pressedId == row.id &&
-                                 pressedOption == static_cast<int>(i);
-            drawRadioCardBackground(painter, row, card, selected, hovered, pressed);
-
-            const D2D1_RECT_F artwork =
-                D2D1::RectF(card.left + 8.0f, card.top + 8.0f, card.right - 24.0f,
-                            card.top + 60.0f);
-            artwork_.drawSpectrumStyleArtwork(painter, artwork, static_cast<int>(i), row.enabled);
-
-            painter.drawText(row.options[i], titleFormat,
-                             D2D1::RectF(card.left + 6.0f, card.bottom - 25.0f,
-                                         card.right - 6.0f, card.bottom - 6.0f),
-                             row.enabled ? p.text : p.disabled);
-
-            // 示意图和文字先画，单选框最后画，避免缩放时被内容盖住。
-            drawRadioIndicator(painter, row, card, selected, hovered, pressed, 14.0f, 14.0f);
-        }
-    }
-
-    void drawCoverEffectRadio(fluent::FluentDialogSurface::Painter& painter, Row& row) {
-        const auto& p = painter.colors();
-        auto* titleFormat = painter.textFormat(fluent::font_sizes::label, 500, false, true);
-        if (!titleFormat)
-            return;
-
-        const float gridW = row.controlRect.right - row.controlRect.left;
-        const float cardW = (gridW - kCoverEffectCardGap) * 0.5f;
-        row.optionRects.clear();
-        const size_t count = std::min<size_t>(row.options.size(), 2);
-        for (size_t i = 0; i < count; ++i) {
-            const float left = row.controlRect.left + static_cast<float>(i) *
-                               (cardW + kCoverEffectCardGap);
-            const D2D1_RECT_F card = D2D1::RectF(left, row.controlRect.top, left + cardW,
-                                                 row.controlRect.bottom);
-            row.optionRects.push_back(card);
-
-            const bool selected = static_cast<int>(i) == row.selected;
-            const bool hovered = row.enabled && hoverId == row.id &&
-                                 hoverOption == static_cast<int>(i);
-            const bool pressed = row.enabled && pressedId == row.id &&
-                                 pressedOption == static_cast<int>(i);
-            drawRadioCardBackground(painter, row, card, selected, hovered, pressed);
-
-            drawRadioIndicator(painter, row, card, selected, hovered, pressed, 16.0f, 16.0f);
-
-            const D2D1_RECT_F artwork =
-                D2D1::RectF(card.left + 12.0f, card.top + 14.0f, card.left + 56.0f,
-                            card.top + 58.0f);
-            artwork_.drawCoverEffectArtwork(painter, artwork, i == 1, row.enabled);
-            painter.drawText(row.options[i], titleFormat,
-                             D2D1::RectF(card.left + 68.0f, card.top + 20.0f,
-                                         card.right - 28.0f, card.bottom - 14.0f),
-                             row.enabled ? p.text : p.disabled);
-        }
-    }
-
-    void drawSongToastPositionRadio(fluent::FluentDialogSurface::Painter& painter, Row& row) {
-        const auto& p = painter.colors();
-        auto* titleFormat = painter.textFormat(fluent::font_sizes::label, 500, true, true);
-        if (!titleFormat)
-            return;
-
-        const float gridW = row.controlRect.right - row.controlRect.left;
-        row.optionRects.clear();
-        const size_t count = std::min<size_t>(row.options.size(), 2);
-        if (count == 0)
-            return;
-        const float cardW = std::min(
-            kSongToastPositionCardW,
-            (gridW - kSongToastPositionCardGap * static_cast<float>(count - 1)) /
-                static_cast<float>(count));
-        const float cardsW = cardW * static_cast<float>(count) +
-                             kSongToastPositionCardGap * static_cast<float>(count - 1);
-        const float cardsLeft = row.controlRect.left + (gridW - cardsW) * 0.5f;
-        for (size_t i = 0; i < count; ++i) {
-            const float left = cardsLeft + static_cast<float>(i) *
-                               (cardW + kSongToastPositionCardGap);
-            const D2D1_RECT_F card = D2D1::RectF(left, row.controlRect.top, left + cardW,
-                                                 row.controlRect.bottom);
-            row.optionRects.push_back(card);
-
-            const bool selected = static_cast<int>(i) == row.selected;
-            const bool hovered = row.enabled && hoverId == row.id &&
-                                 hoverOption == static_cast<int>(i);
-            const bool pressed = row.enabled && pressedId == row.id &&
-                                 pressedOption == static_cast<int>(i);
-            drawRadioCardBackground(painter, row, card, selected, hovered, pressed);
-
-            const float artworkW = std::min(100.0f, cardW - 20.0f);
-            const D2D1_RECT_F artwork = D2D1::RectF(
-                card.left + (cardW - artworkW) * 0.5f, card.top + 8.0f,
-                card.left + (cardW + artworkW) * 0.5f, card.top + 58.0f);
-            artwork_.drawSongToastPositionArtwork(painter, artwork, i == 0, row.enabled);
-
-            // 示意图先画，单选框最后画，避免位置指示被单选框遮住。
-            drawRadioIndicator(painter, row, card, selected, hovered, pressed, 16.0f, 16.0f);
-
-            painter.drawText(row.options[i], titleFormat,
-                             D2D1::RectF(card.left + 10.0f, card.top + 65.0f,
-                                         card.right - 10.0f, card.bottom - 8.0f),
-                             row.enabled ? p.text : p.disabled);
-        }
-    }
-
-    void drawIdleQuoteBackgroundRadio(fluent::FluentDialogSurface::Painter& painter, Row& row) {
-        const auto& p = painter.colors();
-        auto* titleFormat = painter.textFormat(fluent::font_sizes::settings::option, 600, true, true);
-        auto* noneFormat = painter.textFormat(fluent::font_sizes::caption, 600, true, true);
-        if (!titleFormat || !noneFormat)
-            return;
-
-        const float gridW = row.controlRect.right - row.controlRect.left;
-        const float cardW = (gridW - kIdleQuoteBackgroundCardGap) * 0.5f;
-        row.optionRects.clear();
-
-        const D2D1_RECT_F noneRect =
-            D2D1::RectF(row.cardRect.right - 72.0f, row.cardRect.top + 10.0f,
-                        row.cardRect.right - 16.0f, row.cardRect.top + 36.0f);
-        row.optionRects.push_back(noneRect);
-
-        const bool noneSelected = row.selected == 0;
-        const bool noneHovered = row.enabled && hoverId == row.id && hoverOption == 0;
-        const bool nonePressed = row.enabled && pressedId == row.id && pressedOption == 0;
-        D2D1_COLOR_F noneFill = p.controlFill;
-        if (!row.enabled)
-            noneFill = p.listHover;
-        else if (nonePressed)
-            noneFill = p.controlPressed;
-        else if (noneSelected)
-            noneFill = p.listSelected;
-        else if (noneHovered)
-            noneFill = p.controlHover;
-        painter.fillRoundRect(noneFill, noneRect, 13.0f);
-        if (noneSelected) {
-            painter.strokeRoundRect(row.enabled ? (noneHovered ? p.accentHover : p.accent)
-                                                 : p.disabled,
-                                    noneRect,
-                                    focusedId == row.id && focusVisible ? 2.0f : 1.0f, 13.0f);
-        } else {
-            painter.strokeRoundRect(p.cardStroke, noneRect, 1.0f, 13.0f);
-        }
-        const std::wstring noneText = row.options.empty() ? std::wstring(L"无") : row.options[0];
-        painter.drawText(noneText, noneFormat, noneRect,
-                         row.enabled ? p.text : p.disabled);
-
-        const size_t count = row.options.size() > 1
-                                 ? std::min<size_t>(row.options.size() - 1, 4)
-                                 : 0;
-        for (size_t i = 0; i < count; ++i) {
-            const int optionIndex = static_cast<int>(i + 1);
-            const int column = static_cast<int>(i % 2);
-            const int line = static_cast<int>(i / 2);
-            const float left = row.controlRect.left +
-                               column * (cardW + kIdleQuoteBackgroundCardGap);
-            const float top = row.controlRect.top +
-                              line * (kIdleQuoteBackgroundCardH + kIdleQuoteBackgroundCardGap);
-            const D2D1_RECT_F card =
-                D2D1::RectF(left, top, left + cardW, top + kIdleQuoteBackgroundCardH);
-            row.optionRects.push_back(card);
-
-            const bool selected = optionIndex == row.selected;
-            const bool hovered = row.enabled && hoverId == row.id &&
-                                 hoverOption == optionIndex;
-            const bool pressed = row.enabled && pressedId == row.id &&
-                                 pressedOption == optionIndex;
-            drawRadioCardBackground(painter, row, card, selected, hovered, pressed);
-
-            const D2D1_RECT_F artwork =
-                D2D1::RectF(card.left + 10.0f, card.top + 10.0f, card.right - 10.0f,
-                            card.bottom - 31.0f);
-            artwork_.drawIdleQuoteBackgroundArtwork(painter, artwork, optionIndex, row.enabled);
-
-            drawRadioIndicator(painter, row, card, selected, hovered, pressed, 16.0f, 14.0f);
-
-            painter.drawText(row.options[optionIndex], titleFormat,
-                             D2D1::RectF(card.left + 10.0f, card.bottom - 24.0f,
-                                         card.right - 10.0f, card.bottom - 5.0f),
-                             row.enabled ? p.text : p.disabled);
-        }
-    }
-
-    void drawHoverControlStyleRadio(fluent::FluentDialogSurface::Painter& painter, Row& row) {
-        const auto& p = painter.colors();
-        auto* titleFormat = painter.textFormat(fluent::font_sizes::settings::option, 500, true, true);
-        if (!titleFormat)
-            return;
-
-        const float gridW = row.controlRect.right - row.controlRect.left;
-        const float cardW = (gridW - kCoverEffectCardGap) * 0.5f;
-        row.optionRects.clear();
-        const size_t count = std::min<size_t>(row.options.size(), 2);
-        for (size_t i = 0; i < count; ++i) {
-            const float left = row.controlRect.left + static_cast<float>(i) *
-                               (cardW + kCoverEffectCardGap);
-            const D2D1_RECT_F card = D2D1::RectF(left, row.controlRect.top, left + cardW,
-                                                 row.controlRect.bottom);
-            row.optionRects.push_back(card);
-
-            const bool selected = static_cast<int>(i) == row.selected;
-            const bool hovered = row.enabled && hoverId == row.id &&
-                                 hoverOption == static_cast<int>(i);
-            const bool pressed = row.enabled && pressedId == row.id &&
-                                 pressedOption == static_cast<int>(i);
-            drawRadioCardBackground(painter, row, card, selected, hovered, pressed);
-
-            const D2D1_RECT_F artwork =
-                D2D1::RectF(card.left + 10.0f, card.top + 10.0f, card.right - 30.0f,
-                            card.bottom - 27.0f);
-            artwork_.drawHoverControlStyleArtwork(painter, artwork, i == 1, row.enabled);
-
-            // 示意图先画，单选框最后画，确保它始终位于卡片内容之上。
-            drawRadioIndicator(painter, row, card, selected, hovered, pressed, 16.0f, 14.0f);
-
-            painter.drawText(row.options[i], titleFormat,
-                             D2D1::RectF(card.left + 10.0f, card.bottom - 24.0f,
-                                         card.right - 10.0f, card.bottom - 5.0f),
-                             row.enabled ? p.text : p.disabled);
-        }
-    }
-
-    void drawRadio(fluent::FluentDialogSurface::Painter& painter, Row& row) {
-        if (row.id == kIdSpectrumStyle) {
-            drawSpectrumStyleRadio(painter, row);
-            return;
-        }
-        if (row.id == kIdCoverEffect) {
-            drawCoverEffectRadio(painter, row);
-            return;
-        }
-        if (row.id == kIdHoverControlStyle) {
-            drawHoverControlStyleRadio(painter, row);
-            return;
-        }
-        if (row.id == kIdSongToastPosition) {
-            drawSongToastPositionRadio(painter, row);
-            return;
-        }
-        if (row.id == kIdIdleQuoteBackground) {
-            drawIdleQuoteBackgroundRadio(painter, row);
-            return;
-        }
-
-        const auto& p = painter.colors();
-        auto* format = painter.textFormat(fluent::font_sizes::label, 400, true, true);
-        if (!format)
-            return;
-        const float width = row.controlRect.right - row.controlRect.left;
-        const float optionWidth =
-            width / static_cast<float>(std::max<size_t>(1, row.options.size()));
-        painter.fillRoundRect(p.listHover, row.controlRect);
-        row.optionRects.clear();
-        for (size_t i = 0; i < row.options.size(); ++i) {
-            const bool optionEnabled = row.enabled && isOptionEnabled(row, i);
-            const bool selected = static_cast<int>(i) == row.selected;
-            const bool hovered = optionEnabled && hoverId == row.id &&
-                                 hoverOption == static_cast<int>(i);
-            const bool pressed = optionEnabled && pressedId == row.id &&
-                                  pressedOption == static_cast<int>(i);
-            const float left = row.controlRect.left + static_cast<float>(i) * optionWidth;
-            const D2D1_RECT_F optionRect = D2D1::RectF(
-                left, row.controlRect.top, left + optionWidth, row.controlRect.bottom);
-            const D2D1_RECT_F face = D2D1::RectF(
-                optionRect.left + 2.0f, optionRect.top + 2.0f,
-                optionRect.right - 2.0f, optionRect.bottom - 2.0f);
-            if (selected) {
-                painter.fillRoundRect(
-                    optionEnabled ? (pressed ? p.accentPressed : hovered ? p.accentHover : p.accent)
-                                  : p.listSelected,
-                    face);
-            } else if (hovered || pressed) {
-                painter.fillRoundRect(pressed ? p.controlPressed : p.controlHover, face);
-            }
-            if (selected && optionEnabled && focusedId == row.id && focusVisible)
-                painter.strokeRoundRect(
-                    p.textOnAccent,
-                    D2D1::RectF(face.left + 1.5f, face.top + 1.5f,
-                                face.right - 1.5f, face.bottom - 1.5f),
-                    1.0f, fluent::metrics::controlRadius - 1.0f);
-            painter.drawText(row.options[i], format,
-                             D2D1::RectF(face.left + 4.0f, face.top,
-                                         face.right - 4.0f, face.bottom),
-                             optionEnabled ? (selected ? p.textOnAccent : p.text) : p.disabled);
-            row.optionRects.push_back(optionRect);
-        }
-    }
-
-    void drawModeGrid(fluent::FluentDialogSurface::Painter& painter, Row& row) {
-        const auto& p = painter.colors();
-        auto* titleFormat = painter.textFormat(fluent::font_sizes::label, 600, false, true);
-        auto* hintFormat = painter.textFormat(fluent::font_sizes::smallText, 400);
-        if (!titleFormat || !hintFormat)
-            return;
-
-        const float gridW = row.controlRect.right - row.controlRect.left;
-        const float cardW = (gridW - kModeGridGap) * 0.5f;
-        row.optionRects.clear();
-        const size_t count = std::min<size_t>(row.options.size(), 4);
-        for (size_t i = 0; i < count; ++i) {
-            const int column = static_cast<int>(i % 2);
-            const int line = static_cast<int>(i / 2);
-            const float left = row.controlRect.left + column * (cardW + kModeGridGap);
-            const float top = row.controlRect.top + line * (kModeGridCardH + kModeGridGap);
-            const D2D1_RECT_F card =
-                D2D1::RectF(left, top, left + cardW, top + kModeGridCardH);
-            row.optionRects.push_back(card);
-
-            const bool selected = static_cast<int>(i) == row.selected;
-            const bool hovered = row.enabled && hoverId == row.id &&
-                                 hoverOption == static_cast<int>(i);
-            const bool pressed = row.enabled && pressedId == row.id &&
-                                 pressedOption == static_cast<int>(i);
-            D2D1_COLOR_F fill = p.controlFill;
-            if (!row.enabled)
-                fill = p.listHover;
-            else if (pressed)
-                fill = p.controlPressed;
-            else if (selected)
-                fill = p.listSelected;
-            else if (hovered)
-                fill = p.controlHover;
-            painter.fillRoundRect(fill, card, fluent::metrics::controlRadius);
-
-            if (selected) {
-                painter.strokeRoundRect(hovered ? p.accentHover : p.accent, card,
-                                        focusedId == row.id && focusVisible ? 2.0f : 1.5f,
-                                        fluent::metrics::controlRadius);
-                if (auto* br = painter.brush(row.enabled ? p.accent : p.disabled)) {
-                    painter.target()->FillEllipse(
-                        D2D1::Ellipse(D2D1::Point2F(card.right - 14.0f, card.top + 14.0f),
-                                      3.0f, 3.0f),
-                        br);
-                }
-            } else {
-                painter.strokeRoundRect(p.cardStroke, card, 1.0f,
-                                        fluent::metrics::controlRadius);
-            }
-
-            const D2D1_COLOR_F titleColor = row.enabled ? p.text : p.disabled;
-            painter.drawText(row.options[i], titleFormat,
-                             D2D1::RectF(card.left + 12.0f, card.top + 8.0f,
-                                         card.right - 12.0f, card.top + 28.0f),
-                             titleColor);
-            if (i < row.optionHints.size() && !row.optionHints[i].empty()) {
-                painter.drawText(row.optionHints[i], hintFormat,
-                                 D2D1::RectF(card.left + 12.0f, card.top + 29.0f,
-                                             card.right - 12.0f, card.bottom - 8.0f),
-                                 row.enabled ? p.textSecondary : p.disabled);
-            }
-        }
-    }
-
-    void drawIdleApps(fluent::FluentDialogSurface::Painter& painter, const Row& row) {
-        const auto& p = painter.colors();
-        const float innerX = row.cardRect.left + 16.0f;
-        const float innerRight = row.cardRect.right - 16.0f;
-        const float listTop = row.cardRect.top + kIdleAppsListTop;
-        const size_t count = sections_.state.idleApps.size();
-        auto* nameFormat = painter.textFormat(fluent::font_sizes::label, 600, false, true);
-        auto* pathFormat = painter.textFormat(fluent::font_sizes::smallText, 400, false, true);
-        auto* actionFormat = painter.textFormat(fluent::font_sizes::smallText, 600, true, true);
-        if (!nameFormat || !pathFormat || !actionFormat)
-            return;
-
-        auto drawAction = [&](const D2D1_RECT_F& rect, const std::wstring& text, bool enabled,
-                              bool hovered, bool pressed) {
-            const D2D1_COLOR_F fill = !enabled ? p.listHover
-                                               : pressed ? p.controlPressed
-                                                         : hovered ? p.controlHover
-                                                                   : p.controlFill;
-            painter.fillRoundRect(fill, rect, 6.0f);
-            painter.strokeRoundRect(enabled ? p.cardStroke : p.disabled, rect, 1.0f, 6.0f);
-            painter.drawText(text, actionFormat, rect, enabled ? p.text : p.disabled);
+    row_painters::RowPaintContext rowPaintContext() {
+        return {
+            artwork_,
+            slider_,
+            sections_.state.floatingCardBackgroundColor,
+            sections_.state.idleApps,
+            surface.dpi(),
+            idleAppDragging,
+            idleAppDragIndex,
+            idleAppDropIndex,
+            hoverId,
+            hoverOption,
+            pressedId,
+            pressedOption,
+            focusedId,
+            focusVisible,
         };
-
-        const D2D1_RECT_F toggleLabelRect =
-            D2D1::RectF(row.controlRect.left - kIdleAppNamesToggleGap -
-                            kIdleAppNamesToggleLabelW,
-                        row.controlRect.top, row.controlRect.left - kIdleAppNamesToggleGap,
-                        row.controlRect.bottom);
-        painter.drawText(L"显示名称", painter.textFormat(fluent::font_sizes::caption, 400, true, true),
-                         toggleLabelRect, row.enabled ? p.textSecondary : p.disabled);
-        drawToggle(painter, row,
-                   row.enabled && hoverId == row.id && hoverOption == kIdleAppNamesOption,
-                   focusedId == kIdIdleAppNames && focusVisible);
-
-        for (size_t i = 0; i < count; ++i) {
-            const auto& app = sections_.state.idleApps[i];
-            const D2D1_RECT_F item = row.appItemRects[i];
-            const int option = hoverId == row.id ? hoverOption : -1;
-            const int pressedOptionValue = pressedId == row.id ? pressedOption : -1;
-            const bool appHovered = option == static_cast<int>(i) ||
-                                    option == kIdleAppEditOptionBase + static_cast<int>(i) ||
-                                    option == kIdleAppDragOptionBase + static_cast<int>(i);
-            const bool appPressed =
-                pressedOptionValue == static_cast<int>(i) ||
-                pressedOptionValue == kIdleAppEditOptionBase + static_cast<int>(i) ||
-                pressedOptionValue == kIdleAppDragOptionBase + static_cast<int>(i);
-            const bool hovered = row.enabled && hoverId == row.id &&
-                                 appHovered;
-            const bool pressed = row.enabled && pressedId == row.id &&
-                                 appPressed;
-            const bool dragging = idleAppDragging && idleAppDragIndex == static_cast<int>(i);
-            painter.fillRoundRect(row.enabled ? (hovered ? p.controlHover : p.controlFill)
-                                              : p.listHover,
-                                  item, 7.0f);
-            if (pressed)
-                painter.fillRoundRect(p.controlPressed, item, 7.0f);
-            if (dragging)
-                painter.strokeRoundRect(p.accent, item, 1.5f, 7.0f);
-
-            const D2D1_RECT_F iconRect =
-                D2D1::RectF(item.left + 8.0f, item.top + 8.0f, item.left + 36.0f,
-                            item.top + 36.0f);
-            if (app.iconPixels && !app.iconPixels->empty() && app.iconWidth > 0 &&
-                app.iconHeight > 0 && painter.target()) {
-                ID2D1Bitmap* bitmap = nullptr;
-                const auto props = D2D1::BitmapProperties(
-                    D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
-                                      D2D1_ALPHA_MODE_PREMULTIPLIED),
-                    static_cast<float>(surface.dpi()), static_cast<float>(surface.dpi()));
-                if (SUCCEEDED(painter.target()->CreateBitmap(
-                        D2D1::SizeU(app.iconWidth, app.iconHeight), app.iconPixels->data(),
-                        app.iconWidth * 4, &props, &bitmap)) &&
-                    bitmap) {
-                    painter.target()->DrawBitmap(bitmap, iconRect, row.enabled ? 1.0f : 0.45f,
-                                                 D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
-                    bitmap->Release();
-                }
-            }
-
-            const D2D1_RECT_F nameRect =
-                D2D1::RectF(item.left + 46.0f, item.top + 3.0f,
-                            item.right - kIdleAppInfoRightInset, item.top + 23.0f);
-            const D2D1_RECT_F pathRect =
-                D2D1::RectF(item.left + 46.0f, item.top + 22.0f,
-                            item.right - kIdleAppInfoRightInset, item.bottom - 3.0f);
-            painter.drawTrimmedText(app.name.empty() ? L"未命名应用" : app.name, nameFormat,
-                                    nameRect, row.enabled && app.pathValid ? p.text : p.disabled);
-            painter.drawTrimmedText(app.pathValid ? app.path : L"路径失效，请重新选择",
-                                    pathFormat, pathRect,
-                                    row.enabled && app.pathValid ? p.textSecondary : p.disabled);
-
-            const D2D1_RECT_F editRect = row.appEditRects[i];
-            const D2D1_RECT_F deleteRect = row.appDeleteRects[i];
-            drawAction(editRect, L"修改", row.enabled,
-                       row.enabled && option == kIdleAppEditOptionBase + static_cast<int>(i),
-                       row.enabled && pressedOptionValue == kIdleAppEditOptionBase +
-                                                      static_cast<int>(i));
-            drawAction(deleteRect, L"删除", row.enabled,
-                       row.enabled && option == static_cast<int>(i),
-                       row.enabled && pressedOptionValue == static_cast<int>(i));
-        }
-
-        if (idleAppDragging && idleAppDropIndex >= 0) {
-            const float dropY = listTop + static_cast<float>(idleAppDropIndex) * kIdleAppItemH - 4.0f;
-            painter.fillRoundRect(
-                p.accent,
-                D2D1::RectF(innerX + 4.0f, dropY - 1.0f, innerRight - 4.0f, dropY + 1.0f),
-                1.0f);
-        }
-
-        if (count == 0)
-            painter.drawText(L"未添加应用", pathFormat,
-                             D2D1::RectF(innerX + 8.0f, listTop + 10.0f, innerRight - 8.0f,
-                                         listTop + 34.0f),
-                             row.enabled ? p.textSecondary : p.disabled);
-
-        const bool canAdd = row.enabled && count < kMaxIdleApps;
-        const bool addHovered = canAdd && hoverId == row.id && hoverOption == -1;
-        const bool addPressed = canAdd && pressedId == row.id && pressedOption == -1;
-        painter.fillRoundRect(
-            canAdd ? (addPressed ? p.accentPressed : addHovered ? p.accentHover : p.accent)
-                   : p.listHover,
-            row.addAppRect, 7.0f);
-        painter.strokeRoundRect(canAdd ? p.accent : p.disabled, row.addAppRect, 1.0f, 7.0f);
-        painter.drawText(L"添加应用", painter.textFormat(fluent::font_sizes::label, 600, true, true),
-                         row.addAppRect, canAdd ? p.textOnAccent : p.disabled);
     }
 
     void drawScrollBar(fluent::FluentDialogSurface::Painter& painter) {
@@ -2287,8 +1550,9 @@ struct SettingsDialog::Impl {
             if (row.showHint)
                 painter.drawText(row.hint, painter.textFormat(fluent::font_sizes::caption, 400), row.hintRect,
                                  row.enabled ? p.textSecondary : p.disabled);
+            const auto rowCtx = rowPaintContext();
             if (row.kind == ControlKind::AppList) {
-                drawIdleApps(painter, row);
+                row_painters::drawAppList(painter, rowCtx, row);
                 continue;
             }
             if (row.id == kIdSpectrumBackground)
@@ -2303,15 +1567,16 @@ struct SettingsDialog::Impl {
                 artwork_.drawLyricEffectArtwork(painter, row.artworkRect,
                     static_cast<LyricEffect>(row.id - kIdLyricEffectFirst), row.enabled);
             if (row.kind == ControlKind::Toggle)
-                drawToggle(painter, row);
+                row_painters::drawToggle(painter, row, hoverId == row.id,
+                                         focusedId == row.id && focusVisible);
             else if (row.kind == ControlKind::Radio)
-                drawRadio(painter, row);
+                row_painters::drawRadio(painter, rowCtx, row);
             else if (row.kind == ControlKind::ModeGrid)
-                drawModeGrid(painter, row);
+                row_painters::drawModeGrid(painter, rowCtx, row);
             else if (row.kind == ControlKind::Slider)
-                drawSlider(painter, row);
+                row_painters::drawSlider(painter, rowCtx, row);
             else
-                drawButton(painter, row);
+                row_painters::drawButton(painter, rowCtx, row);
         }
     }
 
@@ -2701,7 +1966,7 @@ struct SettingsDialog::Impl {
                 if (row && row->kind == ControlKind::Slider && row->enabled) {
                     const float pointerX = GET_X_LPARAM(lp) / s;
                     const float pointerY = GET_Y_LPARAM(lp) / s;
-                    if (!contains(sliderValueRect(*row), pointerX, pointerY))
+                    if (!contains(row_painters::sliderValueRect(*row), pointerX, pointerY))
                         updateSliderFromPointer(*row, pointerX);
                     return 0;
                 }
@@ -2737,7 +2002,7 @@ struct SettingsDialog::Impl {
             const float pointerY = GET_Y_LPARAM(lp) / s;
             Row* row = findRow(hitTest(pointerX, pointerY));
             if (row && row->kind == ControlKind::Slider && row->enabled &&
-                contains(sliderValueRect(*row), pointerX, pointerY))
+                contains(row_painters::sliderValueRect(*row), pointerX, pointerY))
                 openSliderEditor(*row);
             return 0;
         }
@@ -2772,7 +2037,8 @@ struct SettingsDialog::Impl {
             }
             Row* pressedRow = findRow(pressedId);
             const bool numberHit = pressedRow && pressedRow->kind == ControlKind::Slider &&
-                pressedRow->enabled && contains(sliderValueRect(*pressedRow), pointerX, pointerY);
+                pressedRow->enabled &&
+                contains(row_painters::sliderValueRect(*pressedRow), pointerX, pointerY);
             if (slider_.state().open && (!numberHit || pressedId != slider_.state().rowId))
                 commitSliderEditor();
             if (numberHit) {

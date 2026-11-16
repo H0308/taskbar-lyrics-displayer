@@ -53,42 +53,103 @@ set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/resource.rc
     PROPERTIES OBJECT_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/app.manifest;${CMAKE_CURRENT_SOURCE_DIR}/asset/logo-dark.ico;${CMAKE_CURRENT_SOURCE_DIR}/asset/logo-light.ico;${CMAKE_CURRENT_SOURCE_DIR}/asset/dock_pet_sprites.png")
 
-add_executable(WindowsTaskbarLyrics
-    src/main.cpp
+set(WINDOWS_TASKBAR_LYRICS_CORE_SOURCES
+    src/app/presentation_model.cpp
     src/graphics/gdiplus_runtime.cpp
     src/graphics/pixel_luminance.cpp
-    src/settings/taskbar_appearance.cpp
+    src/logging/runtime_logger.cpp
+    src/lyric/cover_provider.cpp
+    src/lyric/local_lyric_index.cpp
+    src/lyric/lrc_parser.cpp
+    src/lyric/lyric_http.cpp
+    src/lyric/lyric_matching.cpp
+    src/lyric/lyric_provider.cpp
+    src/lyric/lyricsfile_parser.cpp
+    src/lyric/qrc_decoder.cpp
+    src/lyric/qrc_des.cpp
+    src/lyric/sources/kugou_lyric_source.cpp
+    src/lyric/sources/lrclib_lyric_source.cpp
+    src/lyric/sources/netease_lyric_source.cpp
+    src/lyric/sources/qq_lyric_source.cpp
+    src/lyric/sources/soda_lyric_source.cpp
+    src/media/playback_controller.cpp
+    src/media/player_source.cpp
+    src/media/track_identity.cpp
+    src/settings/app_settings.cpp
     src/settings/display_rules.cpp
-    src/ui/taskbar/resource_panel.cpp
-    src/ui/taskbar/cover_image.cpp
+    src/settings/settings_store.cpp
+    src/settings/taskbar_appearance.cpp
+    src/ui/fluent_theme.cpp
+    src/ui/markdown_document.cpp
+    src/ui/media_popup/page_layout.cpp
+    src/ui/text_edit_buffer.cpp
     src/ui/settings/lyric_section.cpp
-    src/ui/settings/spectrum_section.cpp
-    src/ui/taskbar/karaoke_tracker.cpp
-    src/ui/taskbar/text_scroll.cpp
-    src/ui/taskbar/lyric_text_renderer.cpp
-    src/ui/taskbar/interaction.cpp
-    src/ui/taskbar/scene_transition.cpp
-    src/ui/ui_dispatcher.cpp
+    src/ui/settings/search_model.cpp
+    src/ui/settings/sections_commands.cpp
     src/ui/settings/sections_create.cpp
     src/ui/settings/sections_state.cpp
-    src/ui/settings/sections_commands.cpp
+    src/ui/settings/spectrum_section.cpp
+    src/ui/taskbar/interaction.cpp
+    src/ui/taskbar/karaoke_tracker.cpp
+    src/ui/taskbar/layout.cpp
+    src/ui/taskbar/placement.cpp
+    src/ui/taskbar/scene_transition.cpp
+    src/ui/taskbar/text_scroll.cpp
+    src/ui/taskbar/vinyl_animation.cpp
+    src/ui/taskbar/word_wave_renderer.cpp
+    src/update/update_service.cpp
+    src/util/base64.cpp
+    src/util/dominant_color.cpp
+)
+
+add_library(WindowsTaskbarLyricsCore OBJECT ${WINDOWS_TASKBAR_LYRICS_CORE_SOURCES})
+target_include_directories(WindowsTaskbarLyricsCore PUBLIC src)
+target_compile_definitions(WindowsTaskbarLyricsCore PUBLIC
+    UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
+target_compile_options(WindowsTaskbarLyricsCore PUBLIC /utf-8 /EHsc)
+target_link_libraries(WindowsTaskbarLyricsCore PUBLIC
+    CURL::libcurl
+    nlohmann_json::nlohmann_json
+    yaml-cpp::yaml-cpp
+    ZLIB::ZLIB
+    windowsapp
+    winhttp
+    d2d1
+    dwrite
+    dwmapi
+    gdiplus
+    user32
+    gdi32
+    shell32
+    ole32
+    advapi32
+    pdh
+    psapi
+)
+
+add_executable(WindowsTaskbarLyrics
+    src/main.cpp
+    src/ui/taskbar/resource_panel.cpp
+    src/ui/taskbar/cover_image.cpp
+    src/ui/taskbar/lyric_text_renderer.cpp
+    src/ui/ui_dispatcher.cpp
     src/ui/settings/search_palette.cpp
     src/ui/settings/slider_editor.cpp
-    src/ui/media_popup/page_layout.cpp
+    src/ui/settings/row_painters.cpp
+    src/ui/media_popup/backdrop_controller.cpp
     src/ui/media_popup/page_painter_common.cpp
     src/ui/media_popup/media_page_painter.cpp
     src/ui/media_popup/idle_page_painter.cpp
+    src/ui/taskbar/idle_background_renderer.cpp
     src/ui/taskbar/spectrum_renderer.cpp
+    src/ui/taskbar/vinyl_renderer.cpp
     src/ui/taskbar/placement_probe.cpp
-    src/ui/taskbar/placement.cpp
     src/ui/taskbar/appbar_registration.cpp
     src/ui/taskbar/lyric_effects_renderer.cpp
     src/ui/taskbar/lyric_easter_eggs.cpp
     src/ui/taskbar/lyric_easter_egg_scenes.cpp
     src/ui/taskbar/lyric_city_landmarks.cpp
-    src/ui/taskbar/word_wave_renderer.cpp
     src/ui/taskbar/lyric_typesetter.cpp
-    src/ui/taskbar/vinyl_animation.cpp
     src/app/application_dialogs.cpp
     src/app/application_lifecycle.cpp
     src/app/application_presentation.cpp
@@ -96,21 +157,12 @@ add_executable(WindowsTaskbarLyrics
     src/app/application_support.cpp
     src/app/application_taskbar.cpp
     src/app/application_tray.cpp
-    src/app/presentation_model.cpp
     src/idle/idle_controller.cpp
-    src/media/playback_controller.cpp
-    src/media/track_identity.cpp
-    src/settings/app_settings.cpp
     src/ui/settings/artwork.cpp
-    src/ui/settings/search_model.cpp
     src/ui/taskbar/platform.cpp
-    src/ui/taskbar/layout.cpp
     src/ui/taskbar/text_effects_cache.cpp
     src/ui/taskbar/window_attachment.cpp
-    src/settings/settings_store.cpp
-    src/logging/runtime_logger.cpp
     src/media/smtc_monitor.cpp
-    src/media/player_source.cpp
     src/media/smtc/smtc_common.cpp
     src/media/smtc/qq_music_smtc_adapter.cpp
     src/media/smtc/netease_smtc_adapter.cpp
@@ -120,12 +172,6 @@ add_executable(WindowsTaskbarLyrics
     src/monitor/resource_monitor.cpp
     src/idle/idle_quote_provider.cpp
     src/idle/ticktick_provider.cpp
-    src/lyric/lyric_provider.cpp
-    src/lyric/lrc_parser.cpp
-    src/lyric/lyricsfile_parser.cpp
-    src/lyric/qrc_decoder.cpp
-    src/lyric/qrc_des.cpp
-    src/lyric/cover_provider.cpp
     src/graphics/bitmap_renderer.cpp
     src/graphics/composition_renderer.cpp
     src/ui/media_control_icons.cpp
@@ -141,9 +187,9 @@ add_executable(WindowsTaskbarLyrics
     src/ui/message_dialog.cpp
     src/ui/taskbar_host.cpp
     src/ui/about_dialog.cpp
+    src/ui/release_notes_view.cpp
     src/ui/manual_search_dialog.cpp
-    src/ui/font_sizes.h
-    src/ui/fluent_theme.cpp
+    src/ui/manual_search_preview.cpp
     src/ui/fluent_controls.cpp
     src/ui/fluent_menu.cpp
     src/ui/font_picker_dialog.cpp
@@ -152,12 +198,9 @@ add_executable(WindowsTaskbarLyrics
     src/ui/font_color_dialog.cpp
     src/ui/settings_dialog.cpp
     src/ui/runtime_log_dialog.cpp
-    src/util/base64.cpp
-    src/util/dominant_color.cpp
+    src/update/startup_update_check.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/resource.rc
 )
-
-target_include_directories(WindowsTaskbarLyrics PRIVATE src)
 
 # 清单文件已通过 resource.rc 嵌入（app.manifest），关闭链接器的默认清单生成，避免重复。
 # Release 使用 Windows 子系统（不弹控制台黑窗），代码入口是 main()，
@@ -166,38 +209,20 @@ target_link_options(WindowsTaskbarLyrics PRIVATE /MANIFEST:NO
     $<$<CONFIG:Release>:/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup>)
 
 target_compile_definitions(WindowsTaskbarLyrics PRIVATE
-    UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00
     $<$<CONFIG:Release>:QQMUSICLYRIC_RELEASE_BUILD=1>)
-target_compile_options(WindowsTaskbarLyrics PRIVATE /utf-8 /EHsc)
 
 target_link_libraries(WindowsTaskbarLyrics PRIVATE
-    CURL::libcurl
-    nlohmann_json::nlohmann_json
-    yaml-cpp::yaml-cpp
-    ZLIB::ZLIB
-    windowsapp
-    winhttp
-    d2d1
+    WindowsTaskbarLyricsCore
     d3d11
     dxgi
     dxguid
     dcomp
-    dwrite
-    gdiplus
-    user32
-    gdi32
-    shell32
-    ole32
     coremessaging
     shcore
     uiautomationcore
-    dwmapi
     uxtheme
     comctl32
     windowscodecs
-    advapi32
-    pdh
-    psapi
     iphlpapi
     powrprof
     winmm
@@ -208,68 +233,17 @@ if(BUILD_TESTING)
     add_executable(WindowsTaskbarLyricsParserTests
         tests/test_main.cpp
         tests/lrc_parser_tests.cpp
+        tests/lyric_sources_and_local_tests.cpp
         tests/settings_logic_tests.cpp
         tests/transition_and_state_tests.cpp
         tests/layout_and_sections_tests.cpp
         tests/playback_and_presentation_tests.cpp
         tests/soda_logic_tests.cpp
-        src/app/presentation_model.cpp
-        src/graphics/gdiplus_runtime.cpp
-        src/graphics/pixel_luminance.cpp
-        src/logging/runtime_logger.cpp
-        src/lyric/cover_provider.cpp
-        src/lyric/lrc_parser.cpp
-        src/lyric/lyricsfile_parser.cpp
-        src/lyric/lyric_provider.cpp
-        src/lyric/qrc_decoder.cpp
-        src/lyric/qrc_des.cpp
-        src/media/playback_controller.cpp
-        src/media/player_source.cpp
-        src/media/track_identity.cpp
-        src/settings/app_settings.cpp
-        src/settings/display_rules.cpp
-        src/settings/settings_store.cpp
-        src/settings/taskbar_appearance.cpp
-        src/ui/fluent_theme.cpp
-        src/ui/media_popup/page_layout.cpp
-        src/ui/settings/lyric_section.cpp
-        src/ui/settings/search_model.cpp
-        src/ui/settings/sections_commands.cpp
-        src/ui/settings/sections_create.cpp
-        src/ui/settings/sections_state.cpp
-        src/ui/settings/spectrum_section.cpp
-        src/ui/taskbar/interaction.cpp
-        src/ui/taskbar/karaoke_tracker.cpp
-        src/ui/taskbar/layout.cpp
-        src/ui/taskbar/placement.cpp
-        src/ui/taskbar/scene_transition.cpp
-        src/ui/taskbar/text_scroll.cpp
-        src/ui/taskbar/vinyl_animation.cpp
-        src/ui/taskbar/word_wave_renderer.cpp
-        src/util/base64.cpp
-        src/util/dominant_color.cpp
+        tests/ui_text_and_controls_tests.cpp
+        tests/update_and_markdown_tests.cpp
     )
-    target_include_directories(WindowsTaskbarLyricsParserTests PRIVATE src)
-    target_compile_definitions(WindowsTaskbarLyricsParserTests PRIVATE
-        UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
-    target_compile_options(WindowsTaskbarLyricsParserTests PRIVATE /utf-8 /EHsc)
     target_link_libraries(WindowsTaskbarLyricsParserTests PRIVATE
-        CURL::libcurl
-        nlohmann_json::nlohmann_json
-        yaml-cpp::yaml-cpp
-        ZLIB::ZLIB
-        windowsapp
-        d2d1
-        dwrite
-        dwmapi
-        gdiplus
-        user32
-        gdi32
-        shell32
-        ole32
-        advapi32
-        pdh
-        psapi
+        WindowsTaskbarLyricsCore
     )
     add_test(NAME WindowsTaskbarLyricsParserTests COMMAND WindowsTaskbarLyricsParserTests)
 endif()

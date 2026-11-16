@@ -1,5 +1,6 @@
 #pragma once
 #include "ui/settings/row.h"
+#include "ui/text_edit_buffer.h"
 #include <windows.h>
 #include <array>
 #include <functional>
@@ -20,13 +21,9 @@ public:
     struct State {
         int rowId = 0;
         bool open = false, committing = false;
-        std::wstring text;
-        size_t caret = 0, anchor = 0;
+        fluent::TextEditBuffer buffer;
         std::array<float, 4> caretStops{};
         bool caretVisible = true, selecting = false;
-        std::wstring undoText;
-        size_t undoCaret = 0, undoAnchor = 0;
-        bool canUndo = false;
     };
     explicit SliderEditor(SliderEditorOwner owner) : owner_(std::move(owner)) {}
     const State& state() const { return state_; }

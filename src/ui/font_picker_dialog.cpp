@@ -5,6 +5,7 @@
 #include "ui/dialog_notify.h"
 #include "ui/fluent_dialog_surface.h"
 #include "ui/fluent_theme.h"
+#include "ui/text_edit_buffer.h"
 
 #include <windowsx.h>
 
@@ -12,7 +13,6 @@
 #include <array>
 #include <cmath>
 #include <cwctype>
-#include <cstring>
 #include <map>
 #include <string>
 #include <utility>
@@ -42,6 +42,22 @@ constexpr float kScrollBarInset = 8.0f;
 
 constexpr int kSizePresets[] = {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20,
                                 22, 24, 26, 28, 32, 36, 40, 48};
+
+constexpr fluent::TextEditOptions kFilterEditOptions{
+    .digitsOnly = false,
+    .decimalOnly = false,
+    .printableOnly = true,
+    .maxLength = 0,
+    .allowUndo = false,
+};
+
+constexpr fluent::TextEditOptions kSizeEditOptions{
+    .digitsOnly = false,
+    .decimalOnly = true,
+    .printableOnly = false,
+    .maxLength = 0,
+    .allowUndo = false,
+};
 
 const std::array<const wchar_t*, 4>& styleNames() {
     static const std::array<const wchar_t*, 4> names = {L"常规", L"加粗", L"斜体", L"粗斜体"};
@@ -78,10 +94,8 @@ float scrollBarThumbY(const ScrollBarGeometry& bar, float scrollY, float maxScro
 
 struct FontPickerDialog::Impl {
     struct TextField {
-        std::wstring text;
+        fluent::TextEditBuffer buffer;
         std::wstring cue;
-        size_t caret = 0;
-        size_t anchor = 0;
     };
 
     HWND hwnd = nullptr;
@@ -193,98 +207,13 @@ struct FontPickerDialog::Impl {
         return nullptr;
     }
 
-    static size_t selectionStart(const TextField& field) {
-        return std::min(field.caret, field.anchor);
-    }
-
-    static size_t selectionEnd(const TextField& field) {
-        return std::max(field.caret, field.anchor);
-    }
-
-    static void collapseSelection(TextField& field, bool toEnd) {
-        size_t pos = toEnd ? selectionEnd(field) : selectionStart(field);
-        field.caret = pos;
-        field.anchor = pos;
-    }
-
-    void moveCaret(TextField& field, size_t next, bool extend) {
-        next = std::min(next, field.text.size());
-        if (extend)
-            field.caret = next;
-        else
-            field.caret = field.anchor = next;
-        surface.invalidate();
-    }
-
-    void replaceSelection(TextField& field, const std::wstring& inserted, bool numeric) {
-        const size_t start = selectionStart(field);
-        const size_t end = selectionEnd(field);
-        std::wstring base = field.text;
-        base.erase(start, end - start);
-
-        std::wstring accepted;
-        bool hasDot = base.find(L'.') != std::wstring::npos;
-        for (wchar_t c : inserted) {
-            if (numeric) {
-                if (std::iswdigit(c)) {
-                    accepted.push_back(c);
-                } else if (c == L'.' && !hasDot) {
-                    accepted.push_back(c);
-                    hasDot = true;
-                }
-            } else if (c >= L' ' && c != 0x7f) {
-                accepted.push_back(c);
-            }
-        }
-
-        field.text = base.substr(0, start) + accepted + base.substr(start);
-        field.caret = start + accepted.size();
-        field.anchor = field.caret;
-    }
-
-    void copySelection(const TextField& field) const {
-        const size_t start = selectionStart(field);
-        const size_t end = selectionEnd(field);
-        if (start == end || !OpenClipboard(hwnd))
-            return;
-
-        EmptyClipboard();
-        const std::wstring text = field.text.substr(start, end - start);
-        const SIZE_T bytes = (text.size() + 1) * sizeof(wchar_t);
-        HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
-        if (memory) {
-            void* data = GlobalLock(memory);
-            if (data) {
-                std::memcpy(data, text.c_str(), bytes);
-                GlobalUnlock(memory);
-                if (!SetClipboardData(CF_UNICODETEXT, memory))
-                    GlobalFree(memory);
-            } else {
-                GlobalFree(memory);
-            }
-        }
-        CloseClipboard();
-    }
-
-    std::wstring clipboardText() const {
-        std::wstring result;
-        if (!OpenClipboard(hwnd))
-            return result;
-        HANDLE handle = GetClipboardData(CF_UNICODETEXT);
-        if (handle) {
-            const auto* text = static_cast<const wchar_t*>(GlobalLock(handle));
-            if (text)
-                result = text;
-            if (text)
-                GlobalUnlock(handle);
-        }
-        CloseClipboard();
-        return result;
+    static const fluent::TextEditOptions& editOptionsFor(int id) {
+        return id == kIdSizeEdit ? kSizeEditOptions : kFilterEditOptions;
     }
 
     void editChanged(int id) {
         if (id == kIdFilterEdit)
-            rebuildFamilyList(filterEdit.text);
+            rebuildFamilyList(filterEdit.buffer.text);
         surface.invalidate();
     }
 
@@ -292,89 +221,23 @@ struct FontPickerDialog::Impl {
         TextField* field = editFor(focusedId);
         if (!field)
             return false;
-
-        const bool numeric = focusedId == kIdSizeEdit;
-        const bool ctrl = isCtrlDown();
-        const bool shift = isShiftDown();
-        if (ctrl && (key == 'A' || key == 'a')) {
-            field->anchor = 0;
-            field->caret = field->text.size();
-            surface.invalidate();
-            return true;
-        }
-        if (ctrl && (key == 'C' || key == 'c')) {
-            copySelection(*field);
-            return true;
-        }
-        if (ctrl && (key == 'X' || key == 'x')) {
-            copySelection(*field);
-            if (selectionStart(*field) != selectionEnd(*field)) {
-                replaceSelection(*field, L"", numeric);
-                editChanged(focusedId);
-            }
-            return true;
-        }
-        if (ctrl && (key == 'V' || key == 'v')) {
-            replaceSelection(*field, clipboardText(), numeric);
-            editChanged(focusedId);
-            return true;
-        }
-
-        switch (key) {
-        case VK_LEFT:
-            if (!shift && selectionStart(*field) != selectionEnd(*field))
-                collapseSelection(*field, false);
-            else if (field->caret > 0)
-                moveCaret(*field, field->caret - 1, shift);
-            else
-                surface.invalidate();
-            return true;
-        case VK_RIGHT:
-            if (!shift && selectionStart(*field) != selectionEnd(*field))
-                collapseSelection(*field, true);
-            else if (field->caret < field->text.size())
-                moveCaret(*field, field->caret + 1, shift);
-            else
-                surface.invalidate();
-            return true;
-        case VK_HOME:
-            moveCaret(*field, 0, shift);
-            return true;
-        case VK_END:
-            moveCaret(*field, field->text.size(), shift);
-            return true;
-        case VK_BACK:
-            if (selectionStart(*field) != selectionEnd(*field)) {
-                replaceSelection(*field, L"", numeric);
-            } else if (field->caret > 0) {
-                const size_t start = field->caret - 1;
-                field->text.erase(start, 1);
-                field->caret = field->anchor = start;
-            }
-            editChanged(focusedId);
-            return true;
-        case VK_DELETE:
-            if (selectionStart(*field) != selectionEnd(*field)) {
-                replaceSelection(*field, L"", numeric);
-            } else if (field->caret < field->text.size()) {
-                field->text.erase(field->caret, 1);
-            }
-            editChanged(focusedId);
-            return true;
-        default:
+        bool modified = false;
+        if (!field->buffer.handleKey(hwnd, key, isCtrlDown(), isShiftDown(),
+                                     editOptionsFor(focusedId), &modified))
             return false;
-        }
+        if (modified)
+            editChanged(focusedId);
+        else
+            surface.invalidate();
+        return true;
     }
 
     bool handleCharacter(wchar_t character) {
         TextField* field = editFor(focusedId);
         if (!field || character < L' ' || character == 0x7f)
             return false;
-        const bool numeric = focusedId == kIdSizeEdit;
-        if (numeric && !std::iswdigit(character) && character != L'.')
-            return true;
-        replaceSelection(*field, std::wstring(1, character), numeric);
-        editChanged(focusedId);
+        if (field->buffer.replaceSelection(std::wstring(1, character), editOptionsFor(focusedId)))
+            editChanged(focusedId);
         return true;
     }
 
@@ -427,13 +290,11 @@ struct FontPickerDialog::Impl {
     void createControls() {
         filterEdit.cue = L"输入以筛选字体";
         sizeEdit.cue = L"字号";
-        filterEdit.text.clear();
-        filterEdit.caret = filterEdit.anchor = 0;
+        filterEdit.buffer.reset();
 
         wchar_t buf[32];
         swprintf_s(buf, L"%g", static_cast<double>(initSize));
-        sizeEdit.text = buf;
-        sizeEdit.caret = sizeEdit.anchor = sizeEdit.text.size();
+        sizeEdit.buffer.reset(buf, false);
 
         familySelected = -1;
         sizeSelected = -1;
@@ -485,7 +346,7 @@ struct FontPickerDialog::Impl {
         if (interfaceFont)
             return initSize;
         try {
-            const float size = std::stof(sizeEdit.text);
+            const float size = std::stof(sizeEdit.buffer.text);
             return std::isfinite(size) ? std::clamp(size, 4.0f, 96.0f) : initSize;
         } catch (...) {
             return initSize;
@@ -635,11 +496,11 @@ struct FontPickerDialog::Impl {
             return;
         const D2D1_RECT_F textRect = D2D1::RectF(rect.left + 12.0f, rect.top,
                                                  rect.right - 12.0f, rect.bottom);
-        const bool hasSelection = selectionStart(field) != selectionEnd(field);
-        if (!field.text.empty() && hasSelection) {
-            const std::wstring before = field.text.substr(0, selectionStart(field));
-            const std::wstring selected =
-                field.text.substr(selectionStart(field), selectionEnd(field) - selectionStart(field));
+        const size_t selStart = field.buffer.selectionStart();
+        const size_t selEnd = field.buffer.selectionEnd();
+        if (!field.buffer.text.empty() && selStart != selEnd) {
+            const std::wstring before = field.buffer.text.substr(0, selStart);
+            const std::wstring selected = field.buffer.text.substr(selStart, selEnd - selStart);
             const float left = textRect.left + painter.measureTextWidth(before, format);
             const float right = std::min(textRect.right,
                                          left + painter.measureTextWidth(selected, format));
@@ -649,13 +510,13 @@ struct FontPickerDialog::Impl {
                     painter.brush(p.listSelected));
         }
 
-        if (field.text.empty())
+        if (field.buffer.text.empty())
             painter.drawText(field.cue, format, textRect, p.textSecondary);
         else
-            painter.drawText(field.text, format, textRect, p.text);
+            painter.drawText(field.buffer.text, format, textRect, p.text);
 
         if (focused) {
-            const std::wstring before = field.text.substr(0, field.caret);
+            const std::wstring before = field.buffer.text.substr(0, field.buffer.caret);
             const float caretX = std::clamp(textRect.left + painter.measureTextWidth(before, format),
                                             textRect.left, textRect.right - 1.0f);
             if (auto* br = painter.brush(p.accent))
@@ -1028,8 +889,7 @@ struct FontPickerDialog::Impl {
         if (row < 0 || row >= static_cast<int>(_countof(kSizePresets)))
             return;
         sizeSelected = row;
-        sizeEdit.text = std::to_wstring(kSizePresets[row]);
-        sizeEdit.caret = sizeEdit.anchor = sizeEdit.text.size();
+        sizeEdit.buffer.reset(std::to_wstring(kSizePresets[row]), false);
         ensureVisible(false, sizeSelected);
         surface.invalidate();
     }

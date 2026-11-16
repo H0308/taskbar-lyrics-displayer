@@ -5,14 +5,14 @@
 #include "ui/dialog_notify.h"
 #include "ui/fluent_dialog_surface.h"
 #include "ui/fluent_theme.h"
+#include "ui/manual_search_preview.h"
+#include "ui/text_edit_buffer.h"
 #include "logging/runtime_logger.h"
 
 #include <windowsx.h>
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
-#include <numbers>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -45,21 +45,12 @@ constexpr float kScrollBarWidth = 3.0f;
 constexpr float kScrollBarHitWidth = 12.0f;
 constexpr float kScrollBarInset = 8.0f;
 
-constexpr UINT kPreviewTimerId = 1;
-constexpr UINT kPreviewLoadingTimerId = 2;
-constexpr DWORD kPreviewResumeDelayMs = 2000;
-constexpr int kPreviewWheelLinesPerNotch = 3;
-constexpr float kPreviewLineScrollFrequency = 18.0f;
-constexpr float kPreviewResumeScrollFrequency = 14.0f;
-constexpr float kLyricTextWidthDip = 420.0f;
-constexpr float kPreviewHeaderHeight = 62.0f;
-constexpr float kLyricRowHeightDip = 50.0f;
-constexpr float kPreviewSecondaryLineHeight = 18.0f;
-constexpr float kPreviewSecondaryGap = 2.0f;
-constexpr float kPreviewToggleSize = 28.0f;
-constexpr float kPreviewToggleGap = 6.0f;
-constexpr float kPreviewToggleMargin = 10.0f;
-constexpr float kPreviewToggleTextGap = 10.0f;
+constexpr fluent::TextEditOptions kSearchFieldEditOptions{
+    .digitsOnly = false,
+    .printableOnly = true,
+    .maxLength = 0,
+    .allowUndo = false,
+};
 
 constexpr UINT kMsgCandidatesReady = WM_APP + 10;
 constexpr UINT kMsgPreviewLyricReady = WM_APP + 11;
@@ -104,10 +95,8 @@ float scrollBarThumbY(const ScrollBarGeometry& bar, float scrollY, float maxScro
 
 struct ManualSearchDialog::Impl {
     struct TextField {
-        std::wstring text;
+        fluent::TextEditBuffer buffer;
         std::wstring cue;
-        size_t caret = 0;
-        size_t anchor = 0;
         float scrollX = 0.0f;
     };
 
@@ -117,24 +106,17 @@ struct ManualSearchDialog::Impl {
         bool header = false;
     };
 
-    enum class PreviewState { Empty, Loading, NoCandidates, Unavailable };
-
     HWND hwnd = nullptr;
     HWND notifyHwnd = nullptr; // 关闭时向托盘窗口投递 kMsgDialogClosed
     bool backdrop = false;
 
     fluent::FluentDialogSurface surface;
     fluent::CompositedScrollView candidateScrollView;
-    fluent::CompositedScrollView previewScrollView;
     bool candidateContentDirty = true;
-    float previewScrollPadding = 0.0f;
 
     TextField titleEdit;
     TextField artistEdit;
     bool searching = false;
-    PreviewState previewState = PreviewState::Empty;
-    bool previewAnimations = true;
-    ULONGLONG previewLoadingSince = 0;
     UINT_PTR searchGeneration = 0;
     UINT_PTR previewGeneration = 0;
 
@@ -155,29 +137,8 @@ struct ManualSearchDialog::Impl {
     int selectedIdx = -1;
     int hoverItemRow = -1;
 
-    std::vector<LyricLine> previewLines;
-    std::vector<float> previewMainHeights;
-    std::vector<float> previewRowHeights;
-    std::vector<float> previewRowOffsets;
-    float previewMeasuredWidth = -1.0f;
-    int previewMeasuredSecondaryMask = -1;
-    UINT previewMeasuredDpi = 0;
-    SongInfo previewInfo;
-    std::wstring previewCapabilityLabel;
-    bool previewHasTranslation = false;
-    bool previewHasRomanization = false;
-    bool previewShowTranslation = false;
-    bool previewShowRomanization = false;
+    ManualSearchPreview preview;
     int64_t playbackPositionMs = 0;
-    int64_t previewPositionMs = 0;
-    int previewTopLine = 0;
-    int previewCurrentLine = -1;
-    bool previewManualScroll = false;
-    bool previewSnapNextSync = true;
-    bool previewAutoResumePending = false;
-    bool previewContentDirty = true;
-    DWORD previewLastScrollTick = 0;
-    int previewWheelAccum = 0;
 
     float candidateScroll = 0.0f;
     int candidateWheelAccum = 0;
@@ -248,78 +209,6 @@ struct ManualSearchDialog::Impl {
         return nullptr;
     }
 
-    static size_t selectionStart(const TextField& field) {
-        return std::min(field.caret, field.anchor);
-    }
-
-    static size_t selectionEnd(const TextField& field) {
-        return std::max(field.caret, field.anchor);
-    }
-
-    void moveCaret(TextField& field, size_t next, bool extend) {
-        next = std::min(next, field.text.size());
-        if (extend)
-            field.caret = next;
-        else
-            field.caret = field.anchor = next;
-        surface.invalidate();
-    }
-
-    void replaceSelection(TextField& field, const std::wstring& inserted) {
-        const size_t start = selectionStart(field);
-        const size_t end = selectionEnd(field);
-        std::wstring accepted;
-        for (wchar_t character : inserted) {
-            if (character >= L' ' && character != 0x7f)
-                accepted.push_back(character);
-        }
-
-        field.text.erase(start, end - start);
-        field.text.insert(start, accepted);
-        field.caret = start + accepted.size();
-        field.anchor = field.caret;
-    }
-
-    void copySelection(const TextField& field) const {
-        const size_t start = selectionStart(field);
-        const size_t end = selectionEnd(field);
-        if (start == end || !OpenClipboard(hwnd))
-            return;
-
-        EmptyClipboard();
-        const std::wstring text = field.text.substr(start, end - start);
-        const SIZE_T bytes = (text.size() + 1) * sizeof(wchar_t);
-        HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
-        if (memory) {
-            void* data = GlobalLock(memory);
-            if (data) {
-                std::memcpy(data, text.c_str(), bytes);
-                GlobalUnlock(memory);
-                if (!SetClipboardData(CF_UNICODETEXT, memory))
-                    GlobalFree(memory);
-            } else {
-                GlobalFree(memory);
-            }
-        }
-        CloseClipboard();
-    }
-
-    std::wstring clipboardText() const {
-        std::wstring result;
-        if (!OpenClipboard(hwnd))
-            return result;
-        HANDLE handle = GetClipboardData(CF_UNICODETEXT);
-        if (handle) {
-            const auto* text = static_cast<const wchar_t*>(GlobalLock(handle));
-            if (text)
-                result = text;
-            if (text)
-                GlobalUnlock(handle);
-        }
-        CloseClipboard();
-        return result;
-    }
-
     void editChanged() {
         if (hwnd)
             surface.invalidate();
@@ -330,108 +219,20 @@ struct ManualSearchDialog::Impl {
         if (!field)
             return false;
 
-        const bool ctrl = isCtrlDown();
-        const bool shift = isShiftDown();
-        if (ctrl && (key == 'A' || key == 'a')) {
-            field->anchor = 0;
-            field->caret = field->text.size();
-            surface.invalidate();
-            return true;
-        }
-        if (ctrl && (key == 'C' || key == 'c')) {
-            copySelection(*field);
-            return true;
-        }
-        if (ctrl && (key == 'X' || key == 'x')) {
-            copySelection(*field);
-            if (selectionStart(*field) != selectionEnd(*field)) {
-                replaceSelection(*field, L"");
-                editChanged();
-            }
-            return true;
-        }
-        if (ctrl && (key == 'V' || key == 'v')) {
-            replaceSelection(*field, clipboardText());
-            editChanged();
-            return true;
-        }
-
-        switch (key) {
-        case VK_LEFT:
-            if (!shift && selectionStart(*field) != selectionEnd(*field))
-                moveCaret(*field, selectionStart(*field), false);
-            else if (field->caret > 0)
-                moveCaret(*field, field->caret - 1, shift);
-            else
-                surface.invalidate();
-            return true;
-        case VK_RIGHT:
-            if (!shift && selectionStart(*field) != selectionEnd(*field))
-                moveCaret(*field, selectionEnd(*field), false);
-            else if (field->caret < field->text.size())
-                moveCaret(*field, field->caret + 1, shift);
-            else
-                surface.invalidate();
-            return true;
-        case VK_HOME:
-            moveCaret(*field, 0, shift);
-            return true;
-        case VK_END:
-            moveCaret(*field, field->text.size(), shift);
-            return true;
-        case VK_BACK:
-            if (selectionStart(*field) != selectionEnd(*field)) {
-                replaceSelection(*field, L"");
-            } else if (field->caret > 0) {
-                const size_t start = field->caret - 1;
-                field->text.erase(start, 1);
-                field->caret = field->anchor = start;
-            }
-            editChanged();
-            return true;
-        case VK_DELETE:
-            if (selectionStart(*field) != selectionEnd(*field)) {
-                replaceSelection(*field, L"");
-            } else if (field->caret < field->text.size()) {
-                field->text.erase(field->caret, 1);
-            }
-            editChanged();
-            return true;
-        default:
+        if (!field->buffer.handleKey(hwnd, key, isCtrlDown(), isShiftDown(),
+                                     kSearchFieldEditOptions))
             return false;
-        }
+        editChanged();
+        return true;
     }
 
     bool handleCharacter(wchar_t character) {
         TextField* field = editFor(focusedId);
         if (!field || character < L' ' || character == 0x7f)
             return false;
-        replaceSelection(*field, std::wstring(1, character));
+        field->buffer.replaceSelection(std::wstring(1, character), kSearchFieldEditOptions);
         editChanged();
         return true;
-    }
-
-    void updatePreviewLoadingTimer() {
-        if (previewState == PreviewState::Loading && previewAnimations && !IsIconic(hwnd))
-            SetTimer(hwnd, kPreviewLoadingTimerId, 33, nullptr);
-        else
-            KillTimer(hwnd, kPreviewLoadingTimerId);
-    }
-
-    void setPreviewState(PreviewState state) {
-        if (state == previewState)
-            return;
-        previewState = state;
-        if (state == PreviewState::Loading)
-            previewLoadingSince = GetTickCount64();
-        updatePreviewLoadingTimer();
-    }
-
-    void refreshPreviewAnimations() {
-        BOOL enabled = TRUE;
-        SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0);
-        previewAnimations = enabled != FALSE;
-        updatePreviewLoadingTimer();
     }
 
     void invalidatePreview() {
@@ -443,15 +244,19 @@ struct ManualSearchDialog::Impl {
         surface.invalidate(&dirty);
     }
 
+    void setPreviewLines(const std::vector<LyricLine>& lines) {
+        preview.setLines(lines, playbackPositionMs);
+        layout();
+        surface.invalidate();
+    }
+
     void createControls() {
         titleEdit.cue = L"歌名";
-        titleEdit.text = targetTitle;
-        titleEdit.caret = titleEdit.anchor = titleEdit.text.size();
+        titleEdit.buffer.reset(targetTitle, false);
         artistEdit.cue = L"歌手";
-        artistEdit.text = targetArtist;
-        artistEdit.caret = artistEdit.anchor = artistEdit.text.size();
+        artistEdit.buffer.reset(targetArtist, false);
 
-        setPreviewState(PreviewState::Empty);
+        preview.setState(ManualSearchPreviewState::Empty, hwnd);
         searching = false;
         focusedId = kIdTitleEdit;
         focusVisible = false;
@@ -459,8 +264,7 @@ struct ManualSearchDialog::Impl {
         candidateScrollView.setOffset(0.0f);
         candidateWheelAccum = 0;
         candidateScrollDragging = false;
-        previewWheelAccum = 0;
-        resetPreviewView();
+        preview.resetView(playbackPositionMs);
     }
 
     void layout() {
@@ -508,33 +312,9 @@ struct ManualSearchDialog::Impl {
                                     advanceRect.right + gap + timingW, toolsY + controlH);
         } else {
             candidateScrollView.layout({}, 0.0f, surface.dpi());
-            previewScrollView.layout({}, 0.0f, surface.dpi());
+            preview.hideScroll(surface.dpi());
         }
-        previewRomanizationRect = {};
-        previewTranslationRect = {};
-        const int previewToggleCount = (previewHasRomanization ? 1 : 0) +
-                                       (previewHasTranslation ? 1 : 0);
-        if (previewToggleCount > 0) {
-            const float toggleRailHeight =
-                previewToggleCount * kPreviewToggleSize +
-                (previewToggleCount - 1) * kPreviewToggleGap;
-            const float toggleBottom = previewRect.bottom - kPreviewToggleMargin;
-            const float toggleTop =
-                std::max(previewRect.top + previewContentTop(), toggleBottom - toggleRailHeight);
-            const float toggleRight = previewRect.right - kPreviewToggleMargin;
-            float nextTop = toggleTop;
-            if (previewHasRomanization) {
-                previewRomanizationRect =
-                    D2D1::RectF(toggleRight - kPreviewToggleSize, nextTop, toggleRight,
-                                 nextTop + kPreviewToggleSize);
-                nextTop += kPreviewToggleSize + kPreviewToggleGap;
-            }
-            if (previewHasTranslation) {
-                previewTranslationRect =
-                    D2D1::RectF(toggleRight - kPreviewToggleSize, nextTop, toggleRight,
-                                 nextTop + kPreviewToggleSize);
-            }
-        }
+        preview.layoutToggleButtons(previewRect, previewRomanizationRect, previewTranslationRect);
 
         const float cancelW = 88.0f;
         const float applyW = 120.0f;
@@ -546,7 +326,6 @@ struct ManualSearchDialog::Impl {
             &candidateListRect, &previewRect, &previewRomanizationRect, &previewTranslationRect,
             &advanceRect, &delayRect, &applyRect, &cancelRect});
         candidateScroll = std::clamp(candidateScroll, 0.0f, candidateMaxScroll());
-        syncPreviewToCurrentLine();
     }
 
     float candidateItemHeight(int row) const {
@@ -657,357 +436,6 @@ struct ManualSearchDialog::Impl {
         surface.invalidate();
     }
 
-    void updatePreviewCapability() {
-        previewHasTranslation = false;
-        previewHasRomanization = false;
-        for (const auto& line : previewLines) {
-            previewHasTranslation = previewHasTranslation || !line.translation.empty();
-            previewHasRomanization = previewHasRomanization || !line.romanization.empty();
-        }
-        previewShowTranslation = previewShowTranslation && previewHasTranslation;
-        previewShowRomanization = previewShowRomanization && previewHasRomanization;
-        if (previewHasTranslation && previewHasRomanization)
-            previewCapabilityLabel = L"[支持翻译 + 罗马音]";
-        else if (previewHasTranslation)
-            previewCapabilityLabel = L"[支持翻译]";
-        else if (previewHasRomanization)
-            previewCapabilityLabel = L"[支持罗马音]";
-        else
-            previewCapabilityLabel.clear();
-    }
-
-    float previewContentTop() const {
-        return kPreviewHeaderHeight + (previewCapabilityLabel.empty() ? 0.0f : 24.0f);
-    }
-
-    int previewSecondaryMask() const {
-        return (previewShowRomanization ? 1 : 0) | (previewShowTranslation ? 2 : 0);
-    }
-
-    int previewSecondaryLineCount() const {
-        return (previewShowRomanization ? 1 : 0) + (previewShowTranslation ? 1 : 0);
-    }
-
-    int previewSecondaryLineCount(const LyricLine& line) const {
-        return ((previewShowRomanization && !line.romanization.empty()) ? 1 : 0) +
-               ((previewShowTranslation && !line.translation.empty()) ? 1 : 0);
-    }
-
-    float previewSecondaryHeight(int secondaryCount) const {
-        return secondaryCount * (kPreviewSecondaryLineHeight + kPreviewSecondaryGap);
-    }
-
-    float previewLyricRowHeight() const {
-        return kLyricRowHeightDip + previewSecondaryHeight(previewSecondaryLineCount());
-    }
-
-    float measurePreviewMainHeight(fluent::FluentDialogSurface::Painter& painter,
-                                   const std::wstring& text, float width) const {
-        if (text.empty())
-            return kLyricRowHeightDip;
-
-        auto* format = painter.textFormat(fluent::font_sizes::emphasis, 700, true);
-        auto* layout = painter.textLayout(text, format, width, 10000.0f);
-        if (!layout)
-            return kLyricRowHeightDip;
-
-        DWRITE_TEXT_METRICS metrics{};
-        if (FAILED(layout->GetMetrics(&metrics)))
-            return kLyricRowHeightDip;
-        return std::max(kLyricRowHeightDip,
-                        static_cast<float>(std::ceil(std::max(0.0f, metrics.height))));
-    }
-
-    int visiblePreviewRows(float height) const {
-        const float availableHeight = std::max(0.0f, height - previewContentTop());
-        return std::max(1, static_cast<int>(std::floor(availableHeight / previewLyricRowHeight())));
-    }
-
-    int visiblePreviewRows() const {
-        return visiblePreviewRows(std::max(0.0f, previewRect.bottom - previewRect.top));
-    }
-
-    void syncPreviewToCurrentLine() {
-        const int total = static_cast<int>(previewLines.size());
-        if (total == 0) {
-            previewTopLine = 0;
-            return;
-        }
-        const int visible = visiblePreviewRows();
-        const int maxTop = std::max(0, total - 1);
-        if (previewCurrentLine < 0)
-            previewTopLine = 0;
-        else
-            previewTopLine = std::clamp(previewCurrentLine - visible / 2, 0, maxTop);
-    }
-
-    void resetPreviewView() {
-        previewScrollView.setOffset(0.0f);
-        previewPositionMs = playbackPositionMs;
-        previewCurrentLine = LyricProvider::findLine(previewLines, previewPositionMs);
-        previewTopLine = 0;
-        previewManualScroll = false;
-        previewSnapNextSync = true;
-        previewAutoResumePending = false;
-        previewContentDirty = true;
-        previewLastScrollTick = 0;
-        previewWheelAccum = 0;
-        syncPreviewToCurrentLine();
-    }
-
-    void setPreviewLines(const std::vector<LyricLine>& lines) {
-        previewLines = lines;
-        previewMeasuredWidth = -1.0f;
-        previewMainHeights.clear();
-        previewRowHeights.clear();
-        previewRowOffsets.clear();
-        updatePreviewCapability();
-        resetPreviewView();
-        layout();
-        surface.invalidate();
-    }
-
-    void setPreviewPosition(int64_t positionMs) {
-        const int nextLine = LyricProvider::findLine(previewLines, positionMs);
-        const bool lineChanged = nextLine != previewCurrentLine;
-        const bool karaokeActive =
-            nextLine >= 0 && nextLine < static_cast<int>(previewLines.size()) &&
-            !previewLines[nextLine].chars.empty() && positionMs != previewPositionMs;
-        previewPositionMs = positionMs;
-        previewCurrentLine = nextLine;
-        if (!previewManualScroll)
-            syncPreviewToCurrentLine();
-        if (!lineChanged && !karaokeActive)
-            return;
-        previewContentDirty = true;
-        if (hwnd)
-            surface.invalidate();
-    }
-
-    void scrollPreviewBy(int lines) {
-        if (previewLines.empty())
-            return;
-        const int maxTop = std::max(0, static_cast<int>(previewLines.size()) - 1);
-        previewTopLine = std::clamp(previewTopLine + lines, 0, maxTop);
-        previewManualScroll = true;
-        previewAutoResumePending = false;
-        previewSnapNextSync = false;
-        previewLastScrollTick = GetTickCount();
-        previewScrollView.scrollBy(lines * previewLyricRowHeight());
-    }
-
-    void scrollPreviewByWheel(int delta) {
-        if (previewLines.empty())
-            return;
-        previewManualScroll = true;
-        previewAutoResumePending = false;
-        previewSnapNextSync = false;
-        previewLastScrollTick = GetTickCount();
-        previewScrollView.scrollBy(-static_cast<float>(delta) / WHEEL_DELTA *
-                                   kPreviewWheelLinesPerNotch * previewLyricRowHeight());
-    }
-
-    void onPreviewTimer() {
-        if (previewManualScroll &&
-            GetTickCount() - previewLastScrollTick >= kPreviewResumeDelayMs) {
-            previewManualScroll = false;
-            previewAutoResumePending = true;
-            previewContentDirty = true;
-            syncPreviewToCurrentLine();
-            surface.invalidate();
-        }
-    }
-
-    std::vector<D2D1_RECT_F> karaokeHighlightClips(IDWriteTextLayout* layout,
-                                                   const LyricLine& line) const {
-        std::vector<D2D1_RECT_F> clips;
-        if (!layout || line.chars.empty() || line.text.empty())
-            return clips;
-
-        const UINT32 textLength = static_cast<UINT32>(line.text.size());
-        UINT32 textOffset = 0;
-        auto appendClip = [&clips](const DWRITE_HIT_TEST_METRICS& metrics, float width) {
-            if (width <= 0.0f || metrics.height <= 0.0f)
-                return;
-            const D2D1_RECT_F clip =
-                D2D1::RectF(metrics.left, metrics.top, metrics.left + width,
-                             metrics.top + metrics.height);
-            // 同一视觉行的已唱片段合并成一块，避免每个字都 Push/Pop 一次裁剪区域。
-            for (auto& existing : clips) {
-                if (std::fabs(existing.top - clip.top) < 0.5f &&
-                    std::fabs(existing.bottom - clip.bottom) < 0.5f) {
-                    existing.left = std::min(existing.left, clip.left);
-                    existing.right = std::max(existing.right, clip.right);
-                    return;
-                }
-            }
-            clips.push_back(clip);
-        };
-
-        std::vector<DWRITE_HIT_TEST_METRICS> metrics;
-        for (const auto& character : line.chars) {
-            const UINT32 tokenLength = static_cast<UINT32>(character.text.size());
-            if (tokenLength == 0)
-                continue;
-            if (textOffset >= textLength || character.startMs > previewPositionMs)
-                break;
-
-            const UINT32 rangeLength = std::min(tokenLength, textLength - textOffset);
-            const int64_t durationMs =
-                std::max<int64_t>(character.endMs - character.startMs, 1);
-            const float fraction = static_cast<float>(std::clamp(
-                static_cast<double>(previewPositionMs - character.startMs) /
-                    static_cast<double>(durationMs),
-                0.0, 1.0));
-            if (fraction > 0.0f && rangeLength > 0) {
-                metrics.resize(rangeLength + 1);
-                UINT32 actualCount = 0;
-                if (SUCCEEDED(layout->HitTestTextRange(
-                        textOffset, rangeLength, 0.0f, 0.0f, metrics.data(),
-                        static_cast<UINT32>(metrics.size()), &actualCount))) {
-                    float totalWidth = 0.0f;
-                    for (UINT32 i = 0; i < actualCount; ++i)
-                        totalWidth += std::max(0.0f, metrics[i].width);
-
-                    float remainingWidth = totalWidth * fraction;
-                    for (UINT32 i = 0; i < actualCount && remainingWidth > 0.0f; ++i) {
-                        const float metricWidth = std::max(0.0f, metrics[i].width);
-                        if (metricWidth <= 0.0f)
-                            continue;
-                        const float highlightWidth = std::min(metricWidth, remainingWidth);
-                        appendClip(metrics[i], highlightWidth);
-                        remainingWidth -= metricWidth;
-                    }
-                }
-            }
-            textOffset += tokenLength;
-        }
-        return clips;
-    }
-
-    void drawCurrentLyric(fluent::FluentDialogSurface::Painter& painter, const LyricLine& line,
-                          const D2D1_RECT_F& rect) {
-        const auto& p = fluent::palette();
-        auto* format = painter.textFormat(fluent::font_sizes::emphasis, 700, true);
-        if (!format)
-            return;
-
-        if (line.chars.empty()) {
-            painter.drawText(line.text, format, rect, fluent::toD2D(RGB(49, 194, 124)));
-            return;
-        }
-
-        auto* layout = painter.textLayout(line.text, format, rect.right - rect.left,
-                                          rect.bottom - rect.top);
-        if (!layout)
-            return;
-
-        const float pixelScale = surface.dipScale();
-        const D2D1_POINT_2F origin = D2D1::Point2F(
-            std::round(rect.left * pixelScale) / pixelScale,
-            std::round(rect.top * pixelScale) / pixelScale);
-        std::vector<D2D1_RECT_F> playedClips;
-        std::vector<D2D1_RECT_F> unplayedClips{
-            D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom)};
-        for (const auto& clip : karaokeHighlightClips(layout, line)) {
-            const D2D1_RECT_F played = D2D1::RectF(
-                std::max(rect.left, origin.x + clip.left),
-                std::max(rect.top, origin.y + clip.top),
-                std::min(rect.right, origin.x + clip.right),
-                std::min(rect.bottom, origin.y + clip.bottom));
-            if (played.right <= played.left || played.bottom <= played.top)
-                continue;
-            playedClips.push_back(played);
-            std::vector<D2D1_RECT_F> remaining;
-            for (const auto& area : unplayedClips) {
-                const D2D1_RECT_F overlap = D2D1::RectF(
-                    std::max(area.left, played.left), std::max(area.top, played.top),
-                    std::min(area.right, played.right), std::min(area.bottom, played.bottom));
-                if (overlap.right <= overlap.left || overlap.bottom <= overlap.top) {
-                    remaining.push_back(area);
-                    continue;
-                }
-                if (area.top < overlap.top)
-                    remaining.push_back(D2D1::RectF(area.left, area.top, area.right, overlap.top));
-                if (overlap.bottom < area.bottom)
-                    remaining.push_back(D2D1::RectF(area.left, overlap.bottom, area.right, area.bottom));
-                if (area.left < overlap.left)
-                    remaining.push_back(D2D1::RectF(area.left, overlap.top, overlap.left, overlap.bottom));
-                if (overlap.right < area.right)
-                    remaining.push_back(D2D1::RectF(overlap.right, overlap.top, area.right, overlap.bottom));
-            }
-            unplayedClips = std::move(remaining);
-        }
-        auto drawClippedText = [&](const D2D1_RECT_F& clip, D2D1_COLOR_F color) {
-            painter.target()->PushAxisAlignedClip(
-                clip, D2D1_ANTIALIAS_MODE_ALIASED);
-            painter.drawTextLayout(layout, origin, color);
-            painter.target()->PopAxisAlignedClip();
-        };
-        for (const auto& clip : unplayedClips)
-            drawClippedText(clip, p.textSecondary);
-        for (const auto& clip : playedClips)
-            drawClippedText(clip, fluent::toD2D(RGB(49, 194, 124)));
-    }
-
-    void drawPreviewLyricLine(fluent::FluentDialogSurface::Painter& painter,
-                              const LyricLine& line, const D2D1_RECT_F& rowRect,
-                              float mainHeight, bool current) {
-        const auto& p = fluent::palette();
-        const int secondaryCount = previewSecondaryLineCount(line);
-        const float contentHeight =
-            mainHeight + previewSecondaryHeight(secondaryCount);
-        const float top = rowRect.top +
-                          std::max(0.0f, (rowRect.bottom - rowRect.top - contentHeight) * 0.5f);
-        const D2D1_RECT_F mainRect =
-            D2D1::RectF(rowRect.left, top, rowRect.right, top + mainHeight);
-        if (current) {
-            drawCurrentLyric(painter, line, mainRect);
-        } else {
-            painter.drawText(line.text, painter.textFormat(fluent::font_sizes::body, 400, true), mainRect, p.text);
-        }
-
-        float secondaryTop = mainRect.bottom + kPreviewSecondaryGap;
-        auto drawSecondary = [&](const std::wstring& text) {
-            if (text.empty())
-                return;
-            painter.drawTrimmedText(
-                text, painter.textFormat(fluent::font_sizes::caption, 400, true, true),
-                D2D1::RectF(rowRect.left, secondaryTop, rowRect.right,
-                            secondaryTop + kPreviewSecondaryLineHeight),
-                p.textSecondary);
-            secondaryTop += kPreviewSecondaryLineHeight + kPreviewSecondaryGap;
-        };
-        if (previewShowRomanization)
-            drawSecondary(line.romanization);
-        if (previewShowTranslation)
-            drawSecondary(line.translation);
-    }
-
-    void drawPreviewToggleButton(fluent::FluentDialogSurface::Painter& painter,
-                                 const D2D1_RECT_F& rect, const wchar_t* label, bool checked,
-                                 int id) {
-        const auto& p = fluent::palette();
-        const bool hovered = hoverId == id;
-        const bool pressed = pressedId == id;
-        const bool showFill = hovered || pressed;
-        const D2D1_COLOR_F border = checked || hovered || pressed ? p.accent : p.controlStroke;
-        const D2D1_COLOR_F textColor = checked ? p.accent : (hovered ? p.text : p.textSecondary);
-        if (showFill) {
-            painter.fillRoundRect(pressed ? p.controlPressed : p.controlHover, rect,
-                                  fluent::metrics::controlRadius);
-        }
-        painter.strokeRoundRect(border, rect, 1.0f, fluent::metrics::controlRadius);
-        if (focusedId == id && focusVisible) {
-            painter.strokeRoundRect(
-                p.accent,
-                D2D1::RectF(rect.left + 1.5f, rect.top + 1.5f, rect.right - 1.5f,
-                            rect.bottom - 1.5f),
-                1.5f, std::max(1.0f, fluent::metrics::controlRadius - 1.0f));
-        }
-        painter.drawText(label, painter.textFormat(fluent::font_sizes::label, 600, true, true), rect, textColor);
-    }
-
     void drawTextField(fluent::FluentDialogSurface::Painter& painter,
                        const D2D1_RECT_F& rect, TextField& field, int id) {
         const auto& p = fluent::palette();
@@ -1025,20 +453,22 @@ struct ManualSearchDialog::Impl {
             D2D1::RectF(rect.left + 12.0f, rect.top, rect.right - 12.0f, rect.bottom);
         if (!focused) {
             field.scrollX = 0.0f;
-            painter.drawTrimmedText(field.text, format, textRect, p.text);
+            painter.drawTrimmedText(field.buffer.text, format, textRect, p.text);
             return;
         }
 
         const float width = std::max(1.0f, textRect.right - textRect.left - 1.0f);
-        auto* layout = painter.textLayout(field.text, format, width, textRect.bottom - textRect.top);
+        auto* layout = painter.textLayout(field.buffer.text, format, width,
+                                          textRect.bottom - textRect.top);
         if (!layout)
             return;
         DWRITE_TEXT_METRICS metrics{};
         layout->GetMetrics(&metrics);
         float caretX = 0.0f;
-        if (!field.text.empty()) {
-            const bool atEnd = field.caret >= field.text.size();
-            const auto index = static_cast<UINT32>(atEnd ? field.text.size() - 1 : field.caret);
+        if (!field.buffer.text.empty()) {
+            const bool atEnd = field.buffer.caret >= field.buffer.text.size();
+            const auto index =
+                static_cast<UINT32>(atEnd ? field.buffer.text.size() - 1 : field.buffer.caret);
             float caretY = 0.0f;
             DWRITE_HIT_TEST_METRICS caretMetrics{};
             layout->HitTestTextPosition(index, atEnd, &caretX, &caretY, &caretMetrics);
@@ -1053,8 +483,9 @@ struct ManualSearchDialog::Impl {
         const float originX = textRect.left - field.scrollX;
         auto* target = painter.target();
         target->PushAxisAlignedClip(textRect, D2D1_ANTIALIAS_MODE_ALIASED);
-        const auto start = static_cast<UINT32>(selectionStart(field));
-        const auto length = static_cast<UINT32>(selectionEnd(field) - selectionStart(field));
+        const auto start = static_cast<UINT32>(field.buffer.selectionStart());
+        const auto length =
+            static_cast<UINT32>(field.buffer.selectionEnd() - field.buffer.selectionStart());
         if (length > 0) {
             UINT32 count = 0;
             layout->HitTestTextRange(start, length, originX, textRect.top, nullptr, 0, &count);
@@ -1086,11 +517,11 @@ struct ManualSearchDialog::Impl {
         if (id == kIdCandidateList || id == kIdPreview)
             return !candidates.empty();
         if (id == kIdPreviewRomanization)
-            return previewHasRomanization;
+            return preview.hasRomanization();
         if (id == kIdPreviewTranslation)
-            return previewHasTranslation;
+            return preview.hasTranslation();
         if (id == kIdApplyButton || id == kIdAdvanceButton || id == kIdDelayButton)
-            return !previewLines.empty();
+            return !preview.lines().empty();
         return id != 0;
     }
 
@@ -1230,188 +661,6 @@ struct ManualSearchDialog::Impl {
         }
     }
 
-    void drawPreviewPlaceholder(fluent::FluentDialogSurface::Painter& painter) const {
-        const auto& p = fluent::palette();
-        const float centerX = (previewRect.left + previewRect.right) * 0.5f;
-        const float centerY = (previewRect.top + kPreviewHeaderHeight + previewRect.bottom) * 0.5f;
-        const bool loading = previewState == PreviewState::Loading;
-        const wchar_t* text = loading ? L"正在加载预览…"
-            : previewState == PreviewState::Unavailable ? L"该候选没有可用歌词"
-                                                        : L"选择左侧歌曲预览歌词";
-
-        if (loading) {
-            // 五根静止的节拍柱错开亮度，避免持续改变图形位置或尺寸。
-            constexpr float heights[] = {10.0f, 18.0f, 26.0f, 18.0f, 10.0f};
-            constexpr ULONGLONG beatMs = 500;
-            const auto elapsed = GetTickCount64() - previewLoadingSince;
-            for (size_t i = 0; i < _countof(heights); ++i) {
-                const float x = centerX + (static_cast<float>(i) - 2.0f) * 9.0f;
-                const float halfHeight = heights[i] * 0.5f;
-                const float phase = static_cast<float>((elapsed + beatMs - i * 60) % beatMs) /
-                                    static_cast<float>(beatMs);
-                const float pulse = 0.5f - 0.5f * std::cos(phase * 2.0f * std::numbers::pi_v<float>);
-                auto color = p.accent;
-                color.a *= previewAnimations ? 0.30f + 0.65f * pulse : 0.75f;
-                painter.fillRoundRect(color, D2D1::RectF(x - 2.0f, centerY - 14.0f - halfHeight,
-                                                       x + 2.0f, centerY - 14.0f + halfHeight),
-                                      2.0f);
-            }
-        }
-        const float textY = centerY + (loading ? 18.0f : 0.0f);
-        painter.drawText(text, painter.textFormat(fluent::font_sizes::emphasis, 400, true),
-                         D2D1::RectF(previewRect.left + 12.0f, textY - 14.0f,
-                                     previewRect.right - 12.0f, textY + 14.0f),
-                         p.textSecondary);
-    }
-
-    void drawPreview(fluent::FluentDialogSurface::Painter& painter) {
-        const auto& p = fluent::palette();
-        const float width = previewRect.right - previewRect.left;
-        if (focusedId == kIdPreview && focusVisible) {
-            painter.strokeRoundRect(
-                p.accent,
-                D2D1::RectF(previewRect.left + 1.5f, previewRect.top + 1.5f,
-                            previewRect.right - 1.5f, previewRect.bottom - 1.5f),
-                1.5f, fluent::metrics::cardRadius - 1.0f);
-        }
-
-        if (selectedIdx >= 0 && selectedIdx < static_cast<int>(candidates.size())) {
-            const auto& candidate = candidates[selectedIdx];
-            const float left = previewRect.left + 18.0f;
-            const float right = previewRect.right - 18.0f;
-            const float top = previewRect.top;
-            painter.drawTrimmedText(
-                candidate.name, painter.textFormat(fluent::font_sizes::emphasis, 600, false, true),
-                D2D1::RectF(left, top + 7.0f, right, top + 31.0f), p.text);
-            painter.drawTrimmedText(
-                candidate.singer, painter.textFormat(fluent::font_sizes::caption, 400, false, true),
-                D2D1::RectF(left, top + 31.0f, right, top + 51.0f), p.textSecondary);
-            if (auto* brush = painter.brush(p.cardStroke)) {
-                const float y = top + kPreviewHeaderHeight - 6.0f;
-                painter.target()->FillRectangle(D2D1::RectF(left, y, right, y + 1.0f), brush);
-            }
-        }
-
-        if (previewLines.empty()) {
-            previewScrollView.layout({}, 0.0f, surface.dpi());
-            drawPreviewPlaceholder(painter);
-            return;
-        }
-
-        const float contentTop = previewContentTop();
-        if (!previewCapabilityLabel.empty())
-            painter.drawText(previewCapabilityLabel, painter.textFormat(fluent::font_sizes::smallText, 400, true),
-                             D2D1::RectF(previewRect.left + 12.0f, previewRect.top + kPreviewHeaderHeight,
-                                         previewRect.right - 12.0f,
-                                         previewRect.top + kPreviewHeaderHeight + 24.0f),
-                             p.textSecondary);
-
-        // 左右对称预留切换按钮安全边距，保证歌词列始终对齐容器中心且不与「音/译」按钮重叠。
-        constexpr float kLyricSideMargin =
-            kPreviewToggleMargin + kPreviewToggleSize + kPreviewToggleTextGap;
-        const float lyricLeftLimit = previewRect.left + kLyricSideMargin;
-        const float lyricRightLimit = previewRect.right - kLyricSideMargin;
-        const float lyricAreaWidth = std::max(0.0f, lyricRightLimit - lyricLeftLimit);
-        const float lyricWidth = std::min(kLyricTextWidthDip, lyricAreaWidth);
-        const float lyricLeft = lyricLeftLimit + (lyricAreaWidth - lyricWidth) * 0.5f;
-        const float lyricRight = lyricLeft + lyricWidth;
-
-        const int total = static_cast<int>(previewLines.size());
-        const float bodyTop = previewRect.top + contentTop;
-        const float bodyBottom = std::max(bodyTop, previewRect.bottom - 2.0f);
-        const float availableHeight = std::max(0.0f, bodyBottom - bodyTop);
-
-        const int secondaryMask = previewSecondaryMask();
-        if (previewMeasuredWidth != lyricWidth ||
-            previewMeasuredSecondaryMask != secondaryMask ||
-            previewMeasuredDpi != surface.dpi()) {
-            previewMainHeights.resize(total);
-            previewRowHeights.resize(total);
-            previewRowOffsets.assign(total + 1, 0.0f);
-            for (int index = 0; index < total; ++index) {
-                previewMainHeights[index] =
-                    measurePreviewMainHeight(painter, previewLines[index].text, lyricWidth);
-                previewRowHeights[index] =
-                    previewMainHeights[index] +
-                    previewSecondaryHeight(previewSecondaryLineCount(previewLines[index]));
-                previewRowOffsets[index + 1] =
-                    previewRowOffsets[index] + previewRowHeights[index];
-            }
-            previewMeasuredWidth = lyricWidth;
-            previewMeasuredSecondaryMask = secondaryMask;
-            previewMeasuredDpi = surface.dpi();
-            previewContentDirty = true;
-        }
-        const auto& mainHeights = previewMainHeights;
-        const auto& rowHeights = previewRowHeights;
-        const auto& rowOffsets = previewRowOffsets;
-
-        float totalScrollContentHeight = availableHeight;
-        if (rowOffsets[total] <= availableHeight) {
-            previewScrollPadding =
-                std::max(0.0f, (availableHeight - rowOffsets[total]) * 0.5f);
-        } else {
-            float firstPageHeight = 0.0f;
-            for (int index = 0; index < total; ++index) {
-                if (index > 0 && firstPageHeight + rowHeights[index] > availableHeight)
-                    break;
-                firstPageHeight += rowHeights[index];
-            }
-            previewScrollPadding = std::max(6.0f, (availableHeight - firstPageHeight) * 0.5f);
-            totalScrollContentHeight = rowOffsets[total] + previewScrollPadding * 2.0f;
-        }
-        const float maxScrollOffset =
-            std::max(0.0f, totalScrollContentHeight - availableHeight);
-
-        previewScrollView.layout(D2D1::RectF(lyricLeft, bodyTop, lyricRight, bodyBottom),
-                                 totalScrollContentHeight, surface.dpi());
-        if (!previewManualScroll) {
-            float desiredOffset = 0.0f;
-            if (previewCurrentLine >= 0 && previewCurrentLine < total) {
-                const float lineCenterY =
-                    previewScrollPadding + rowOffsets[previewCurrentLine] +
-                    rowHeights[previewCurrentLine] * 0.5f;
-                desiredOffset = std::clamp(lineCenterY - availableHeight * 0.5f,
-                                           0.0f, maxScrollOffset);
-            }
-            if (previewSnapNextSync) {
-                previewSnapNextSync = false;
-                previewAutoResumePending = false;
-                previewScrollView.setOffset(desiredOffset);
-            } else if (previewAutoResumePending) {
-                previewAutoResumePending = false;
-                previewScrollView.scrollTo(desiredOffset, true,
-                                           kPreviewResumeScrollFrequency, false);
-            } else if (std::fabs(previewScrollView.targetOffset() - desiredOffset) > 0.5f) {
-                previewScrollView.scrollTo(desiredOffset, true,
-                                           kPreviewLineScrollFrequency, false);
-            }
-        }
-
-        const bool forcePreviewRedraw = previewContentDirty;
-        previewContentDirty = false;
-        previewScrollView.paint([&](fluent::FluentDialogSurface::Painter& painter,
-                                    const D2D1_RECT_F& paintBounds, float position) {
-            painter.fillRoundRect(p.cardFill, paintBounds, 0.0f);
-            for (int index = 0; index < total; ++index) {
-                const float rowTop = bodyTop + previewScrollPadding + rowOffsets[index] - position;
-                const D2D1_RECT_F rect = D2D1::RectF(
-                    lyricLeft, rowTop, lyricRight, rowTop + rowHeights[index]);
-                if (rect.bottom < paintBounds.top || rect.top > paintBounds.bottom)
-                    continue;
-                drawPreviewLyricLine(painter, previewLines[index], rect,
-                                     mainHeights[index], index == previewCurrentLine);
-            }
-        }, false, forcePreviewRedraw);
-
-        if (previewHasRomanization)
-            drawPreviewToggleButton(painter, previewRomanizationRect, L"音",
-                                    previewShowRomanization, kIdPreviewRomanization);
-        if (previewHasTranslation)
-            drawPreviewToggleButton(painter, previewTranslationRect, L"译", previewShowTranslation,
-                                    kIdPreviewTranslation);
-    }
-
     void paint(fluent::FluentDialogSurface::Painter& painter, float, float) {
         const auto& p = fluent::palette();
         drawTextField(painter, titleEditRect, titleEdit, kIdTitleEdit);
@@ -1428,14 +677,33 @@ struct ManualSearchDialog::Impl {
                     brush);
             }
             drawCandidateList(painter);
-            drawPreview(painter);
+            const SearchCandidate* selectedCandidate =
+                (selectedIdx >= 0 && selectedIdx < static_cast<int>(candidates.size()))
+                    ? &candidates[selectedIdx]
+                    : nullptr;
+            preview.draw(painter, {
+                .rect = previewRect,
+                .romanizationRect = previewRomanizationRect,
+                .translationRect = previewTranslationRect,
+                .selectedCandidate = selectedCandidate,
+                .dipScale = surface.dipScale(),
+                .dpi = surface.dpi(),
+                .focusedId = focusedId,
+                .hoverId = hoverId,
+                .pressedId = pressedId,
+                .focusVisible = focusVisible,
+                .previewId = kIdPreview,
+                .romanizationId = kIdPreviewRomanization,
+                .translationId = kIdPreviewTranslation,
+            });
             drawButton(painter, advanceRect, L"提前 0.5 秒", false, kIdAdvanceButton);
             drawButton(painter, delayRect, L"延后 0.5 秒", false, kIdDelayButton);
             drawButton(painter, applyRect, L"使用此歌词", true, kIdApplyButton);
         } else {
             const wchar_t* hint = searching ? L"正在搜索歌词候选…"
-                : previewState == PreviewState::NoCandidates ? L"未找到歌词，试试缩短歌名或更换歌手关键词。"
-                                                             : L"输入歌名和歌手后搜索。";
+                : preview.state() == ManualSearchPreviewState::NoCandidates
+                    ? L"未找到歌词，试试缩短歌名或更换歌手关键词。"
+                    : L"输入歌名和歌手后搜索。";
             painter.drawText(hint,
                              painter.textFormat(fluent::font_sizes::label, 400, false, true),
                              D2D1::RectF(workspaceRect.left, workspaceRect.top,
@@ -1454,9 +722,9 @@ struct ManualSearchDialog::Impl {
             return kIdSearchButton;
         if (isEnabled(kIdCandidateList) && contains(candidateListRect, x, y))
             return kIdCandidateList;
-        if (previewHasRomanization && contains(previewRomanizationRect, x, y))
+        if (preview.hasRomanization() && contains(previewRomanizationRect, x, y))
             return kIdPreviewRomanization;
-        if (previewHasTranslation && contains(previewTranslationRect, x, y))
+        if (preview.hasTranslation() && contains(previewTranslationRect, x, y))
             return kIdPreviewTranslation;
         if (contains(previewRect, x, y))
             return kIdPreview;
@@ -1527,25 +795,15 @@ struct ManualSearchDialog::Impl {
             shiftPreviewTimes(500);
             break;
         case kIdPreviewRomanization:
-            previewShowRomanization = !previewShowRomanization;
+            preview.toggleRomanization();
             runtime_log::writef(L"[action][manual-search] preview-romanization=%s",
-                                previewShowRomanization ? L"on" : L"off");
-            previewManualScroll = false;
-            previewSnapNextSync = true;
-            previewAutoResumePending = false;
-            previewContentDirty = true;
-            syncPreviewToCurrentLine();
+                                preview.showRomanization() ? L"on" : L"off");
             surface.invalidate();
             break;
         case kIdPreviewTranslation:
-            previewShowTranslation = !previewShowTranslation;
+            preview.toggleTranslation();
             runtime_log::writef(L"[action][manual-search] preview-translation=%s",
-                                previewShowTranslation ? L"on" : L"off");
-            previewManualScroll = false;
-            previewSnapNextSync = true;
-            previewAutoResumePending = false;
-            previewContentDirty = true;
-            syncPreviewToCurrentLine();
+                                preview.showTranslation() ? L"on" : L"off");
             surface.invalidate();
             break;
         case kIdApplyButton:
@@ -1567,7 +825,7 @@ struct ManualSearchDialog::Impl {
         const UINT_PTR generation = ++searchGeneration;
         ++previewGeneration;
         searching = true;
-        setPreviewState(PreviewState::Empty);
+        preview.setState(ManualSearchPreviewState::Empty, hwnd);
         candidateItems.clear();
         candidates.clear();
         selectedItemRow = -1;
@@ -1579,8 +837,8 @@ struct ManualSearchDialog::Impl {
         setPreviewLines({});
         surface.invalidate();
 
-        const std::wstring title = titleEdit.text;
-        const std::wstring artist = artistEdit.text;
+        const std::wstring title = titleEdit.buffer.text;
+        const std::wstring artist = artistEdit.buffer.text;
         HWND hwndCopy = hwnd;
         provider->searchCandidatesAsync(title, artist,
             [hwndCopy, generation](const std::vector<SearchCandidate>& result) {
@@ -1638,7 +896,7 @@ struct ManualSearchDialog::Impl {
             addGroup(L"汽水音乐歌词（逐字／LRC）", LyricSource::Soda);
 
         if (candidates.empty()) {
-            setPreviewState(PreviewState::NoCandidates);
+            preview.setState(ManualSearchPreviewState::NoCandidates, hwnd);
         } else {
             for (int row = 0; row < static_cast<int>(candidateItems.size()); ++row) {
                 if (!candidateItems[row].header) {
@@ -1653,7 +911,7 @@ struct ManualSearchDialog::Impl {
     void onSelectionChanged() {
         if (selectedIdx < 0 || selectedIdx >= static_cast<int>(candidates.size()) || !provider)
             return;
-        setPreviewState(PreviewState::Loading);
+        preview.setState(ManualSearchPreviewState::Loading, hwnd);
         setPreviewLines({});
         surface.invalidate();
 
@@ -1678,41 +936,34 @@ struct ManualSearchDialog::Impl {
         if (index != selectedIdx)
             return;
         if (!ok || lines.empty()) {
-            setPreviewState(PreviewState::Unavailable);
+            preview.setState(ManualSearchPreviewState::Unavailable, hwnd);
             surface.invalidate();
             return;
         }
-        setPreviewState(PreviewState::Empty);
-        previewInfo = info;
-        previewInfo.timingOffsetKnown = true;
+        preview.setState(ManualSearchPreviewState::Empty, hwnd);
+        SongInfo updatedInfo = info;
+        updatedInfo.timingOffsetKnown = true;
+        preview.setSongInfo(updatedInfo);
         setPreviewLines(lines);
         surface.invalidate();
     }
 
     void applySelection() {
         if (selectedIdx < 0 || selectedIdx >= static_cast<int>(candidates.size()) ||
-            previewLines.empty())
+            preview.lines().empty())
             return;
-        SongInfo info = previewInfo;
+        SongInfo info = preview.songInfo();
         if (!targetNeteaseSongId.empty())
             info.neteaseSongId = targetNeteaseSongId;
         if (onApply)
-            onApply(LyricResult{true, previewLines, std::move(info), false, true});
+            onApply(LyricResult{true, preview.lines(), std::move(info), false, true});
         destroy();
     }
 
     void shiftPreviewTimes(int64_t deltaMs) {
-        if (previewLines.empty())
+        if (preview.lines().empty())
             return;
-        previewInfo.timingOffsetMs += deltaMs;
-        for (auto& line : previewLines) {
-            line.ms += deltaMs;
-            for (auto& character : line.chars) {
-                character.startMs += deltaMs;
-                character.endMs += deltaMs;
-            }
-        }
-        resetPreviewView();
+        preview.shiftTimes(deltaMs, playbackPositionMs);
         surface.invalidate();
     }
 
@@ -1741,24 +992,18 @@ struct ManualSearchDialog::Impl {
                         static_cast<LONG>(std::ceil(candidateListRect.bottom * scale))};
                     surface.invalidate(&dirty);
                 }) ||
-                !previewScrollView.create(hwnd, 0x6402, [this](float, bool redraw) {
-                    if (redraw)
-                        surface.invalidate();
-                }))
+                !preview.create(hwnd, [this]() { surface.invalidate(); }))
                 return -1;
             createControls();
-            refreshPreviewAnimations();
+            preview.refreshAnimations(hwnd);
             layout();
-            SetTimer(hwnd, kPreviewTimerId, 100, nullptr);
+            SetTimer(hwnd, ManualSearchPreview::kTimerId, 100, nullptr);
             return 0;
         case WM_SIZE:
-            updatePreviewLoadingTimer();
+            preview.updateLoadingTimer(hwnd);
             candidateScroll = candidateScrollView.offset();
             candidateScrollView.stop();
-            previewScrollView.stop();
-            if (!previewManualScroll)
-                previewSnapNextSync = true;
-            previewContentDirty = true;
+            preview.onContainerResizeOrDpiChange();
             layout();
             surface.invalidate();
             return 0;
@@ -1766,9 +1011,7 @@ struct ManualSearchDialog::Impl {
             fluent::applyDialogDpiChange(hwnd, wp, reinterpret_cast<RECT*>(lp), kDialogStyle,
                                          kDialogExStyle, kMinClientWidthDip,
                                          kMinClientHeightDip);
-            if (!previewManualScroll)
-                previewSnapNextSync = true;
-            previewContentDirty = true;
+            preview.onContainerResizeOrDpiChange();
             layout();
             surface.invalidate();
             return 0;
@@ -1785,14 +1028,10 @@ struct ManualSearchDialog::Impl {
         case WM_SETTINGCHANGE:
         case WM_THEMECHANGED:
             candidateContentDirty = true;
-            refreshPreviewAnimations();
-            previewMeasuredWidth = -1.0f;
+            preview.refreshAnimations(hwnd);
+            preview.onThemeChange();
             candidateScroll = candidateScrollView.offset();
             candidateScrollView.stop();
-            previewScrollView.stop();
-            if (!previewManualScroll)
-                previewSnapNextSync = true;
-            previewContentDirty = true;
             backdrop = fluent::restyleDialogWindow(hwnd, backdrop);
             surface.setBackdrop(backdrop);
             surface.invalidate();
@@ -1811,15 +1050,16 @@ struct ManualSearchDialog::Impl {
             surface.eraseBackground(reinterpret_cast<HDC>(wp), backdrop);
             return 1;
         case WM_TIMER:
-            if (wp == kPreviewLoadingTimerId) {
-                if (previewState == PreviewState::Loading && previewAnimations)
+            if (wp == ManualSearchPreview::kLoadingTimerId) {
+                if (preview.state() == ManualSearchPreviewState::Loading &&
+                    preview.animationsEnabled())
                     invalidatePreview();
                 return 0;
             }
-            if (candidateScrollView.tick(wp) || previewScrollView.tick(wp))
+            if (candidateScrollView.tick(wp) || preview.tickScroll(wp))
                 return 0;
-            if (wp == kPreviewTimerId)
-                onPreviewTimer();
+            if (wp == ManualSearchPreview::kTimerId && preview.onResumeTimer())
+                surface.invalidate();
             return 0;
         case kMsgCandidatesReady: {
             auto* payload = reinterpret_cast<std::vector<SearchCandidate>*>(lp);
@@ -1881,16 +1121,14 @@ struct ManualSearchDialog::Impl {
             const float x = GET_X_LPARAM(lp) / scale;
             const float y = GET_Y_LPARAM(lp) / scale;
             const int id = hitTest(x, y);
-            if (id == kIdPreview && previewManualScroll) {
-                previewScrollView.stop();
-                previewLastScrollTick = GetTickCount();
-            }
+            if (id == kIdPreview)
+                preview.onPointerDown();
             focusedId = id;
             pressedId = 0;
 
             if (id == kIdTitleEdit || id == kIdArtistEdit) {
                 if (auto* field = editFor(id))
-                    field->caret = field->anchor = field->text.size();
+                    field->buffer.moveCaret(field->buffer.text.size(), false);
             } else if (id == kIdCandidateList) {
                 if (beginCandidateScrollDrag(x, y)) {
                     focusedId = kIdCandidateList;
@@ -1940,7 +1178,7 @@ struct ManualSearchDialog::Impl {
             if (contains(candidateListRect, x, y))
                 scrollCandidatesBy(GET_WHEEL_DELTA_WPARAM(wp));
             else if (contains(previewRect, x, y))
-                scrollPreviewByWheel(GET_WHEEL_DELTA_WPARAM(wp));
+                preview.scrollByWheel(GET_WHEEL_DELTA_WPARAM(wp));
             return 0;
         }
         case WM_GETDLGCODE:
@@ -2027,10 +1265,10 @@ struct ManualSearchDialog::Impl {
             return 0;
         case WM_DESTROY:
             candidateScrollView.reset();
-            previewScrollView.reset();
+            preview.resetScroll();
             discardPendingResults(hwnd);
-            KillTimer(hwnd, kPreviewTimerId);
-            KillTimer(hwnd, kPreviewLoadingTimerId);
+            KillTimer(hwnd, ManualSearchPreview::kTimerId);
+            KillTimer(hwnd, ManualSearchPreview::kLoadingTimerId);
             surface.discard();
             hwnd = nullptr;
             if (notifyHwnd)
@@ -2143,7 +1381,8 @@ void ManualSearchDialog::setApplyCallback(ApplyCallback cb) {
 
 void ManualSearchDialog::setPlaybackPosition(int64_t positionMs) {
     impl_->playbackPositionMs = positionMs;
-    impl_->setPreviewPosition(positionMs);
+    if (impl_->preview.setPosition(positionMs) && impl_->hwnd)
+        impl_->surface.invalidate();
 }
 
 void ManualSearchDialog::setTargetSong(const std::wstring& title, const std::wstring& artist,
@@ -2169,7 +1408,7 @@ void ManualSearchDialog::setTargetSong(const std::wstring& title, const std::wst
     impl_->selectedItemRow = -1;
     impl_->selectedIdx = -1;
     impl_->hoverItemRow = -1;
-    impl_->previewInfo = {};
+    impl_->preview.clearSongInfo();
     impl_->setPreviewLines({});
     impl_->createControls();
     impl_->surface.invalidate();

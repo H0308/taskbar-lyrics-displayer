@@ -460,7 +460,7 @@ void drawIdleQuickListContent(const PagePaintContext& context, ID2D1DeviceContex
                 cell.left + (kIdleQuickCellSizeDip + kIdleQuickIconSizeDip) * 0.5f,
                 iconTop + kIdleQuickIconSizeDip);
             if (i < idleIconBitmaps.size() && idleIconBitmaps[i])
-                rt->DrawBitmap(idleIconBitmaps[i], iconRect, valid ? 1.0f : 0.45f,
+                rt->DrawBitmap(idleIconBitmaps[i].Get(), iconRect, valid ? 1.0f : 0.45f,
                                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
             if (showName) {
                 const D2D1_RECT_F textRect =
