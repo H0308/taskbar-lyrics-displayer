@@ -636,6 +636,7 @@ h1, h2, h3 { line-height: 1.3; font-weight: 700; }
   opacity: 0.75;
 }
 .footer-disclaimer p { margin: 0; }
+.footer-disclaimer p + p { margin-top: 6px; }
 
 /* ===== 更新日志时间线 ===== */
 .releases-hero {
