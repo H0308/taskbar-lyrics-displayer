@@ -1298,11 +1298,11 @@ struct ManualSearchDialog::Impl {
                                          previewRect.top + kPreviewHeaderHeight + 24.0f),
                              p.textSecondary);
 
-        const bool hasToggleRail = previewHasRomanization || previewHasTranslation;
-        const float lyricLeftLimit = previewRect.left + 12.0f;
-        const float lyricRightLimit = previewRect.right - 12.0f -
-                                      (hasToggleRail ? kPreviewToggleSize + kPreviewToggleTextGap
-                                                     : 0.0f);
+        // 左右对称预留切换按钮安全边距，保证歌词列始终对齐容器中心且不与「音/译」按钮重叠。
+        constexpr float kLyricSideMargin =
+            kPreviewToggleMargin + kPreviewToggleSize + kPreviewToggleTextGap;
+        const float lyricLeftLimit = previewRect.left + kLyricSideMargin;
+        const float lyricRightLimit = previewRect.right - kLyricSideMargin;
         const float lyricAreaWidth = std::max(0.0f, lyricRightLimit - lyricLeftLimit);
         const float lyricWidth = std::min(kLyricTextWidthDip, lyricAreaWidth);
         const float lyricLeft = lyricLeftLimit + (lyricAreaWidth - lyricWidth) * 0.5f;
