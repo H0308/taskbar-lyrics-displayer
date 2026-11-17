@@ -46,6 +46,7 @@ struct SettingsState {
     bool backgroundBlurSupported = true;
     bool embeddedResourceMonitor = false;
     bool dockResourceGpuUsage = false;
+    bool dockResourceSmallFont = false; // 性能监测用小一号字，块与块更紧凑
     bool dockResourceDownload = true;
     bool dockResourceUpload = true;
     bool dockResourceCpuFrequency = false;
@@ -135,6 +136,7 @@ struct SettingsActions {
     std::function<void(int)> onDockBackgroundAdjustment;
     std::function<void(bool)> onEmbeddedResourceMonitor;
     std::function<void(bool)> onDockResourceGpuUsage;
+    std::function<void(bool)> onDockResourceSmallFont;
     std::function<void(bool)> onDockResourceDownload;
     std::function<void(bool)> onDockResourceUpload;
     std::function<void(bool)> onDockResourceCpuFrequency;

@@ -56,6 +56,7 @@ struct AppSettings {
     bool dockResourceDownload_ = true;
     bool dockResourceUpload_ = true;
     bool dockResourceCpuFrequency_ = false;
+    bool dockResourceSmallFont_ = false; // 性能监测小字模式
     bool taskbarContextMenuEnabled_ = true;
     bool hoverPlaybackControls_ = true;
     HoverControlStyle hoverControlStyle_ = HoverControlStyle::Inline;

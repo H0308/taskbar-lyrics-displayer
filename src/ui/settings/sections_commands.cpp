@@ -380,6 +380,12 @@ void SettingsSections::onCommand(int id, int option) {
         if (actions.onDockResourceGpuUsage)
             actions.onDockResourceGpuUsage(row->checked);
         break;
+    case kIdDockResourceSmallFont:
+        row->checked = !row->checked;
+        state.dockResourceSmallFont = row->checked;
+        if (actions.onDockResourceSmallFont)
+            actions.onDockResourceSmallFont(row->checked);
+        break;
     case kIdDockResourceDownload:
         row->checked = !row->checked;
         state.dockResourceDownload = row->checked;

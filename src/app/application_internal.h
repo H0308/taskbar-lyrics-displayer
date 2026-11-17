@@ -395,6 +395,8 @@ private:
 
     void applyDockResourceCpuFrequency(bool on);
 
+    void applyDockResourceSmallFont(bool on);
+
     bool isRenderMode(RenderMode mode) const;
 
     bool isMinimalRenderMode() const;

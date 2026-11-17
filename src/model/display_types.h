@@ -75,6 +75,7 @@ struct DockResourceVisibility {
     bool upload = true;
     bool gpuUsage = false;
     bool cpuFrequency = false;
+    bool smallFont = false; // 性能监测用小一号字，块与块之间更紧凑
     bool operator==(const DockResourceVisibility&) const = default;
 };
 

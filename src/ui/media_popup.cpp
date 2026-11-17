@@ -2208,10 +2208,10 @@ struct MediaPopup::Impl {
     int hitButton(float x, float y) const {
         if (categoryTransition.active())
             return -1;
-        for (int i = 0; i < 3; ++i) {
-            if (media_popup_paint::buttonEnabled(available, i, media) &&
+        for (size_t i = 0; i < mediaLayout_.buttons.size(); ++i) {
+            if (media_popup_paint::buttonEnabled(available, static_cast<int>(i), media) &&
                 contains(mediaLayout_.buttons[i], x, y))
-                return i;
+                return static_cast<int>(i);
         }
         return -1;
     }

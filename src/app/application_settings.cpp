@@ -259,6 +259,7 @@ void App::applyDockResourceVisibility() {
     visibility.upload = settings_.dockResourceUpload_;
     visibility.gpuUsage = settings_.dockResourceGpuUsage_;
     visibility.cpuFrequency = settings_.dockResourceCpuFrequency_;
+    visibility.smallFont = settings_.dockResourceSmallFont_;
     publishTaskbarAppearance();
 }
 
@@ -289,6 +290,13 @@ void App::applyDockResourceCpuFrequency(bool on) {
     settings_.dockResourceCpuFrequency_ = on;
     applyDockResourceVisibility();
     logSettingBool(L"dock-resource-cpu-frequency", on);
+    saveSettings();
+}
+
+void App::applyDockResourceSmallFont(bool on) {
+    settings_.dockResourceSmallFont_ = on;
+    applyDockResourceVisibility();
+    logSettingBool(L"dock-resource-small-font", on);
     saveSettings();
 }
 
@@ -1027,6 +1035,7 @@ SettingsState App::currentSettingsState() const {
     st.dockResourceDownload = settings_.dockResourceDownload_;
     st.dockResourceUpload = settings_.dockResourceUpload_;
     st.dockResourceCpuFrequency = settings_.dockResourceCpuFrequency_;
+    st.dockResourceSmallFont = settings_.dockResourceSmallFont_;
     st.songInfoVisible = view.songInfoVisible;
     st.albumCoverVisible = settings_.albumCoverVisible_;
     st.platformIconVisible = settings_.platformIconVisible_;
@@ -1142,6 +1151,7 @@ SettingsActions App::buildSettingsActions() {
     act.onDockResourceDownload = [this](bool on) { applyDockResourceNetwork(true, on); };
     act.onDockResourceUpload = [this](bool on) { applyDockResourceNetwork(false, on); };
     act.onDockResourceCpuFrequency = [this](bool on) { applyDockResourceCpuFrequency(on); };
+    act.onDockResourceSmallFont = [this](bool on) { applyDockResourceSmallFont(on); };
     act.onSpectrum = [this](bool on) { applySpectrumOn(on); };
     act.onSpectrumStyle = [this](int style) { applySpectrumStyle(style); };
     act.onSpectrumColorMode = [this](int mode) { applySpectrumColorMode(mode); };

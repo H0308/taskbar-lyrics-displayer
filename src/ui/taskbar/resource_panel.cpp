@@ -7,8 +7,11 @@
 #include <cstdint>
 
 namespace {
-constexpr float kDockResourceZoneGap = 10.0f;
-constexpr float kResourceCellSafetyPadding = 1.0f;
+// CPU / 内存 / 上下行之间的横向间距：10 → 5 → 3 → 4 DIP。
+// 列宽改为按两位数（"CPU: 99%"）预留，所以这里保留 4 DIP 就够分开两块了；
+// 之前按三位数预留，两位数时右侧天然空一格，再加间距就显得很远。
+constexpr float kDockResourceZoneGap = 4.0f;
+constexpr float kResourceCellSafetyPadding = 0.0f;
 constexpr UINT kResourceSnapshotPollMs = 250;
 } // namespace
 using taskbar_detail::monotonicNowMs;
@@ -253,8 +256,10 @@ bool ResourcePanel::updateColumnWidths(IDWriteFactory* dwrite, IDWriteTextFormat
         }
         ++cellIndex;
     };
-    measureCell({L"CPU: 100%", L"CPU: " + twoDigits + L"%"});
-    measureCell({L"内存: 100%", L"内存: " + twoDigits + L"%"});
+    // 按两位数预留列宽：CPU/内存 到 100% 的情况很少且瞬时，宁可那一刻挤一格，
+    // 也不让常态下的两位数在列尾留下一整格空白。
+    measureCell({L"CPU: " + twoDigits + L"%"});
+    measureCell({L"内存: " + twoDigits + L"%"});
     static constexpr const wchar_t* rateUnits[] = {L"B/s", L"KB/s", L"MB/s", L"GB/s", L"TB/s"};
     auto measureRate = [&](const wchar_t* prefixLabel) {
         std::vector<std::wstring> samples;

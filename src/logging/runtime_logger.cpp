@@ -583,6 +583,8 @@ void RuntimeLogger::start(const std::wstring& directory, int retentionDays) {
     SetUnhandledExceptionFilter(unhandledExceptionFilter);
     impl_->worker = std::thread([this] { impl_->run(); });
     writef(L"[lifecycle] runtime logger started: file=%s", session.c_str());
+    // 编译时间戳：排查时用它确认当前跑的到底是不是刚编出来的那一版。
+    writef(L"[lifecycle] build=%hs %hs", __DATE__, __TIME__);
 }
 
 void RuntimeLogger::stop() {
