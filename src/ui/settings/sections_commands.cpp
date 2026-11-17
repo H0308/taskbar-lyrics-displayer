@@ -447,6 +447,25 @@ void SettingsSections::onCommand(int id, int option) {
         if (actions.onFrameRate)
             actions.onFrameRate(row->selected);
         break;
+    case kIdFullscreenRenderModeEnabled:
+        row->checked = !row->checked;
+        state.fullscreenRenderModeEnabled = row->checked;
+        if (auto* monitor = findRow(kIdFullscreenRenderModeMonitor))
+            monitor->enabled = row->checked;
+        if (auto* target = findRow(kIdFullscreenRenderMode))
+            target->enabled = row->checked;
+        if (actions.onFullscreenRenderModeEnabled)
+            actions.onFullscreenRenderModeEnabled(row->checked);
+        break;
+    case kIdFullscreenRenderModeMonitor:
+        if (actions.onChooseFullscreenRenderModeMonitor)
+            actions.onChooseFullscreenRenderModeMonitor();
+        break;
+    case kIdFullscreenRenderMode:
+        state.fullscreenRenderMode = std::clamp(row->selected, 0, 2);
+        if (actions.onFullscreenRenderMode)
+            actions.onFullscreenRenderMode(state.fullscreenRenderMode);
+        break;
     case kIdPickFont:
         if (actions.onPickFont)
             actions.onPickFont();

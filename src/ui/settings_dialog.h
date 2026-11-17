@@ -64,6 +64,9 @@ struct SettingsState {
     int coverBackgroundOpacity = 60; // 封面模糊背景不透明度（0~100）
     int renderMode = 0; // 0 正常 1 低渲染 2 完全停止 3 极简
     int frameRate = 1;
+    bool fullscreenRenderModeEnabled = false;
+    int fullscreenRenderMode = 1; // 0 低渲染 1 完全停止 2 极简
+    std::wstring fullscreenRenderModeMonitorLabel;
     bool taskbarContextMenu = true;
     bool hoverControls = true;
     int hoverControlStyle = 0; // 0 内嵌控件 1 媒体卡片
@@ -152,6 +155,9 @@ struct SettingsActions {
     std::function<void(int)> onCoverBackgroundOpacity;
     std::function<void(int)> onRenderMode;
     std::function<void(int)> onFrameRate;
+    std::function<void(bool)> onFullscreenRenderModeEnabled;
+    std::function<void(int)> onFullscreenRenderMode;
+    std::function<void()> onChooseFullscreenRenderModeMonitor;
     std::function<void(bool)> onTaskbarContextMenu;
     std::function<void(bool)> onHoverControls;
     std::function<void(int)> onHoverControlStyle;

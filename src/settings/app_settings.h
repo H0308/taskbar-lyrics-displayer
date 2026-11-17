@@ -10,6 +10,9 @@
 // 仅包含持久化的偏好与内容缓存；异步请求、窗口和播放状态不属于配置。
 struct AppSettings {
     int frameRate_ = 1;
+    bool fullscreenRenderModeEnabled_ = false;
+    RenderMode fullscreenRenderMode_ = RenderMode::Stopped;
+    std::wstring fullscreenRenderModeMonitorId_ = L"all";
     // 字体状态（作为字体选择器的记忆源）。hasUserFont_ 为 false 时各宿主使用各自的默认字体。
     bool hasUserFont_ = false;
     std::wstring fontFamily_ = kDefaultUiFontFamily; // 与普通窗口默认字体族一致

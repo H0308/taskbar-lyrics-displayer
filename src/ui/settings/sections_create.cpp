@@ -331,6 +331,20 @@ void SettingsSections::createPerformanceRows() {
                 {L"完整视觉效果", L"降低帧率，节省 GPU", L"停止渲染，保留监听",
                  L"横向歌词，关闭逐字与转场"},
                 std::clamp(state.renderMode, 0, kRenderModeMinimal), true, kModeGridMinH);
+    addHeader(kPerformancePage, L"全屏应用");
+    Row& fullscreenMode = addRow(
+        kPerformancePage, kIdFullscreenRenderModeEnabled, ControlKind::Toggle,
+        L"全屏应用时自动切换模式",
+        L"前台存在全屏应用时自动切换到指定性能模式，退出全屏后恢复原模式。", 40.0f, kRowTallH);
+    fullscreenMode.checked = state.fullscreenRenderModeEnabled;
+    Row& fullscreenMonitor = addButton(
+        kPerformancePage, kIdFullscreenRenderModeMonitor, L"目标显示器",
+        L"选择“全部显示器”时任意显示器出现全屏应用均会切换；选择指定显示器时仅监测并切换该显示器的歌词。",
+        state.fullscreenRenderModeMonitorLabel.c_str(), kRowTallH);
+    fullscreenMonitor.enabled = state.fullscreenRenderModeEnabled;
+    addRadio(kPerformancePage, kIdFullscreenRenderMode, L"全屏时目标模式", nullptr,
+             {L"低渲染", L"完全停止", L"极简"}, std::clamp(state.fullscreenRenderMode, 0, 2),
+             state.fullscreenRenderModeEnabled, kRowH);
 }
 
 void SettingsSections::create() {

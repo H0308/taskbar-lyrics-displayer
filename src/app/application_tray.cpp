@@ -19,6 +19,7 @@ bool App::createTrayWindow(HINSTANCE inst) {
     taskbarCreatedMsg_ = RegisterWindowMessageW(L"TaskbarCreated");
     updateTrayIcon();
     SetTimer(trayHwnd, kTimerIdleQuote, kIdleQuoteCheckMs, nullptr);
+    updateFullscreenCheckTimer();
     return true;
 }
 
@@ -29,6 +30,7 @@ void App::destroyTray() {
         KillTimer(hwnd, kTimerIdleQuote);
         KillTimer(hwnd, kTimerTickTickStartupRetry);
         KillTimer(hwnd, kTimerTaskbarAutoRestore);
+        KillTimer(hwnd, kTimerFullscreenCheck);
         taskbarAutoRestorePending_ = false;
         idle_.resetTickTickStartupRetry();
         idle_.setTimerWindow(nullptr);
@@ -461,6 +463,10 @@ LRESULT CALLBACK App::trayWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         app->idle_.refreshHolidayCalendar(false);
         app->idle_.refreshIdleQuote(false);
         app->refreshIdleWelcome();
+        return 0;
+    }
+    if (msg == WM_TIMER && wp == kTimerFullscreenCheck) {
+        app->syncFullscreenRenderMode();
         return 0;
     }
     if (msg == WM_TIMER && wp == kTimerTickTickStartupRetry) {

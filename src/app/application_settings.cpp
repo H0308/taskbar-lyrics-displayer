@@ -298,9 +298,9 @@ bool App::isMinimalRenderMode() const { return isRenderMode(RenderMode::Minimal)
 
 bool App::isNormalRenderMode() const { return isRenderMode(RenderMode::Normal); }
 
-TaskbarAppearance App::appearanceForHost(bool vertical) const {
+TaskbarAppearance App::appearanceForHost(bool vertical, RenderMode mode) const {
     AppearanceContext context;
-    context.renderMode = static_cast<RenderMode>(renderMode_);
+    context.renderMode = mode;
     context.vertical = vertical;
     context.lyricAppearance = currentLyricAppearance();
     context.playedColor = effectivePlayedColor();
@@ -310,9 +310,14 @@ TaskbarAppearance App::appearanceForHost(bool vertical) const {
     return resolveTaskbarAppearance(settings_, context);
 }
 
+TaskbarAppearance App::appearanceForHost(bool vertical) const {
+    return appearanceForHost(vertical, static_cast<RenderMode>(renderMode_));
+}
+
 void App::publishTaskbarAppearance() {
     forEachHost([&](TaskbarHost* host) {
-        host->applyAppearance(appearanceForHost(host->isVerticalTaskbar()));
+        host->applyAppearance(
+            appearanceForHost(host->isVerticalTaskbar(), effectiveRenderModeForHost(host)));
     });
 }
 
@@ -321,8 +326,48 @@ void App::applyEffectiveTaskbarSettings() {
     syncTaskbarView(monitor.snapshot());
 }
 
-void App::applyRenderMode(int mode) {
+RenderMode App::effectiveRenderModeForHost(const TaskbarHost* host) const {
+    if (fullscreenRenderModeActive_) {
+        if (fullscreenTargetAllMonitors() ||
+            (host && host->monitorDeviceName() == settings_.fullscreenRenderModeMonitorId_)) {
+            return settings_.fullscreenRenderMode_;
+        }
+    }
+    return static_cast<RenderMode>(userRenderMode_);
+}
+
+int App::desiredRenderMode() const {
+    if (!fullscreenRenderModeActive_)
+        return userRenderMode_;
+    if (fullscreenTargetAllMonitors())
+        return static_cast<int>(settings_.fullscreenRenderMode_);
+    if (!taskbarHost)
+        return isRenderMode(RenderMode::Stopped)
+                   ? static_cast<int>(settings_.fullscreenRenderMode_)
+                   : userRenderMode_;
+    bool anyTargetHost = false;
+    bool anyOtherHost = false;
+    if (taskbarHost->monitorDeviceName() == settings_.fullscreenRenderModeMonitorId_)
+        anyTargetHost = true;
+    else
+        anyOtherHost = true;
+    for (const auto& host : additionalTaskbarHosts_) {
+        if (!host)
+            continue;
+        if (host->monitorDeviceName() == settings_.fullscreenRenderModeMonitorId_)
+            anyTargetHost = true;
+        else
+            anyOtherHost = true;
+    }
+    return (anyTargetHost && !anyOtherHost)
+               ? static_cast<int>(settings_.fullscreenRenderMode_)
+               : userRenderMode_;
+}
+
+bool App::applyEffectiveRenderMode(int mode) {
     const int nextMode = std::clamp(mode, 0, 3);
+    if (renderMode_ == nextMode)
+        return false;
     const bool enteringStopped =
         !isRenderMode(RenderMode::Stopped) && nextMode == static_cast<int>(RenderMode::Stopped);
     const bool leavingStopped =
@@ -335,7 +380,7 @@ void App::applyRenderMode(int mode) {
     renderMode_ = nextMode;
     if (taskbarHost) {
         forEachHost(
-            [&](TaskbarHost* host) { host->setRenderMode(static_cast<RenderMode>(renderMode_)); });
+            [&](TaskbarHost* host) { host->setRenderMode(effectiveRenderModeForHost(host)); });
         applyEffectiveTaskbarSettings();
     }
     if (leavingStopped && taskbarEnabledBeforeStopped_) {
@@ -364,9 +409,89 @@ void App::applyRenderMode(int mode) {
     else if (taskbarAutoClosedForNoSpace_ && !taskbarHost)
         armTaskbarAutoRestore();
     refreshSettingsDialog(true);
-    logSettingInt(L"render-mode", renderMode_);
     updateRuntimeLogState(monitor.snapshot());
+    return true;
+}
+
+void App::syncHostRenderModes() {
+    if (taskbarHost) {
+        forEachHost([&](TaskbarHost* host) {
+            const RenderMode hostMode = effectiveRenderModeForHost(host);
+            host->setRenderMode(hostMode);
+            if (hostMode != RenderMode::Stopped)
+                host->applyPresentationFrame(presentation_.frame());
+        });
+        applyEffectiveTaskbarSettings();
+    }
+    syncSpectrumWithMode();
+    refreshSettingsDialog(true);
+    updateRuntimeLogState(monitor.snapshot());
+}
+
+void App::applyRenderMode(int mode) {
+    userRenderMode_ = std::clamp(mode, 0, 3);
+    std::wstring fullscreenMonitor;
+    const bool hasFullscreen =
+        settings_.fullscreenRenderModeEnabled_ && foregroundFullscreen(&fullscreenMonitor);
+    fullscreenRenderModeActive_ =
+        hasFullscreen && (fullscreenTargetAllMonitors() ||
+                          fullscreenMonitor == settings_.fullscreenRenderModeMonitorId_);
+    if (!applyEffectiveRenderMode(desiredRenderMode()))
+        syncHostRenderModes();
+    logSettingInt(L"render-mode", userRenderMode_);
     saveSettings();
+}
+
+void App::updateFullscreenCheckTimer() {
+    if (!trayHwnd)
+        return;
+    if (settings_.fullscreenRenderModeEnabled_ && !shutdownRequested_)
+        SetTimer(trayHwnd, kTimerFullscreenCheck, kFullscreenCheckMs, nullptr);
+    else
+        KillTimer(trayHwnd, kTimerFullscreenCheck);
+}
+
+void App::syncFullscreenRenderMode(bool forceSync) {
+    if (shutdownRequested_)
+        return;
+    std::wstring fullscreenMonitor;
+    const bool hasFullscreen =
+        settings_.fullscreenRenderModeEnabled_ && foregroundFullscreen(&fullscreenMonitor);
+    const bool nextActive =
+        hasFullscreen && (fullscreenTargetAllMonitors() ||
+                          fullscreenMonitor == settings_.fullscreenRenderModeMonitorId_);
+    const bool activeChanged = fullscreenRenderModeActive_ != nextActive;
+    fullscreenRenderModeActive_ = nextActive;
+    const int targetMode = desiredRenderMode();
+    if (!forceSync && !activeChanged && renderMode_ == targetMode)
+        return;
+    if (activeChanged || forceSync) {
+        runtime_log::writef(L"[render-mode] fullscreen=%s monitor=%s target=%d",
+                            fullscreenRenderModeActive_ ? L"on" : L"off",
+                            fullscreenMonitor.empty() ? L"none" : fullscreenMonitor.c_str(),
+                            targetMode);
+    }
+    if (!applyEffectiveRenderMode(targetMode))
+        syncHostRenderModes();
+}
+
+void App::applyFullscreenRenderModeEnabled(bool on) {
+    settings_.fullscreenRenderModeEnabled_ = on;
+    updateFullscreenCheckTimer();
+    syncFullscreenRenderMode(true);
+    logSettingBool(L"fullscreen-render-mode-enabled", on);
+    saveSettings();
+    refreshSettingsDialog(true);
+}
+
+void App::applyFullscreenRenderMode(int index) {
+    settings_.fullscreenRenderMode_ = index == 0   ? RenderMode::Low
+                                      : index == 2 ? RenderMode::Minimal
+                                                   : RenderMode::Stopped;
+    syncFullscreenRenderMode(true);
+    logSettingInt(L"fullscreen-render-mode", static_cast<int>(settings_.fullscreenRenderMode_));
+    saveSettings();
+    refreshSettingsDialog(true);
 }
 
 void App::applyHoverControls(bool on) {
@@ -460,7 +585,9 @@ void App::applySongToastPosition(int position) {
     saveSettings();
 }
 
-bool App::foregroundFullscreen() {
+bool App::foregroundFullscreen(std::wstring* monitorDeviceName) {
+    if (monitorDeviceName)
+        monitorDeviceName->clear();
     HWND foreground = GetForegroundWindow();
     if (!foreground || foreground == GetShellWindow())
         return false;
@@ -481,13 +608,17 @@ bool App::foregroundFullscreen() {
     if (!GetWindowRect(foreground, &rc))
         return false;
     HMONITOR monitor = MonitorFromWindow(foreground, MONITOR_DEFAULTTOPRIMARY);
-    MONITORINFO info{};
+    MONITORINFOEXW info{};
     info.cbSize = sizeof(info);
     if (!GetMonitorInfoW(monitor, &info))
         return false;
     const RECT& mon = info.rcMonitor;
-    return rc.left <= mon.left && rc.top <= mon.top && rc.right >= mon.right &&
-           rc.bottom >= mon.bottom;
+    if (rc.left > mon.left || rc.top > mon.top || rc.right < mon.right ||
+        rc.bottom < mon.bottom)
+        return false;
+    if (monitorDeviceName)
+        *monitorDeviceName = info.szDevice;
+    return true;
 }
 
 void App::cancelSongToastCoverWait() {
@@ -1046,6 +1177,11 @@ SettingsState App::currentSettingsState() const {
     st.coverBackgroundOpacity = settings_.coverBackgroundOpacity_;
     st.renderMode = renderMode_;
     st.frameRate = settings_.frameRate_;
+    st.fullscreenRenderModeEnabled = settings_.fullscreenRenderModeEnabled_;
+    st.fullscreenRenderMode = settings_.fullscreenRenderMode_ == RenderMode::Low       ? 0
+                              : settings_.fullscreenRenderMode_ == RenderMode::Minimal ? 2
+                                                                                       : 1;
+    st.fullscreenRenderModeMonitorLabel = fullscreenRenderModeMonitorLabel();
     st.taskbarContextMenu = settings_.taskbarContextMenuEnabled_;
     st.hoverControls = settings_.hoverPlaybackControls_;
     st.hoverControlStyle = settings_.hoverControlStyle_ == HoverControlStyle::Popup ? 1 : 0;
@@ -1168,6 +1304,9 @@ SettingsActions App::buildSettingsActions() {
         logSettingInt(L"frame-rate", settings_.frameRate_);
         saveSettings();
     };
+    act.onFullscreenRenderModeEnabled = [this](bool on) { applyFullscreenRenderModeEnabled(on); };
+    act.onFullscreenRenderMode = [this](int index) { applyFullscreenRenderMode(index); };
+    act.onChooseFullscreenRenderModeMonitor = [this] { showFullscreenRenderModeMonitorMenu(); };
     act.onTaskbarContextMenu = [this](bool on) { applyTaskbarContextMenu(on); };
     act.onHoverControls = [this](bool on) { applyHoverControls(on); };
     act.onHoverControlStyle = [this](int style) { applyHoverControlStyle(style); };

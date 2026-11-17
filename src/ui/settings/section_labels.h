@@ -84,12 +84,14 @@ inline settings_icon::Kind iconForRow(int id) {
     case kIdIdleQuoteBackgroundScope:
         return settings_icon::Kind::Scope;
     case kIdRenderMode:
+    case kIdFullscreenRenderMode:
         return settings_icon::Kind::RenderMode;
     case kIdFrameRate:
         return settings_icon::Kind::Refresh;
     case kIdTaskbarContextMenu:
     case kIdTaskbarViewMode:
     case kIdTaskbarMonitor:
+    case kIdFullscreenRenderModeMonitor:
         return settings_icon::Kind::Display;
     case kIdAppBarEdge:
         return settings_icon::Kind::Position;
@@ -151,6 +153,7 @@ inline settings_icon::Kind iconForRow(int id) {
     case kIdSongToastDuration:
         return settings_icon::Kind::Duration;
     case kIdSongToastSkipFullscreen:
+    case kIdFullscreenRenderModeEnabled:
         return settings_icon::Kind::Fullscreen;
     case kIdSongToastPosition:
         return settings_icon::Kind::Position;

@@ -114,6 +114,77 @@ void App::showTaskbarMonitorMenu() {
     });
 }
 
+bool App::fullscreenTargetAllMonitors() const {
+    return settings_.fullscreenRenderModeMonitorId_.empty() ||
+           settings_.fullscreenRenderModeMonitorId_ == L"all";
+}
+
+std::wstring App::fullscreenRenderModeMonitorLabel() const {
+    if (fullscreenTargetAllMonitors())
+        return L"全部显示器";
+
+    const auto compactDeviceName = [](std::wstring deviceName) {
+        if (deviceName.rfind(L"\\\\.\\", 0) == 0)
+            deviceName.erase(0, 4);
+        return deviceName;
+    };
+    const auto displays = enumerateTaskbarDisplays();
+    const auto selected = std::find_if(displays.begin(), displays.end(), [this](const auto& item) {
+        return item.deviceName == settings_.fullscreenRenderModeMonitorId_;
+    });
+    if (selected == displays.end())
+        return compactDeviceName(settings_.fullscreenRenderModeMonitorId_) + L" 断开";
+    return selected->primary ? L"主显示器" : compactDeviceName(selected->deviceName);
+}
+
+void App::selectFullscreenRenderModeMonitor(const std::wstring& deviceName) {
+    const std::wstring normalized = deviceName.empty() ? std::wstring(L"all") : deviceName;
+    if (settings_.fullscreenRenderModeMonitorId_ == normalized)
+        return;
+    settings_.fullscreenRenderModeMonitorId_ = normalized;
+    runtime_log::writef(L"[action][setting] fullscreen-render-mode-monitor=%s",
+                        settings_.fullscreenRenderModeMonitorId_.c_str());
+    syncFullscreenRenderMode(true);
+    saveSettings();
+    refreshSettingsDialog(true);
+}
+
+void App::showFullscreenRenderModeMonitorMenu() {
+    const auto displays = enumerateTaskbarDisplays();
+    std::vector<fluent::FluentMenuItem> items;
+    taskbarMonitorMenuItems_.clear();
+    fluent::FluentMenuItem all;
+    all.id = kCmdTaskbarMonitorAll;
+    all.text = L"全部显示器";
+    all.icon = settings_icon::Kind::Display;
+    all.checked = fullscreenTargetAllMonitors();
+    items.push_back(std::move(all));
+    for (size_t i = 0; i < displays.size(); ++i) {
+        const auto& display = displays[i];
+        fluent::FluentMenuItem item;
+        item.id = kCmdTaskbarMonitorBase + static_cast<int>(i);
+        item.text = taskbarDisplayLabel(display);
+        item.icon = settings_icon::Kind::Display;
+        item.checked = !fullscreenTargetAllMonitors() &&
+                       settings_.fullscreenRenderModeMonitorId_ == display.deviceName;
+        taskbarMonitorMenuItems_.emplace_back(item.id, display.deviceName);
+        items.push_back(std::move(item));
+    }
+    POINT point{};
+    GetCursorPos(&point);
+    fluent::FluentMenu::show(trayHwnd, point, std::move(items), [this](int command) {
+        if (command == kCmdTaskbarMonitorAll) {
+            selectFullscreenRenderModeMonitor(L"all");
+            return;
+        }
+        const auto found =
+            std::find_if(taskbarMonitorMenuItems_.begin(), taskbarMonitorMenuItems_.end(),
+                         [command](const auto& item) { return item.first == command; });
+        if (found != taskbarMonitorMenuItems_.end())
+            selectFullscreenRenderModeMonitor(found->second);
+    });
+}
+
 bool App::taskbarExpandedConfigured() const {
     return settings_.taskbarViewMode_ != TaskbarViewMode::Embedded;
 }
@@ -195,10 +266,16 @@ void App::syncTaskbarView(const SmtcSnapshot& snap) {
 }
 
 void App::syncSpectrumWithMode() {
-    const bool active = display_rules::spectrumRequested(
-                            settings_, static_cast<RenderMode>(renderMode_), taskbarVertical_) &&
-                        taskbarHost != nullptr && !taskbarSpectrumSuppressedForNoSpace_;
-    if (active) {
+    bool anyHostActive = false;
+    if (!taskbarSpectrumSuppressedForNoSpace_) {
+        forEachHost([&](TaskbarHost* host) {
+            if (display_rules::spectrumRequested(settings_, effectiveRenderModeForHost(host),
+                                                 host->isVerticalTaskbar())) {
+                anyHostActive = true;
+            }
+        });
+    }
+    if (anyHostActive) {
         SmtcSnapshot snap = monitor.snapshot();
         const wchar_t* processName = spectrumProcessName(snap.player);
         if (*processName)
@@ -206,7 +283,7 @@ void App::syncSpectrumWithMode() {
         spectrum_.start();
         forEachHost([&](TaskbarHost* host) {
             host->setSpectrumVisible(display_rules::spectrumRequested(
-                settings_, static_cast<RenderMode>(renderMode_), host->isVerticalTaskbar()));
+                settings_, effectiveRenderModeForHost(host), host->isVerticalTaskbar()));
         });
     } else {
         spectrum_.stop();
@@ -216,8 +293,9 @@ void App::syncSpectrumWithMode() {
 
 void App::tryRestoreSpectrumAfterNoSpace() {
     if (!taskbarSpectrumSuppressedForNoSpace_ || taskbarSpectrumRestoring_ ||
-        !display_rules::spectrumRequested(settings_, static_cast<RenderMode>(renderMode_),
-                                          taskbarVertical_) || !taskbarHost)
+        !display_rules::spectrumRequested(settings_, effectiveRenderModeForHost(taskbarHost.get()),
+                                          taskbarVertical_) ||
+        !taskbarHost)
         return;
 
     // 频谱本身会扩大任务栏歌词窗口；恢复空间时先试着恢复用户设置，
@@ -299,8 +377,16 @@ void App::configureTaskbarHostCallbacks(TaskbarHost* host, bool primary) {
         return;
     host->setCloseCallback([this] { requestQuit(); });
     host->setSpectrumReader([source = &spectrum_] { return source->bands(); });
+    host->setTickCallback([this, host] {
+        TaskbarHost* tickOwner = nullptr;
+        forEachHost([&](TaskbarHost* candidate) {
+            if (!tickOwner && effectiveRenderModeForHost(candidate) != RenderMode::Stopped)
+                tickOwner = candidate;
+        });
+        if (tickOwner == host)
+            onFrame();
+    });
     if (primary) {
-        host->setTickCallback([this] { onFrame(); });
         host->setStatusTextCycleCompletedCallback(
             [this] { idle_.onStartupTaskSummaryCompleted(); });
         host->setPlacementStatusCallback(
@@ -416,7 +502,7 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
         host->setAllowOverlap(allowOverlap);
         configureTaskbarHostCallbacks(host.get(), primary);
         // 完全停止模式下新宿主从创建开始就保持隐藏，避免同步首帧后闪现。
-        host->setRenderMode(static_cast<RenderMode>(renderMode_));
+        host->setRenderMode(effectiveRenderModeForHost(host.get()));
         host->setAppBarEdge(settings_.appBarEdge_);
         return host;
     };
@@ -441,7 +527,8 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
         syncHost(host);
         if (settings_.hasUserFont_)
             host->setFont(settings_.fontFamily_, settings_.fontSize_, settings_.fontStyle_);
-        host->applyAppearance(appearanceForHost(host->isVerticalTaskbar()));
+        host->applyAppearance(
+            appearanceForHost(host->isVerticalTaskbar(), effectiveRenderModeForHost(host)));
 
         host->setPositionMode(settings_.taskbarPosition_);
         host->setAppVolume(appVolumeState_);
@@ -597,7 +684,8 @@ void App::onTaskbarPlacementStatus(TaskbarPlacementStatus status) {
             if (!taskbarSpectrumRestoring_) {
                 if (taskbarSpectrumSuppressedForNoSpace_) {
                     if (display_rules::spectrumRequested(
-                            settings_, static_cast<RenderMode>(renderMode_), taskbarVertical_))
+                            settings_, effectiveRenderModeForHost(taskbarHost.get()),
+                            taskbarVertical_))
                         tryRestoreSpectrumAfterNoSpace();
                     else
                         // 频谱因用户设置、竖向任务栏或性能模式关闭时，

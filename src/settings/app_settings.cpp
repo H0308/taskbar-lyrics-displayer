@@ -208,6 +208,26 @@ const char* themeModeConfigName(fluent::ThemeMode mode) {
         return "system";
     }
 }
+
+RenderMode fullscreenRenderModeFromConfig(const std::string& value) {
+    if (value == "low")
+        return RenderMode::Low;
+    if (value == "minimal")
+        return RenderMode::Minimal;
+    return RenderMode::Stopped;
+}
+
+const char* fullscreenRenderModeConfigName(RenderMode mode) {
+    switch (mode) {
+    case RenderMode::Low:
+        return "low";
+    case RenderMode::Minimal:
+        return "minimal";
+    case RenderMode::Stopped:
+    default:
+        return "stopped";
+    }
+}
 } // namespace
 
 void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
@@ -221,6 +241,13 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
         logDirectory_ = configuredLogDirectory;
     logRetentionDays_ = std::clamp(j.value("logRetentionDays", 30), 0, 3650);
     frameRate_ = std::clamp(j.value("frameRate", 1), 0, 2);
+    fullscreenRenderModeEnabled_ = j.value("fullscreenRenderModeEnabled", false);
+    fullscreenRenderMode_ =
+        fullscreenRenderModeFromConfig(j.value("fullscreenRenderMode", std::string("stopped")));
+    fullscreenRenderModeMonitorId_ =
+        wideOf(j.value("fullscreenRenderModeMonitor", std::string("all")));
+    if (fullscreenRenderModeMonitorId_.empty())
+        fullscreenRenderModeMonitorId_ = L"all";
     hasUserFont_ = j.value("hasUserFont", false);
     std::wstring fam = wideOf(j.value("fontFamily", std::string()));
     if (!fam.empty())
@@ -536,6 +563,11 @@ nlohmann::json AppSettings::toJson() const {
     j.erase("immersiveMaskCustomColor");
     j.erase("immersiveMaskColor");
     j["taskbarContextMenu"] = taskbarContextMenuEnabled_;
+    j["fullscreenRenderModeEnabled"] = fullscreenRenderModeEnabled_;
+    j["fullscreenRenderMode"] = fullscreenRenderModeConfigName(fullscreenRenderMode_);
+    j["fullscreenRenderModeMonitor"] = utf8Of(
+        fullscreenRenderModeMonitorId_.empty() ? std::wstring(L"all")
+                                               : fullscreenRenderModeMonitorId_);
     // 性能模式不写入配置，重启后由 loadSettings() 恢复正常模式。
     j["hoverPlaybackControls"] = hoverPlaybackControls_;
     j["hoverControlStyle"] = hoverControlStyle_ == HoverControlStyle::Popup ? 1 : 0;

@@ -85,12 +85,14 @@ constexpr UINT_PTR kTimerIdleQuote = 5;
 constexpr UINT_PTR kTimerTaskbarAutoRestore = 7;
 constexpr UINT_PTR kTimerBackgroundSettingsSave = 8;
 constexpr UINT_PTR kTimerTaskbarDisplayRebuildRetry = 9;
+constexpr UINT_PTR kTimerFullscreenCheck = 10;
 constexpr UINT kTaskbarAutoRestoreMs = 1000;
 constexpr UINT kTaskbarDisplayRebuildRetryMs = 500;
 constexpr int kTaskbarDisplayRebuildMaxRetries = 6;
 constexpr UINT kSongToastCoverWaitMs = 350;
 constexpr UINT kBackgroundSettingsSaveDebounceMs = 300;
 constexpr UINT kIdleQuoteCheckMs = 60 * 1000;
+constexpr UINT kFullscreenCheckMs = 500;
 constexpr UINT kTrayMsg = WM_APP + 200;
 constexpr UINT kTrayIconId = 1;
 constexpr UINT kCmdToggleTaskbar = 101;
@@ -258,6 +260,8 @@ private:
     // 渲染模式：0 正常；1 低渲染（~30fps，降低 GPU/CPU 占用）；2 完全停止；
     // 3 极简（不降低歌词刷新率，只关闭附加视觉与弹窗）
     int renderMode_ = 0;
+    int userRenderMode_ = 0;
+    bool fullscreenRenderModeActive_ = false;
     bool taskbarVertical_ = false; // 当前任务栏是否为左右侧的竖向布局
     bool taskbarCompact_ = false;
     bool mediaSessionAlive_ = false; // 用于同步依赖播放会话的设置可用态
@@ -307,6 +311,14 @@ private:
     void selectTaskbarMonitor(const std::wstring& deviceName);
 
     void showTaskbarMonitorMenu();
+
+    bool fullscreenTargetAllMonitors() const;
+
+    std::wstring fullscreenRenderModeMonitorLabel() const;
+
+    void selectFullscreenRenderModeMonitor(const std::wstring& deviceName);
+
+    void showFullscreenRenderModeMonitorMenu();
 
     void updateRuntimeLogState(const SmtcSnapshot& snap);
 
@@ -404,6 +416,7 @@ private:
     // 各设置字段保存用户的常规配置；极简模式只在推送到宿主时临时覆盖有效值，
     // 退出后重新推送原配置，避免用户切换性能模式时丢失显示偏好。竖向任务栏则
     // 额外关闭不适合窄栏的有效显示，但歌词相关配置仍保留，切回横向即可继续使用。
+    TaskbarAppearance appearanceForHost(bool vertical, RenderMode mode) const;
     TaskbarAppearance appearanceForHost(bool vertical) const;
     void publishTaskbarAppearance();
     void applyEffectiveTaskbarSettings();
@@ -415,6 +428,22 @@ private:
     void tryRestoreSpectrumAfterNoSpace();
 
     void syncTaskbarOrientation();
+
+    RenderMode effectiveRenderModeForHost(const TaskbarHost* host) const;
+
+    int desiredRenderMode() const;
+
+    bool applyEffectiveRenderMode(int mode);
+
+    void syncHostRenderModes();
+
+    void updateFullscreenCheckTimer();
+
+    void syncFullscreenRenderMode(bool forceSync = false);
+
+    void applyFullscreenRenderModeEnabled(bool on);
+
+    void applyFullscreenRenderMode(int index);
 
     void applyRenderMode(int mode);
 
@@ -444,7 +473,7 @@ private:
 
     // 前台窗口覆盖整块显示器（无边框全屏和独占全屏都命中）时视为全屏应用；
     // 桌面、任务栏等外壳窗口不算。
-    bool foregroundFullscreen();
+    bool foregroundFullscreen(std::wstring* monitorDeviceName = nullptr);
 
     void cancelSongToastCoverWait();
 

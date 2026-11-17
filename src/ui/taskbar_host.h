@@ -78,6 +78,7 @@ public:
     bool isTaskbar() const override;
     bool isVerticalTaskbar() const;
     bool isCompactTaskbar() const;
+    std::wstring monitorDeviceName() const;
     int currentLine() const override;
     std::wstring statusText() const override;
 

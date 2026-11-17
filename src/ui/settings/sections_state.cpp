@@ -430,6 +430,16 @@ void SettingsSections::syncThemeFontRows(const SettingsState& s) {
         row->enabled = s.renderMode != static_cast<int>(RenderMode::Low) &&
                        s.renderMode != static_cast<int>(RenderMode::Stopped);
     }
+    if (auto* row = findRow(kIdFullscreenRenderModeEnabled))
+        row->checked = s.fullscreenRenderModeEnabled;
+    if (auto* row = findRow(kIdFullscreenRenderModeMonitor)) {
+        row->controlText = s.fullscreenRenderModeMonitorLabel;
+        row->enabled = s.fullscreenRenderModeEnabled;
+    }
+    if (auto* row = findRow(kIdFullscreenRenderMode)) {
+        row->selected = std::clamp(s.fullscreenRenderMode, 0, 2);
+        row->enabled = s.fullscreenRenderModeEnabled;
+    }
     if (auto* row = findRow(kIdPickFont)) {
         row->valueText = s.fontDesc;
         row->hint = kFontSettingNotice;

@@ -934,6 +934,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return false;
 
         targetMonitor_ = display->monitor;
+        if (targetMonitorDeviceName_.empty())
+            targetMonitorDeviceName_ = display->deviceName;
         taskbar_ = display->taskbarWindow;
         placementProbe_.setTaskbar(taskbar_); // 同步给探测工作线程
         if (!taskbar_ && !isAppBarView())
@@ -7492,6 +7494,12 @@ bool TaskbarHost::isVerticalTaskbar() const {
 bool TaskbarHost::isCompactTaskbar() const {
     return thread_->invoke([=, this]() mutable {
         return impl_ && impl_->compactTaskbarHeight_ > 0.0f;
+    });
+}
+
+std::wstring TaskbarHost::monitorDeviceName() const {
+    return thread_->invoke([=, this]() mutable {
+        return impl_ ? impl_->targetMonitorDeviceName_ : std::wstring{};
     });
 }
 

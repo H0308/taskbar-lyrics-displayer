@@ -161,6 +161,9 @@ TEST_CASE("app_settings.json_roundtrip_and_legacy_migrations") {
         lyricEffectBit(LyricEffect::FollowLight) | lyricEffectBit(LyricEffect::WordWave);
     original.idleCustomWelcome_ = L"欢迎回来";
     original.logRetentionDays_ = 14;
+    original.fullscreenRenderModeEnabled_ = true;
+    original.fullscreenRenderMode_ = RenderMode::Low;
+    original.fullscreenRenderModeMonitorId_ = L"\\\\.\\DISPLAY2";
 
     const nlohmann::json dumped = original.toJson();
     AppSettings loaded;
@@ -183,6 +186,9 @@ TEST_CASE("app_settings.json_roundtrip_and_legacy_migrations") {
     EXPECT_EQ(loaded.lyricEffects_, original.lyricEffects_);
     EXPECT_EQ(loaded.idleCustomWelcome_, std::wstring(L"欢迎回来"));
     EXPECT_EQ(loaded.logRetentionDays_, 14);
+    EXPECT_TRUE(loaded.fullscreenRenderModeEnabled_);
+    EXPECT_EQ(loaded.fullscreenRenderMode_, RenderMode::Low);
+    EXPECT_EQ(loaded.fullscreenRenderModeMonitorId_, std::wstring(L"\\\\.\\DISPLAY2"));
 
     // 验证旧版字段迁移、越界钳制与欢迎语规则
     nlohmann::json legacy = {
@@ -209,6 +215,9 @@ TEST_CASE("app_settings.json_roundtrip_and_legacy_migrations") {
     EXPECT_EQ(migrated.idleApps_.size(), 2u);
     EXPECT_EQ(migrated.idleApps_[0].path, std::wstring(L"C:\\app1.exe"));
     EXPECT_EQ(migrated.idleApps_[1].customName, std::wstring(L"App2"));
+    EXPECT_FALSE(migrated.fullscreenRenderModeEnabled_);
+    EXPECT_EQ(migrated.fullscreenRenderMode_, RenderMode::Stopped);
+    EXPECT_EQ(migrated.fullscreenRenderModeMonitorId_, std::wstring(L"all"));
 }
 
 TEST_CASE("settings_store.atomic_save_and_error_statuses") {
