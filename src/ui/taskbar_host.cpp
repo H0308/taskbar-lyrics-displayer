@@ -2496,7 +2496,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const DisplayScene previousScene = scene_;
         const bool sceneChanged = frame.scene != scene_;
         const auto* incomingSource = player_source::find(frame.media.sourceAppUserModelId);
+        const bool inlineControlsShown =
+            mouseOver_ && controlsOnHover_ && hoverControlStyle_ == HoverControlStyle::Inline &&
+            !isExpandedView();
         const bool loadedLyricsFromPrelude = !trackChanged && lyricsChanged && lines.empty() &&
+            !inlineControlsShown &&
             incomingSource && player_source::showsTrackInfoBeforeLyrics(incomingSource->player) &&
             isTaskbarMediaScene(scene_) && frame.scene == DisplayScene::Lyrics &&
             frame.currentLine >= 0 && frame.media.playing && frame.animateTransition &&
@@ -3017,7 +3021,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                                       hoverControlStyle_ == HoverControlStyle::Inline &&
                                       !idleScene && !isExpandedView() &&
                                       !(transition_.kind() == LyricTransitionKind::Scene &&
-                                        isLyricTransitionActive());
+                                        isLyricTransitionActive() &&
+                                        isTaskbarSceneTransition(sceneTransition_.outgoingScene(),
+                                                                 scene_));
             if (!idleScene && albumCoverVisible_)
                 playback[0] = D2D1::RectF(0.0f, 0.0f, infoStartX(), h);
             if (!idleScene && songInfoVisible_)
@@ -6235,7 +6241,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         bool showControls =
             mouseOver_ && controlsOnHover_ && hoverControlStyle_ == HoverControlStyle::Inline &&
             !idleScene && !isExpandedView() &&
-            !(transition_.kind() == LyricTransitionKind::Scene && isLyricTransitionActive());
+            !(transition_.kind() == LyricTransitionKind::Scene && isLyricTransitionActive() &&
+              isTaskbarSceneTransition(sceneTransition_.outgoingScene(), scene_));
         const bool backgroundSpectrum = !idleScene && spectrumVisible_ && backgroundWaveEnabled();
         // 独立频谱占用歌词区右端；背景波浪不改变窗口宽度和歌词布局。
         bool showSpectrum = !idleScene && spectrumVisible_ && !showControls &&
