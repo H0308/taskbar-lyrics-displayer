@@ -171,10 +171,9 @@ MediaPageLayout mediaPageLayout(float w, float origin) {
                     w * 0.5f + 18.0f, origin + kPopupHeightDip - 8.0f),
         D2D1::RectF(w * 0.5f + 44.0f, origin + kPopupHeightDip - 44.0f,
                     w * 0.5f + 80.0f, origin + kPopupHeightDip - 8.0f),
-        // 3 播放模式（下一首右侧）：之前和槽位 2 用了同一个矩形，
-        // 两个图标叠在一起，卡片上看起来就是"糊成一团"。
-        D2D1::RectF(w * 0.5f + 100.0f, origin + kPopupHeightDip - 44.0f,
-                    w * 0.5f + 136.0f, origin + kPopupHeightDip - 8.0f)};
+        // 3 播放模式（下一首右侧）：与前三个按钮保持相同的 62 DIP 中心间距
+        D2D1::RectF(w * 0.5f + 106.0f, origin + kPopupHeightDip - 44.0f,
+                    w * 0.5f + 142.0f, origin + kPopupHeightDip - 8.0f)};
     result.source = D2D1::RectF(kMediaSourceTextLeftDip, kMediaSourceRowTopDip,
                                 kMediaSourceTextRightDip, kMediaSourceRowBottomDip);
     result.sourceHit = D2D1::RectF(8.0f, origin + 8.0f, 220.0f, origin + 40.0f);

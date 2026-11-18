@@ -4015,23 +4015,29 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return true;
         }
         // 五个控件：上一首/播放/下一首/播放模式/音量。
-        constexpr float kIdealPitch = 2.4f;
+        constexpr float kIdealPitch = 2.8f;
+        constexpr float kRepeatExtraGap = 0.3f;
+        constexpr float kVolumeExtraGap = 0.4f;
         constexpr float kInlineControlMargin = 6.0f;
-        // 组宽 = 3*间距 + 2r = (3*2.4 + 2) * r = 9.2r
-        constexpr float kInlineGroupUnit = 3.0f * kIdealPitch + 2.0f;
+        // 组宽 = (4*kIdealPitch + kRepeatExtraGap + kVolumeExtraGap + 2) * r = 13.9r
+        constexpr float kInlineGroupUnit =
+            4.0f * kIdealPitch + kRepeatExtraGap + kVolumeExtraGap + 2.0f;
         const float fitR = (controlsW - kInlineControlMargin * 2.0f) / kInlineGroupUnit;
         r = std::max(5.0f, std::min(r, fitR));
-        const float maxSpacing = (controlsW - kInlineControlMargin * 2.0f - 2.0f * r) / 3.0f;
+        const float maxSpacing =
+            (controlsW - kInlineControlMargin * 2.0f -
+             (2.0f + kRepeatExtraGap + kVolumeExtraGap) * r) /
+            4.0f;
         const float spacing = std::max(r * 1.3f, std::min(r * kIdealPitch, maxSpacing));
-        // 五个控件等间距：循环按钮正好落在"下一首"和"音量"中间，不会再显得偏左。
-        const float volumeGap = spacing;
-        // 组跨度 [-spacing, 2*spacing+volumeGap]
-        const float groupShift = (spacing + volumeGap) * 0.5f;
-        const float cx = layout.leftW + controlsW * 0.5f - groupShift;
+        // 播放模式与音量字形比播放三角形更宽，按各自半宽补偿中心距，保证视觉净空隙一致。
+        const float repeatGap = spacing + r * kRepeatExtraGap;
+        const float volumeGap = spacing + r * kVolumeExtraGap;
+        const float totalSpan = 2.0f * spacing + repeatGap + volumeGap;
+        const float startX = layout.leftW + controlsW * 0.5f - totalSpan * 0.5f;
         for (int i = 0; i < 3; ++i)
-            centers[i] = cx + (i - 1) * spacing;
-        centers[3] = cx + spacing * 2.0f;
-        centers[4] = cx + spacing * 2.0f + volumeGap;
+            centers[i] = startX + i * spacing;
+        centers[3] = centers[2] + repeatGap;
+        centers[4] = centers[3] + volumeGap;
         return true;
     }
 
@@ -4228,7 +4234,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (!rt)
             return;
         drawInlineControlBackground(3, c, r, true);
-        media_control::drawRepeat(rt, c, r * 0.86f, brushBtn_.Get(), media.repeatMode);
+        media_control::drawRepeat(rt, c, r * 0.80f, brushBtn_.Get(), media.repeatMode);
     }
 
     // ---------- 点击循环后的模式提示 ----------

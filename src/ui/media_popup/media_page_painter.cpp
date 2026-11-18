@@ -215,7 +215,7 @@ void drawButton(const PagePaintContext& context, ID2D1DeviceContext* rt, int ind
     if (index == 3) {
         // 播放模式：顺序用文字色，其余（列表/单曲/随机）用强调色点亮。
         const bool on = content.repeatMode != 0;
-        media_control::drawRepeat(rt, D2D1::Point2F(cx, cy), 8.5f,
+        media_control::drawRepeat(rt, D2D1::Point2F(cx, cy), 8.0f,
                                   on ? brushAccent : iconBrush, content.repeatMode);
         return;
     }
