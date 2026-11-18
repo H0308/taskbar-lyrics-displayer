@@ -213,10 +213,8 @@ void drawButton(const PagePaintContext& context, ID2D1DeviceContext* rt, int ind
     if (index == 1 && enabled)
         iconBrush = brushTextOnAccent;
     if (index == 3) {
-        // 播放模式：顺序用文字色，其余（列表/单曲/随机）用强调色点亮。
-        const bool on = content.repeatMode != 0;
-        media_control::drawRepeat(rt, controlGeometry, D2D1::Point2F(cx, cy), 8.0f,
-                                  on ? brushAccent : iconBrush, content.repeatMode);
+        media_control::drawRepeat(rt, controlGeometry, D2D1::Point2F(cx, cy), 8.0f, iconBrush,
+                                  content.repeatMode);
         return;
     }
     const float radius = index == 1 ? 9.5f : 8.5f;

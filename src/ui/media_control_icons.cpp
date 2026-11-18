@@ -424,9 +424,10 @@ void drawRepeat(ID2D1RenderTarget* target, const Geometry& geometry,
     if (glyphWidth <= 0.0f || glyphHeight <= 0.0f)
         return;
 
-    // 视觉尺寸对齐播放三角形（约 1.16 倍半径高）。图标字体字形自带上下留白，
-    // 直接撑满 2*radius 会比相邻按钮明显大一圈，看起来像"挤在一起"。
-    const float scale = (radius * 1.35f) / glyphHeight;
+    // 三个图标在字体中原本按相同的 1em 宽度做光学平衡（Repeat 因上下箭头尖使
+    // glyphHeight=1.0，而 Shuffle 的 glyphHeight=0.75）。按 glyphWidth 统一归一化，
+    // 保证列表循环、单曲循环与随机播放在所有模式下视觉大小一致。
+    const float scale = (radius * 1.75f) / glyphWidth;
     const float glyphCenterX = (bounds.left + bounds.right) * 0.5f;
     const float glyphCenterY = (bounds.top + bounds.bottom) * 0.5f;
 
