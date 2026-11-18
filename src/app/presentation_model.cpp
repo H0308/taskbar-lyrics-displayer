@@ -54,6 +54,7 @@ OverlayMediaInfo makeMediaInfo(const SmtcSnapshot& snap, const PlaybackState& pl
     mi.canPrev = snap.canPrev;
     mi.canPlayPause = snap.canPlayPause;
     mi.canNext = snap.canNext;
+    mi.canRepeat = snap.canRepeat;
     mi.repeatMode = snap.playMode();
     mi.playing = snap.status == PlaybackStatus::Playing;
     return mi;

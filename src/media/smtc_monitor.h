@@ -33,6 +33,7 @@ struct SmtcSnapshot {
     bool canPrev = false;
     bool canPlayPause = false;
     bool canNext = false;
+    bool canRepeat = false;
     // 原始 SMTC 循环维度：0 关闭、1 单曲循环、2 列表循环（AutoRepeatMode）。
     int repeatMode = 0;
     bool shuffle = false; // 随机播放是独立开关（IsShuffleActive），不在 AutoRepeatMode 里

@@ -901,7 +901,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         bool textChanged = info.title != media.title || info.artist != media.artist;
         bool controlsChanged = info.canPrev != media.canPrev ||
                                info.canPlayPause != media.canPlayPause ||
-                               info.canNext != media.canNext;
+                               info.canNext != media.canNext ||
+                               info.canRepeat != media.canRepeat ||
+                               info.repeatMode != media.repeatMode;
         bool playingChanged = info.playing != media.playing;
         bool platformChanged = info.sourceAppUserModelId != media.sourceAppUserModelId;
         bool dominantColorChanged =
@@ -909,6 +911,14 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             (info.hasDominantColor && info.dominantColor != media.dominantColor);
         bool durationChanged = info.durationMs != media.durationMs;
         media = info;
+        if (!media.canRepeat) {
+            if (hwnd && (repeatHintTarget_ >= 0 || repeatHintUntil_ != 0))
+                KillTimer(hwnd, kRepeatHintTimerId);
+            repeatHintTarget_ = -1;
+            repeatHintUntil_ = 0;
+            if (inlineControlHover_ == 3)
+                inlineControlHover_ = -1;
+        }
         if (thumbChanged)
             requestInvalidation(RenderInvalidation::Cover);
         if (platformChanged)
@@ -3993,6 +4003,17 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         cy = layout.h * 0.5f;
         r = layout.h * 0.26f;
         const float controlsW = std::max(1.0f, layout.rightW - embeddedResourceExtra());
+        if (!media.canRepeat) {
+            const float spacing = r * 2.8f;
+            // 音量按钮与下一首之间多留 0.9r：音量字形比三角形宽，等间距会显得挤
+            const float volumeGap = spacing + r * 0.9f;
+            const float cx = layout.leftW + controlsW * 0.5f - volumeGap * 0.5f;
+            for (int i = 0; i < 3; ++i)
+                centers[i] = cx + (i - 1) * spacing;
+            centers[3] = 0.0f;
+            centers[4] = cx + spacing + volumeGap;
+            return true;
+        }
         // 五个控件：上一首/播放/下一首/播放模式/音量。
         constexpr float kIdealPitch = 2.4f;
         constexpr float kInlineControlMargin = 6.0f;
@@ -4684,7 +4705,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 return i;
         }
         // 索引与 MediaControl 枚举同值（3=播放模式）。
-        if (std::hypot(x - centers[3], y - cy) <= r + 4.0f)
+        if (media.canRepeat && std::hypot(x - centers[3], y - cy) <= r + 4.0f)
             return 3;
         return -1;
     }
@@ -5681,7 +5702,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             if (inlineControlsLayout(centers, cy, r)) {
                 for (int i = 0; i < 3; ++i)
                     drawButton(i, D2D1::Point2F(centers[i], cy), r);
-                drawRepeatButton(D2D1::Point2F(centers[3], cy), r);
+                if (media.canRepeat)
+                    drawRepeatButton(D2D1::Point2F(centers[3], cy), r);
                 drawVolumeButton(D2D1::Point2F(centers[4], cy), r);
             }
         } else {
@@ -6332,7 +6354,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 if (inlineControlsLayout(centers, cy, r)) {
                     for (int i = 0; i < 3; ++i)
                         drawButton(i, D2D1::Point2F(centers[i], cy), r);
-                    drawRepeatButton(D2D1::Point2F(centers[3], cy), r);
+                    if (media.canRepeat)
+                        drawRepeatButton(D2D1::Point2F(centers[3], cy), r);
                     drawVolumeButton(D2D1::Point2F(centers[4], cy), r);
                 }
             } else {

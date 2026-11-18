@@ -33,6 +33,7 @@ struct PlaybackSample {
     bool canPrev = false;
     bool canPlayPause = false;
     bool canNext = false;
+    bool canRepeat = false;
 };
 
 struct TimelineSample {
@@ -54,6 +55,7 @@ inline PlaybackSample readPlaybackSample(const PlaybackInfo& info) {
         sample.canPrev = controls.IsPreviousEnabled();
         sample.canPlayPause = controls.IsPlayEnabled() || controls.IsPauseEnabled();
         sample.canNext = controls.IsNextEnabled();
+        sample.canRepeat = controls.IsRepeatEnabled() || controls.IsShuffleEnabled();
     }
     return sample;
 }
@@ -76,6 +78,8 @@ inline void applyPlaybackControls(const PlaybackSample& sample, SmtcSnapshot& sn
     snapshot.canPrev = sample.canPrev;
     snapshot.canPlayPause = sample.canPlayPause;
     snapshot.canNext = sample.canNext;
+    snapshot.canRepeat = sample.canRepeat && snapshot.player != SmtcPlayerType::QQMusic &&
+                         snapshot.player != SmtcPlayerType::Soda;
 }
 
 inline void advancePlayingPosition(SmtcSnapshot& snapshot, int64_t nowMs,

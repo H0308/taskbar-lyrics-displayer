@@ -32,6 +32,7 @@ struct OverlayMediaInfo {
     bool canPrev = false;
     bool canPlayPause = false;
     bool canNext = false;
+    bool canRepeat = false;
     int repeatMode = 0;   // 0 关闭、1 单曲循环、2 列表循环（播放器通过 SMTC 上报）
     bool playing = false;
 };

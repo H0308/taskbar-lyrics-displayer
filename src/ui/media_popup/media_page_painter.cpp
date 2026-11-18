@@ -59,7 +59,8 @@ void drawMediaContent(const PagePaintContext& context, ID2D1DeviceContext* rt, f
                     artistLayout, artistWidth, artistHeight, artistScrollOffset);
     drawMediaPet(context, rt, w);
     drawProgress(context, rt, w, media);
-    for (int i = 0; i < 4; ++i)
+    const int buttonCount = media.canRepeat ? 4 : 3;
+    for (int i = 0; i < buttonCount; ++i)
         drawButton(context, rt, i, media);
 }
 
@@ -98,7 +99,8 @@ void drawMediaSnapshot(const PagePaintContext& context, ID2D1DeviceContext* rt, 
                     snapshotArtistHeight, categorySnapshot.artistScrollOffset);
     drawMediaPet(context, rt, w);
     drawProgress(context, rt, w, snapshot);
-    for (int i = 0; i < 4; ++i)
+    const int buttonCount = snapshot.canRepeat ? 4 : 3;
+    for (int i = 0; i < buttonCount; ++i)
         drawButton(context, rt, i, snapshot);
     releaseCom(snapshotTitleLayout);
     releaseCom(snapshotArtistLayout);
