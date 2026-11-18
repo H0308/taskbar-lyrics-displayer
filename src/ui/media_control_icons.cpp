@@ -54,6 +54,106 @@ bool createRoundedTriangle(ID2D1Factory* factory, int direction,
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// 播放模式图标：直接取 Windows 自带图标字体里的真实字形，不再手绘路径。
+//
+// 码位来自微软官方 Segoe MDL2 Assets 图标表（Segoe Fluent Icons 与之兼容）：
+//   RepeatAll  U+E8EE  —— 顺序播放 / 列表循环共用这一个字形
+//   RepeatOne  U+E8ED  —— 单曲循环
+//   Shuffle    U+E8B1  —— 随机播放
+// ---------------------------------------------------------------------------
+constexpr UINT32 kRepeatCodepoints[3] = {0xE8EE, 0xE8ED, 0xE8B1}; // All / One / Shuffle
+
+// 按优先级在系统字体里找图标字体（Win11 是 Segoe Fluent Icons，Win10 是 MDL2 Assets）。
+IDWriteFontFace* findIconFontFace(IDWriteFactory* dwrite) {
+    static const wchar_t* kFamilies[] = {L"Segoe Fluent Icons", L"Segoe MDL2 Assets"};
+    IDWriteFontCollection* collection = nullptr;
+    if (FAILED(dwrite->GetSystemFontCollection(&collection, FALSE)) || !collection)
+        return nullptr;
+
+    IDWriteFontFace* face = nullptr;
+    for (const wchar_t* name : kFamilies) {
+        UINT32 index = 0;
+        BOOL exists = FALSE;
+        if (FAILED(collection->FindFamilyName(name, &index, &exists)) || !exists)
+            continue;
+        IDWriteFontFamily* family = nullptr;
+        if (FAILED(collection->GetFontFamily(index, &family)) || !family)
+            continue;
+        IDWriteFont* font = nullptr;
+        if (SUCCEEDED(family->GetFirstMatchingFont(DWRITE_FONT_WEIGHT_NORMAL,
+                                                   DWRITE_FONT_STRETCH_NORMAL,
+                                                   DWRITE_FONT_STYLE_NORMAL, &font)) &&
+            font) {
+            font->CreateFontFace(&face);
+            font->Release();
+        }
+        family->Release();
+        if (face)
+            break;
+    }
+    collection->Release();
+    return face;
+}
+
+// 把单个字形转成单位 em 坐标下的路径几何（笔形轮廓由 GetGlyphRunOutline 展平）。
+bool buildGlyphGeometry(ID2D1Factory* factory, IDWriteFontFace* face, UINT32 codepoint,
+                        ID2D1PathGeometry** out, D2D1_RECT_F* bounds) {
+    if (!factory || !face || !out || !bounds)
+        return false;
+    UINT16 glyphIndex = 0;
+    if (FAILED(face->GetGlyphIndices(&codepoint, 1, &glyphIndex)) || glyphIndex == 0)
+        return false; // 该字体里没有这个码位
+
+    ID2D1PathGeometry* path = nullptr;
+    if (FAILED(factory->CreatePathGeometry(&path)) || !path)
+        return false;
+    ID2D1GeometrySink* sink = nullptr;
+    if (FAILED(path->Open(&sink)) || !sink) {
+        path->Release();
+        return false;
+    }
+    // 字形轮廓按 nonzero winding 填充，PathGeometry 默认的 alternate 会让
+    // 箭头这类多轮廓字形出现空洞。
+    sink->SetFillMode(D2D1_FILL_MODE_WINDING);
+    const HRESULT outlineHr =
+        face->GetGlyphRunOutline(1.0f, &glyphIndex, nullptr, nullptr, 1, FALSE, FALSE, sink);
+    const HRESULT closeHr = sink->Close();
+    sink->Release();
+    if (FAILED(outlineHr) || FAILED(closeHr)) {
+        path->Release();
+        return false;
+    }
+    D2D1_RECT_F rect{};
+    if (FAILED(path->GetBounds(nullptr, &rect))) {
+        path->Release();
+        return false;
+    }
+    *out = path;
+    *bounds = rect;
+    return true;
+}
+
+void createRepeatGlyphs(ID2D1Factory* factory, Geometry& geometry) {
+    if (!factory)
+        return;
+    IDWriteFactory* dwrite = nullptr;
+    if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+                                   reinterpret_cast<IUnknown**>(&dwrite))) ||
+        !dwrite) {
+        return;
+    }
+    IDWriteFontFace* face = findIconFontFace(dwrite);
+    if (face) {
+        for (int i = 0; i < 3; ++i) {
+            buildGlyphGeometry(factory, face, kRepeatCodepoints[i], &geometry.repeat[i],
+                               &geometry.repeatBounds[i]);
+        }
+        face->Release();
+    }
+    dwrite->Release();
+}
+
 } // namespace
 
 void release(Geometry& geometry) {
@@ -66,6 +166,10 @@ void release(Geometry& geometry) {
     releaseGeometry(geometry.play);
     releaseGeometry(geometry.previous);
     releaseGeometry(geometry.next);
+    for (int i = 0; i < 3; ++i) {
+        releaseGeometry(geometry.repeat[i]);
+        geometry.repeatBounds[i] = {};
+    }
 }
 
 
@@ -77,6 +181,7 @@ bool create(ID2D1Factory* factory, Geometry& geometry) {
         release(geometry);
         return false;
     }
+    createRepeatGlyphs(factory, geometry);
     return true;
 }
 
@@ -235,154 +340,6 @@ void strokeWaveArc(ID2D1RenderTarget* target, const D2D1_POINT_2F& center, float
     geometry->Release();
 }
 
-// ---------------------------------------------------------------------------
-// 播放模式图标：直接取 Windows 自带图标字体里的真实字形，不再手绘路径。
-//
-// 码位来自微软官方 Segoe MDL2 Assets 图标表（Segoe Fluent Icons 与之兼容）：
-//   RepeatAll  U+E8EE  —— 顺序播放 / 列表循环共用这一个字形
-//   RepeatOne  U+E8ED  —— 单曲循环
-//   Shuffle    U+E8B1  —— 随机播放
-// 图标字体里没有"顺序播放"专用字形，顺序播放直接用 RepeatAll 字形（不再做灰暗处理）。
-// 列表循环已从轮换档位里去掉；播放器自己上报列表循环时，界面与顺序播放共用同一字形。
-// ---------------------------------------------------------------------------
-
-constexpr UINT32 kRepeatCodepoints[3] = {0xE8EE, 0xE8ED, 0xE8B1}; // All / One / Shuffle
-
-struct RepeatGlyphCache {
-    ID2D1Factory* factory = nullptr;
-    ID2D1PathGeometry* glyph[3] = {nullptr, nullptr, nullptr};
-    D2D1_RECT_F bounds[3] = {};
-    bool attempted = false; // 试过初始化（字体缺失时不再每帧重试）
-    bool ready = false;
-};
-
-RepeatGlyphCache& repeatGlyphCache() {
-    static RepeatGlyphCache cache;
-    return cache;
-}
-
-IDWriteFactory* sharedDwriteFactory() {
-    static IDWriteFactory* factory = [] {
-        IDWriteFactory* value = nullptr;
-        if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
-                                       reinterpret_cast<IUnknown**>(&value))))
-            return static_cast<IDWriteFactory*>(nullptr);
-        return value;
-    }();
-    return factory;
-}
-
-// 按优先级在系统字体里找图标字体（Win11 是 Segoe Fluent Icons，Win10 是 MDL2 Assets）。
-IDWriteFontFace* findIconFontFace(IDWriteFactory* dwrite) {
-    static const wchar_t* kFamilies[] = {L"Segoe Fluent Icons", L"Segoe MDL2 Assets"};
-    IDWriteFontCollection* collection = nullptr;
-    if (FAILED(dwrite->GetSystemFontCollection(&collection, FALSE)) || !collection)
-        return nullptr;
-
-    IDWriteFontFace* face = nullptr;
-    for (const wchar_t* name : kFamilies) {
-        UINT32 index = 0;
-        BOOL exists = FALSE;
-        if (FAILED(collection->FindFamilyName(name, &index, &exists)) || !exists)
-            continue;
-        IDWriteFontFamily* family = nullptr;
-        if (FAILED(collection->GetFontFamily(index, &family)) || !family)
-            continue;
-        IDWriteFont* font = nullptr;
-        if (SUCCEEDED(family->GetFirstMatchingFont(DWRITE_FONT_WEIGHT_NORMAL,
-                                                   DWRITE_FONT_STRETCH_NORMAL,
-                                                   DWRITE_FONT_STYLE_NORMAL, &font)) &&
-            font) {
-            font->CreateFontFace(&face);
-            font->Release();
-        }
-        family->Release();
-        if (face)
-            break;
-    }
-    collection->Release();
-    return face;
-}
-
-// 把单个字形转成单位 em 坐标下的路径几何（笔形轮廓由 GetGlyphRunOutline 展平）。
-bool buildGlyphGeometry(ID2D1Factory* factory, IDWriteFontFace* face, UINT32 codepoint,
-                        ID2D1PathGeometry** out, D2D1_RECT_F* bounds) {
-    if (!factory || !face || !out || !bounds)
-        return false;
-    UINT16 glyphIndex = 0;
-    if (FAILED(face->GetGlyphIndices(&codepoint, 1, &glyphIndex)) || glyphIndex == 0)
-        return false; // 该字体里没有这个码位
-
-    ID2D1PathGeometry* path = nullptr;
-    if (FAILED(factory->CreatePathGeometry(&path)) || !path)
-        return false;
-    ID2D1GeometrySink* sink = nullptr;
-    if (FAILED(path->Open(&sink)) || !sink) {
-        path->Release();
-        return false;
-    }
-    // 字形轮廓按 nonzero winding 填充，PathGeometry 默认的 alternate 会让
-    // 箭头这类多轮廓字形出现空洞。
-    sink->SetFillMode(D2D1_FILL_MODE_WINDING);
-    const HRESULT outlineHr =
-        face->GetGlyphRunOutline(1.0f, &glyphIndex, nullptr, nullptr, 1, FALSE, FALSE, sink);
-    const HRESULT closeHr = sink->Close();
-    sink->Release();
-    if (FAILED(outlineHr) || FAILED(closeHr)) {
-        path->Release();
-        return false;
-    }
-    D2D1_RECT_F rect{};
-    if (FAILED(path->GetBounds(nullptr, &rect))) {
-        path->Release();
-        return false;
-    }
-    *out = path;
-    *bounds = rect;
-    return true;
-}
-
-bool ensureRepeatGlyphs(ID2D1Factory* factory) {
-    if (!factory)
-        return false;
-    RepeatGlyphCache& cache = repeatGlyphCache();
-    if (cache.attempted && cache.factory == factory)
-        return cache.ready;
-
-    for (ID2D1PathGeometry*& glyph : cache.glyph) {
-        if (glyph) {
-            glyph->Release();
-            glyph = nullptr;
-        }
-    }
-    if (cache.factory) {
-        cache.factory->Release();
-        cache.factory = nullptr;
-    }
-    cache.ready = false;
-    cache.attempted = true;
-    cache.factory = factory;
-    cache.factory->AddRef(); // 缓存期持有，避免工厂先于几何被销毁
-
-    IDWriteFactory* dwrite = sharedDwriteFactory();
-    if (!dwrite)
-        return false;
-    IDWriteFontFace* face = findIconFontFace(dwrite);
-    if (!face)
-        return false;
-
-    bool anyBuilt = false;
-    for (int i = 0; i < 3; ++i) {
-        if (buildGlyphGeometry(factory, face, kRepeatCodepoints[i], &cache.glyph[i],
-                               &cache.bounds[i]))
-            anyBuilt = true;
-    }
-    face->Release();
-    // 只要字体存在就算初始化成功：个别码位缺失时由调用方按模式退回旧画法。
-    cache.ready = anyBuilt;
-    return anyBuilt;
-}
-
 // 图标字体不可用时的兜底画法，保证按钮不会变成一格空白。
 void drawRepeatLegacy(ID2D1RenderTarget* target, const D2D1_POINT_2F& center, float radius,
                       ID2D1Brush* brush, int mode) {
@@ -449,25 +406,14 @@ void drawVolume(ID2D1RenderTarget* target, const D2D1_POINT_2F& center, float ra
         strokeWaveArc(target, c, scale, 0.88f, radius * 0.17f, brush);
 }
 
-void drawRepeat(ID2D1RenderTarget* target, const D2D1_POINT_2F& center, float radius,
-                ID2D1Brush* brush, int mode) {
+void drawRepeat(ID2D1RenderTarget* target, const Geometry& geometry,
+                const D2D1_POINT_2F& center, float radius, ID2D1Brush* brush, int mode) {
     if (!target || !brush || radius <= 0.0f)
         return;
 
-    // 字形取自系统图标字体；取不到就退回旧的画法，避免按钮留空。
-    ID2D1Factory* factory = nullptr;
-    target->GetFactory(&factory);
-    const bool glyphsReady = ensureRepeatGlyphs(factory);
-    if (factory)
-        factory->Release(); // 缓存里已另持一份引用
-    if (!glyphsReady) {
-        drawRepeatLegacy(target, center, radius, brush, mode);
-        return;
-    }
-
     const int slot = (mode == 3) ? 2 : (mode == 2 ? 1 : 0); // All / One / Shuffle
-    ID2D1PathGeometry* glyph = repeatGlyphCache().glyph[slot];
-    const D2D1_RECT_F bounds = repeatGlyphCache().bounds[slot];
+    ID2D1PathGeometry* glyph = geometry.repeat[slot];
+    const D2D1_RECT_F bounds = geometry.repeatBounds[slot];
     if (!glyph) {
         drawRepeatLegacy(target, center, radius, brush, mode);
         return;

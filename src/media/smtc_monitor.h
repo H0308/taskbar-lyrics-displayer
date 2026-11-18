@@ -47,6 +47,9 @@ struct SmtcSnapshot {
             return 2;
         return 0;
     }
+    static constexpr int nextPlayMode(int mode) noexcept {
+        return mode == 2 ? 3 : (mode == 3 ? 0 : 2);
+    }
 };
 
 // 监听 QQ、汽水和 Spotify 的系统媒体会话及 Genres 中带 NCM-{ID} 的网易云增强会话。
@@ -67,7 +70,7 @@ public:
     void playPause();
     void skipNext();
     void skipPrevious();
-    // 切换循环模式：关闭 → 列表 → 单曲 → 关闭（由播放器通过 SMTC 执行）。
+    // 切换播放模式：顺序播放 → 单曲循环 → 随机播放 → 顺序播放（由播放器通过 SMTC 执行）。
     void cycleRepeatMode();
 
 private:

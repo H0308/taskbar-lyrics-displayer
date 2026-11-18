@@ -123,12 +123,6 @@ std::wstring sessionSourceAppUserModelId(const Session& session) {
 }
 
 // ---- 播放模式（顺序/列表/单曲/随机）----
-// 播放器上报的 AutoRepeatMode / IsShuffleActive 会滞后一两拍（实测设置后 30ms
-// 内还能读到旧值）。如果每次点击都拿这份上报值去算"下一档"，就会出现
-// "切到随机之后再也切不回去"的死循环，所以这里维护一份本地权威模式。
-std::atomic<int> g_pendingPlayMode{-1};
-std::atomic<uint64_t> g_pendingPlayModeUntil{0};
-
 int playModeFrom(int repeatMode, bool shuffle) {
     if (shuffle)
         return 3;
@@ -216,6 +210,10 @@ struct SmtcMonitor::Impl {
     int64_t sampledPositionMs = 0;
     int64_t sampledDurationMs = 0;
     int64_t sampledAnchorMs = 0;
+    int pendingPlayMode_ = -1;
+    int64_t pendingPlayModeUntilMs_ = 0;
+    bool repeatInitialLogged_ = false;
+    bool repeatMissingLogged_ = false;
 
     // Windows 在其他 SMTC 应用成为当前会话时，可能从枚举结果中漏掉
     // 已暂停的音乐会话。只要该会话所属的音乐播放器仍在运行，就保留暂停快照；
@@ -687,8 +685,8 @@ struct SmtcMonitor::Impl {
                                          next.player != SmtcPlayerType::QQMusic &&
                                          next.player != SmtcPlayerType::Soda;
             if (!repeatSupported) {
-                g_pendingPlayMode.store(-1);
-                g_pendingPlayModeUntil.store(0);
+                pendingPlayMode_ = -1;
+                pendingPlayModeUntilMs_ = 0;
                 next.repeatMode = 0;
                 next.shuffle = false;
             } else {
@@ -698,9 +696,8 @@ struct SmtcMonitor::Impl {
                     // 循环模式由播放器上报，可能为空（不支持时），保持上一次的值。
                     if (auto mode = info.AutoRepeatMode()) {
                         const int value = static_cast<int>(mode.Value());
-                        static bool loggedInitial = false;
-                        if (!loggedInitial) {
-                            loggedInitial = true;
+                        if (!repeatInitialLogged_) {
+                            repeatInitialLogged_ = true;
                             runtime_log::writef(L"[smtc] repeat initial=%d (0 关/1 单曲/2 列表)",
                                                 value);
                         }
@@ -720,26 +717,25 @@ struct SmtcMonitor::Impl {
                     // 注意：判定必须用 reportedRepeat 这份"播放器原始上报值"，
                     // 不能用 next.repeatMode —— next 是从上一帧继承来的，里面已经含
                     // 本地的覆盖值，用它判断会自己确认自己，第一帧就把预期值清掉。
-                    const int pending = g_pendingPlayMode.load();
+                    const int pending = pendingPlayMode_;
                     const bool pendingValid =
-                        pending >= 0 &&
-                        smtc::nowUtcMs() < static_cast<int64_t>(g_pendingPlayModeUntil.load());
+                        pending >= 0 && smtc::nowUtcMs() < pendingPlayModeUntilMs_;
                     if (pendingValid) {
                         const bool confirmed =
                             reportedRepeat >= 0 &&
                             playModeFrom(reportedRepeat, reportedShuffle) == pending;
                         if (confirmed) {
                             // 播放器真的跟上来了，停止覆盖。
-                            g_pendingPlayMode.store(-1);
-                            g_pendingPlayModeUntil.store(0);
+                            pendingPlayMode_ = -1;
+                            pendingPlayModeUntilMs_ = 0;
                         } else {
                             next.repeatMode = repeatModeFor(pending);
                             next.shuffle = shuffleFor(pending);
                         }
                     } else if (pending >= 0) {
                         // 窗口到期仍未生效：放掉本地值并留痕，界面回到真实状态。
-                        g_pendingPlayMode.store(-1);
-                        g_pendingPlayModeUntil.store(0);
+                        pendingPlayMode_ = -1;
+                        pendingPlayModeUntilMs_ = 0;
                         const int actualMode = playModeFrom(next.repeatMode, next.shuffle);
                         std::wostringstream reject;
                         reject << L"phase=operation-rejected action=play-mode wanted=" << pending
@@ -748,9 +744,8 @@ struct SmtcMonitor::Impl {
                     }
                 }
                 if (info && !info.AutoRepeatMode()) {
-                    static bool loggedMissing = false;
-                    if (!loggedMissing) {
-                        loggedMissing = true;
+                    if (!repeatMissingLogged_) {
+                        repeatMissingLogged_ = true;
                         runtime_log::writef(L"[smtc] repeat unsupported: AutoRepeatMode is null");
                     }
                 }
@@ -882,6 +877,10 @@ struct SmtcMonitor::Impl {
             sampledPositionMs = 0;
             sampledDurationMs = 0;
             sampledAnchorMs = 0;
+            pendingPlayMode_ = -1;
+            pendingPlayModeUntilMs_ = 0;
+            repeatInitialLogged_ = false;
+            repeatMissingLogged_ = false;
             for (auto& adapter : adapters) {
                 if (adapter)
                     adapter->reset();
@@ -1156,11 +1155,10 @@ struct SmtcMonitor::Impl {
             // 列表循环(1) 不再是独立档位；播放器自己上报列表循环时按顺序播放处理。
             // 基准优先取本地权威模式：播放器上报滞后时，仍能保证每次点击前进一档。
             const int curMode = snapshotCopy.playMode();
-            const int pending = g_pendingPlayMode.load();
-            const bool pendingValid =
-                pending >= 0 && smtc::nowUtcMs() < static_cast<int64_t>(g_pendingPlayModeUntil.load());
+            const int pending = pendingPlayMode_;
+            const bool pendingValid = pending >= 0 && smtc::nowUtcMs() < pendingPlayModeUntilMs_;
             const int base = pendingValid ? pending : curMode;
-            const int nextMode = (base == 2) ? 3 : (base == 3 ? 0 : 2);
+            const int nextMode = SmtcSnapshot::nextPlayMode(base);
 
             const auto repeatMode =
                 static_cast<winrt::Windows::Media::MediaPlaybackAutoRepeatMode>(
@@ -1174,20 +1172,39 @@ struct SmtcMonitor::Impl {
                 break;
             }
             // 先把本地权威值定下来，后续上报即使滞后也不会影响下一次点击。
-            g_pendingPlayMode.store(nextMode);
+            pendingPlayMode_ = nextMode;
             // 网易云写入后 1~2 秒才回读得到新值，窗口给到 3.5 秒足够覆盖；
             // 一旦回读到目标值会提前撤掉覆盖（见刷新路径）。
-            g_pendingPlayModeUntil.store(static_cast<uint64_t>(smtc::nowUtcMs() + 3500));
+            pendingPlayModeUntilMs_ = smtc::nowUtcMs() + 3500;
             try {
+                // 带超时等待异步调用，避免播放器未响应时阻塞 SMTC 轮询线程。
+                auto waitControl = [](auto&& op) -> bool {
+                    if (!op)
+                        return false;
+                    const auto status = op.wait_for(std::chrono::milliseconds(1500));
+                    if (status != winrt::Windows::Foundation::AsyncStatus::Completed) {
+                        if (status == winrt::Windows::Foundation::AsyncStatus::Started)
+                            op.Cancel();
+                        return false;
+                    }
+                    op.GetResults();
+                    return true;
+                };
                 // 两个维度按顺序落地，避免并发互相覆盖。
                 // 顺序有讲究：开随机时先设循环再开随机；关随机时先关随机再设循环。
                 // 反过来做的话，网易云会把刚设好的循环又按"随机"改回去。
-                if (wantShuffle) {
-                    current.TryChangeAutoRepeatModeAsync(repeatMode).get();
-                    current.TryChangeShuffleActiveAsync(true).get();
-                } else {
-                    current.TryChangeShuffleActiveAsync(false).get();
-                    current.TryChangeAutoRepeatModeAsync(repeatMode).get();
+                const bool completed =
+                    wantShuffle
+                        ? (waitControl(current.TryChangeAutoRepeatModeAsync(repeatMode)) &&
+                           waitControl(current.TryChangeShuffleActiveAsync(true)))
+                        : (waitControl(current.TryChangeShuffleActiveAsync(false)) &&
+                           waitControl(current.TryChangeAutoRepeatModeAsync(repeatMode)));
+                if (!completed) {
+                    pendingPlayMode_ = -1;
+                    pendingPlayModeUntilMs_ = 0;
+                    writeSmtcControlLog(
+                        L"phase=operation-failed action=play-mode reason=timeout-or-canceled");
+                    break;
                 }
                 // 回读校验：确认真的落下去了，失败也留痕，方便排查播放器不支持的情况。
                 int readRepeat = -1;
@@ -1206,8 +1223,8 @@ struct SmtcMonitor::Impl {
                 writeSmtcControlLog(line.str());
                 requestRefresh(refreshSignal);
             } catch (...) {
-                g_pendingPlayMode.store(-1);
-                g_pendingPlayModeUntil.store(0);
+                pendingPlayMode_ = -1;
+                pendingPlayModeUntilMs_ = 0;
                 writeSmtcControlLog(L"phase=operation-failed action=play-mode");
             }
             break;

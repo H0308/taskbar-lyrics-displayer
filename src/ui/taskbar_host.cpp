@@ -599,7 +599,6 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushLyricDim_;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushLyricGlow_;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushLyricOutline_;
-    Microsoft::WRL::ComPtr<IDWriteTextFormat> repeatHintFormat_;
     std::wstring repeatHintText_;     // 提示词文本（等回读结果确定后再填）
     int repeatHintTarget_ = -1;       // 本次点击期望的模式；>=0 表示正在等结果
     ULONGLONG repeatHintUntil_ = 0;   // 提示词消失时刻（0 表示未激活）
@@ -4234,7 +4233,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (!rt)
             return;
         drawInlineControlBackground(3, c, r, true);
-        media_control::drawRepeat(rt, c, r * 0.80f, brushBtn_.Get(), media.repeatMode);
+        media_control::drawRepeat(rt, controlGeometry, c, r * 0.80f, brushBtn_.Get(),
+                                  media.repeatMode);
     }
 
     // ---------- 点击循环后的模式提示 ----------
@@ -4246,11 +4246,6 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         case 1: return L"列表循环";
         default: return L"顺序播放";
         }
-    }
-
-    // 与 smtc_monitor 的轮换规则保持一致：顺序 → 单曲 → 随机 → 顺序。
-    static int nextPlayMode(int mode) {
-        return mode == 2 ? 3 : (mode == 3 ? 0 : 2);
     }
 
     // 点击后先等一小拍再出提示词：此时图标已被本地值切到目标模式，两者一致。
@@ -4281,35 +4276,26 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return repeatHintUntil_ != 0 && GetTickCount64() < repeatHintUntil_;
     }
 
-    bool ensureRepeatHintFormat() {
-        if (repeatHintFormat_)
-            return true;
-        auto* dwrite = renderer.dwrite();
-        if (!dwrite) {
-            renderer.initialize();
-            dwrite = renderer.dwrite();
-        }
-        if (!dwrite)
-            return false;
-        const float size = fitCompactFontSize(fluent::font_sizes::taskbar::resource,
-                                              compactTaskbarHeight_ - 2.0f);
-        if (FAILED(dwrite->CreateTextFormat(fontFamily_.c_str(), nullptr,
-                                            DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                                            dwriteStyleOf(fontStyle_), DWRITE_FONT_STRETCH_NORMAL,
-                                            size, L"zh-cn", &repeatHintFormat_)))
-            return false;
-        fluent::applyUiFontFallback(repeatHintFormat_.Get());
-        repeatHintFormat_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-        repeatHintFormat_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-        return true;
-    }
-
     void drawRepeatHint(ID2D1RenderTarget* rt, const D2D1_RECT_F& area, ID2D1Brush* brush) {
-        if (!rt || !brush || repeatHintText_.empty() || !repeatHintActive() ||
-            !ensureRepeatHintFormat())
+        auto* format = typesetter_.resources().fmtRepeatHint_.Get();
+        if (!rt || !brush || !format || repeatHintText_.empty() || !repeatHintActive())
             return;
         rt->DrawTextW(repeatHintText_.c_str(), static_cast<UINT32>(repeatHintText_.size()),
-                      repeatHintFormat_.Get(), area, brush);
+                      format, area, brush);
+    }
+
+    void drawSongInfoSubtitle(float infoX, float infoW, float subtitleY) {
+        if (repeatHintActive()) {
+            // 副标题行临时改为播放模式提示，省掉额外浮层，也不挤占按钮区。
+            const D2D1_RECT_F hintRect =
+                D2D1::RectF(infoX, subtitleY, infoX + infoW, subtitleY + artistHeight_);
+            drawRepeatHint(drawTarget(), hintRect, brushText_.Get());
+        } else {
+            drawScrollingText(typesetter_.resources().artistLayout_.Get(), artistWidth_,
+                              artistHeight_, infoW, infoX, subtitleY, scroll_.artist(),
+                              brushDim_.Get(), nullptr, nullptr, nullptr, 0.0f, 1.0f,
+                              LyricAlignment::Center, false, kTextPadding, true, kTextPadding);
+        }
     }
 
     void drawVolumeButton(const D2D1_POINT_2F& c, float r) {
@@ -5693,11 +5679,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                               infoW, infoX, infoY, scroll_.title(), brushText_.Get(), nullptr,
                               nullptr, nullptr, 0.0f, 1.0f, LyricAlignment::Center, false,
                               kTextPadding, true, kTextPadding);
-            drawScrollingText(typesetter_.resources().artistLayout_.Get(), artistWidth_,
-                              artistHeight_, infoW, infoX, infoY + titleHeight_ + infoGap,
-                              scroll_.artist(), brushDim_.Get(), nullptr, nullptr, nullptr, 0.0f,
-                              1.0f, LyricAlignment::Center, false, kTextPadding, true,
-                              kTextPadding);
+            drawSongInfoSubtitle(infoX, infoW, infoY + titleHeight_ + infoGap);
             drawSongInfoDivider(leftW, h);
         }
 
@@ -6337,19 +6319,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                                   titleHeight_, infoW, infoX, infoY, scroll_.title(),
                                   brushText_.Get(), nullptr, nullptr, nullptr, 0.0f, 1.0f,
                                   LyricAlignment::Center, false, kTextPadding, true, kTextPadding);
-                if (repeatHintActive()) {
-                    // 副标题行临时改为播放模式提示，省掉额外浮层，也不挤占按钮区。
-                    const D2D1_RECT_F hintRect =
-                        D2D1::RectF(infoX, infoY + titleHeight_ + infoGap, infoX + infoW,
-                                    infoY + titleHeight_ + infoGap + artistHeight_);
-                    drawRepeatHint(drawTarget(), hintRect, brushText_.Get());
-                } else {
-                    drawScrollingText(typesetter_.resources().artistLayout_.Get(), artistWidth_,
-                                      artistHeight_, infoW, infoX, infoY + titleHeight_ + infoGap,
-                                      scroll_.artist(), brushDim_.Get(), nullptr, nullptr, nullptr,
-                                      0.0f, 1.0f, LyricAlignment::Center, false, kTextPadding, true,
-                                      kTextPadding);
-                }
+                drawSongInfoSubtitle(infoX, infoW, infoY + titleHeight_ + infoGap);
                 drawSongInfoDivider(leftW, h);
             }
 
@@ -7238,7 +7208,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             int btn = hitButton(mx, my);
             // 循环按钮点击后先记下期望模式，等回读结果出来再显示提示词。
             if (btn == static_cast<int>(MediaControl::Repeat))
-                armRepeatHint(nextPlayMode(media.repeatMode));
+                armRepeatHint(SmtcSnapshot::nextPlayMode(media.repeatMode));
             if (btn >= 0 && onControl)
                 onControl(static_cast<MediaControl>(btn));
             // 卡片的当前页面自己判断是否为点击展开；这样无播放时的每日一言卡片
