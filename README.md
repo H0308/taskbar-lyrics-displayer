@@ -5,7 +5,6 @@
    <p>把 QQ 音乐、网易云音乐、汽水音乐和 Spotify 的歌词嵌入 Windows 10/11 任务栏——滚动歌词、每日一言、逐字高亮、播放控制、音频频谱，支持 Windows 11 任务栏上、下、左、右四边布局，程序本体为 C++ 原生实现，无 Electron、WebView 和 .NET/WPF 运行时，秉持工具软件应尽可能少占内存的原则</p>
    <p>
       <a href="https://github.com/H0308/taskbar-lyrics-displayer/releases/latest"><img src="https://img.shields.io/github/v/release/H0308/taskbar-lyrics-displayer?display_name=tag&amp;sort=semver" alt="最新版本"></a>
-      <a href="https://github.com/H0308/taskbar-lyrics-displayer/actions/workflows/build-and-release.yml"><img src="https://github.com/H0308/taskbar-lyrics-displayer/actions/workflows/build-and-release.yml/badge.svg?branch=main" alt="构建状态"></a>
       <a href="LICENSE"><img src="https://img.shields.io/github/license/H0308/taskbar-lyrics-displayer" alt="许可证"></a>
       <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows11&amp;logoColor=white" alt="Windows 10/11">
    </p>
