@@ -125,6 +125,7 @@ TEST_CASE("media_popup_layout.idle_and_media_geometry_and_scroll_bounds") {
     const auto media = mediaPageLayout(320.0f, 0.0f);
     EXPECT_TRUE(media.buttons[0].left < media.buttons[1].left);
     EXPECT_TRUE(media.buttons[1].left < media.buttons[2].left);
+    EXPECT_TRUE(media.buttons[2].left < media.buttons[3].left);
     EXPECT_TRUE(media.track.right > media.track.left);
 }
 
@@ -241,4 +242,18 @@ TEST_CASE("settings_sections.search_and_interdependent_row_states") {
     sections.onCommand(settings_ui::kIdTickTickEnabled);
     EXPECT_TRUE(tickTickRequested);
     EXPECT_FALSE(sections.findRow(settings_ui::kIdTickTickEnabled)->checked);
+
+    // 全屏应用自动切换开关关闭时禁用子项，开启后恢复启用并同步目标模式
+    const auto* fsMonitor = sections.findRow(settings_ui::kIdFullscreenRenderModeMonitor);
+    const auto* fsTarget = sections.findRow(settings_ui::kIdFullscreenRenderMode);
+    EXPECT_TRUE(fsMonitor != nullptr && fsTarget != nullptr);
+    EXPECT_FALSE(fsMonitor->enabled);
+    EXPECT_FALSE(fsTarget->enabled);
+    auto fsState = sections.state;
+    fsState.fullscreenRenderModeEnabled = true;
+    fsState.fullscreenRenderMode = 2;
+    sections.update(fsState);
+    EXPECT_TRUE(fsMonitor->enabled);
+    EXPECT_TRUE(fsTarget->enabled);
+    EXPECT_EQ(fsTarget->selected, 2);
 }

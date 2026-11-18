@@ -209,6 +209,8 @@ TEST_CASE("presentation_model.scene_resolution_lead_time_and_transition_retentio
     snap.durationMs = 305991;
     snap.positionMs = 1920; // +100ms 预读后达到 2020ms，应选中第二句（index=1）
     snap.status = PlaybackStatus::Playing;
+    snap.canRepeat = true;
+    snap.repeatMode = 1;
 
     IdleFrameInput idle;
     const auto& frame1 = model.update(snap, settings, playback, idle,
@@ -216,6 +218,12 @@ TEST_CASE("presentation_model.scene_resolution_lead_time_and_transition_retentio
     EXPECT_EQ(frame1.scene, DisplayScene::Lyrics);
     EXPECT_EQ(frame1.currentLine, 1);
     EXPECT_EQ(frame1.media.artist, std::wstring(L"F.I.R. · 爱‧歌姬"));
+    EXPECT_TRUE(frame1.media.canRepeat);
+    EXPECT_EQ(frame1.media.repeatMode, 2);
+    EXPECT_EQ(SmtcSnapshot::nextPlayMode(0), 2);
+    EXPECT_EQ(SmtcSnapshot::nextPlayMode(1), 2);
+    EXPECT_EQ(SmtcSnapshot::nextPlayMode(2), 3);
+    EXPECT_EQ(SmtcSnapshot::nextPlayMode(3), 0);
 
     // SMTC 过渡事件标题与歌手暂时为空时，保留上一帧的媒体标题与歌手，防止闪空
     SmtcSnapshot transient = snap;
@@ -225,6 +233,8 @@ TEST_CASE("presentation_model.scene_resolution_lead_time_and_transition_retentio
     const auto& frame2 = model.update(transient, settings, playback, idle, {});
     EXPECT_EQ(frame2.media.title, std::wstring(L"月牙湾"));
     EXPECT_EQ(frame2.media.artist, std::wstring(L"F.I.R. · 爱‧歌姬"));
+    EXPECT_TRUE(frame2.media.canRepeat);
+    EXPECT_EQ(frame2.media.repeatMode, 2);
 
     // 高频播放进度补丁与专辑主题色更新
     snap.positionMs = 500;
@@ -352,4 +362,12 @@ TEST_CASE("utility_logic.base64_and_backdrop_luminance") {
         255, 255, 255, 255, 255, 255, 255, 255,
     };
     EXPECT_NEAR(graphics::backdropLuminance(whitePixels, 2, 2), 1.0, 1e-4);
+
+    // 亮暗混合背景施加暗区惩罚后，等效亮度应明显低于线性均值并保持在切换白字阈值以下
+    const uint8_t halfWhiteHalfBlackPixels[16] = {
+        255, 255, 255, 255, 255, 255, 255, 255,
+        0,   0,   0,   255, 0,   0,   0,   255,
+    };
+    const float mixedLuminance = graphics::backdropLuminance(halfWhiteHalfBlackPixels, 2, 2);
+    EXPECT_TRUE(mixedLuminance > 0.0f && mixedLuminance < 0.15f);
 }
