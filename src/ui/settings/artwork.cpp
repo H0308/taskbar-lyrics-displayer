@@ -687,7 +687,7 @@ void SettingsArtwork::drawHoverControlStyleArtwork(fluent::FluentDialogSurface::
     };
 
     if (!mediaCard) {
-        // 内嵌控件：保留两条等长歌词基线，四个控件统一使用任务栏里的普通单色字形。
+        // 内嵌控件：保留两条等长歌词基线，五个控件统一使用任务栏里的普通单色字形。
         const float panelH = panel.bottom - panel.top;
         const float cx = (panel.left + panel.right) * 0.5f;
         const float cy = (panel.top + panel.bottom) * 0.5f;
@@ -700,33 +700,41 @@ void SettingsArtwork::drawHoverControlStyleArtwork(fluent::FluentDialogSurface::
 
         const float preferredControlSize = std::clamp(panelH * 0.30f, 28.0f, 34.0f);
         constexpr float kControlGap = 10.0f;
-        constexpr float kVolumeGap = 14.0f;
-        const float preferredGroupW = preferredControlSize * 4.0f + kControlGap * 2.0f + kVolumeGap;
+        constexpr float kRepeatGap = 12.0f;
+        constexpr float kVolumeGap = 13.0f;
+        const float preferredGroupW =
+            preferredControlSize * 5.0f + kControlGap * 2.0f + kRepeatGap + kVolumeGap;
         // 卡片变窄时按同一比例缩放控件组，保留 4 DIP 安全边距，避免图标越界。
         const float availableW = std::max(0.0f, panel.right - panel.left - 8.0f);
         const float groupScale =
             preferredGroupW > 0.0f ? std::clamp(availableW / preferredGroupW, 0.0f, 1.0f) : 1.0f;
         const float controlSize = preferredControlSize * groupScale;
         const float controlGap = kControlGap * groupScale;
+        const float repeatGap = kRepeatGap * groupScale;
         const float volumeGap = kVolumeGap * groupScale;
-        const float groupW = controlSize * 4.0f + controlGap * 2.0f + volumeGap;
+        const float groupW = controlSize * 5.0f + controlGap * 2.0f + repeatGap + volumeGap;
         const float groupLeft = cx - groupW * 0.5f;
         const float previousX = groupLeft + controlSize * 0.5f;
         const float playX = previousX + controlSize + controlGap;
         const float nextX = playX + controlSize + controlGap;
-        const float volumeX = nextX + controlSize + volumeGap;
+        const float repeatX = nextX + controlSize + repeatGap;
+        const float volumeX = repeatX + controlSize + volumeGap;
         const D2D1_POINT_2F previous = D2D1::Point2F(previousX, cy);
         const D2D1_POINT_2F play = D2D1::Point2F(playX, cy);
         const D2D1_POINT_2F next = D2D1::Point2F(nextX, cy);
+        const D2D1_POINT_2F repeat = D2D1::Point2F(repeatX, cy);
         const D2D1_POINT_2F volume = D2D1::Point2F(volumeX, cy);
         const float iconRadius = controlSize * 0.25f;
         const D2D1_COLOR_F iconColor = enabled ? p.text : p.disabled;
         drawControl(0, false, previous, iconRadius, iconColor);
         drawControl(1, false, play, iconRadius, iconColor);
         drawControl(2, false, next, iconRadius, iconColor);
-        if (auto* brush = painter.brush(tone(iconColor)))
+        if (auto* brush = painter.brush(tone(iconColor))) {
+            media_control::drawRepeat(painter.target(), controls, repeat, iconRadius * 0.8f,
+                                      brush, 0);
             media_control::drawVolume(painter.target(), volume, iconRadius * 0.8f, brush,
                                       enabled ? 3 : 0);
+        }
         media_control::release(controls);
         return;
     }

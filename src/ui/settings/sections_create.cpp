@@ -254,7 +254,7 @@ void SettingsSections::createMediaControlRows() {
     addToggle(kMediaPopupPage, kIdHoverControls, L"显示播放控件", state.hoverControls);
     addRadio(
         kMediaPopupPage, kIdHoverControlStyle, L"控件样式",
-        L"内嵌控件在鼠标悬浮时显示，仅提供播放操作；媒体卡片还显示歌词进度，其打开方式由“悬浮卡片”中的“悬浮卡片展开方式”决定，点击应用图标或名称可打开播放器。",
+        L"内嵌控件在鼠标悬浮时显示，仅提供播放操作；媒体卡片还显示歌词进度，其打开方式由“悬浮卡片”中的“悬浮卡片展开方式”决定，点击应用图标或名称可打开播放器。只有支持的播放器才会显示播放模式控制按钮。",
         {L"内嵌控件", L"媒体卡片"}, minimal ? 0 : state.hoverControlStyle,
         state.hoverControls && !minimal, kHoverControlStyleRowH);
 }
