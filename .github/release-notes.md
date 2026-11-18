@@ -1,4 +1,4 @@
-## Windows任务栏歌词 v2.15.1
+## Windows任务栏歌词 v2.16.0
 把 QQ 音乐、网易云、汽水音乐和Spotify的歌词嵌入 Windows 10/11 任务栏——滚动歌词、每日一言、快速打开、滴答清单今日任务、逐字高亮、播放控制、音频频谱，支持 Windows 11 任务栏上、下、左、右四边布局。程序本体为 C++ 原生实现，无 Electron、WebView 和 .NET/WPF 运行时，秉持工具软件应尽可能少占内存的原则。
 
 ### ### ✨ 新增功能
@@ -13,7 +13,7 @@
 
 ### 📦 下载与使用
 
-下载软件安装包 `WindowsTaskbarLyrics-2.15.1-Setup.exe` 安装使用，安装向导提供简体中文界面。
+下载软件安装包 `WindowsTaskbarLyrics-2.16.0-Setup.exe` 安装使用，安装向导提供简体中文界面。
 
 如果安装前检测到 WindowsTaskbarLyrics 正在运行，请先通过系统托盘图标退出软件，再点击安装程序中的「重试」继续安装。发布包包含前置依赖时，安装程序会自动安装 Microsoft Visual C++ 运行库。
 
