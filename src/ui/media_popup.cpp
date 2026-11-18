@@ -492,18 +492,24 @@ struct MediaPopup::Impl {
         }
         // 自动对比度同时考虑磨砂上的底色，避免加深背景后仍按原截图选黑字。
         auto applyTint = [&luminance](D2D1_COLOR_F tint) {
+            const float alpha = std::clamp(tint.a, 0.0f, 1.0f);
+            if (alpha <= 0.0f)
+                return;
             const uint8_t tintPixel[] = {
-                static_cast<uint8_t>(std::lround(tint.b * 255.0f)),
-                static_cast<uint8_t>(std::lround(tint.g * 255.0f)),
-                static_cast<uint8_t>(std::lround(tint.r * 255.0f)), 255};
-            luminance = luminance * (1.0f - tint.a) + backdropLuminance(tintPixel, 1, 1) * tint.a;
+                static_cast<uint8_t>(std::lround(std::clamp(tint.b, 0.0f, 1.0f) * 255.0f)),
+                static_cast<uint8_t>(std::lround(std::clamp(tint.g, 0.0f, 1.0f) * 255.0f)),
+                static_cast<uint8_t>(std::lround(std::clamp(tint.r, 0.0f, 1.0f) * 255.0f)), 255};
+            const float baseRoot = std::sqrt(std::clamp(luminance, 0.0f, 1.0f));
+            const float tintRoot =
+                std::sqrt(std::clamp(backdropLuminance(tintPixel, 1, 1), 0.0f, 1.0f));
+            const float blendedRoot = baseRoot * (1.0f - alpha) + tintRoot * alpha;
+            luminance = blendedRoot * blendedRoot;
         };
         applyTint(cardFillForPage(page));
         if (dynamicBackgroundEnabledForPage(page))
             applyTint(colorFromRef(media.dominantColor, kAlbumTintAlpha));
-        const float blackContrast = (luminance + 0.05f) / 0.05f;
-        const float whiteContrast = 1.05f / (luminance + 0.05f);
-        const bool useBlack = blackContrast >= whiteContrast;
+        constexpr float kBlackTextLuminanceThreshold = 0.32f;
+        const bool useBlack = luminance >= kBlackTextLuminanceThreshold;
         const D2D1_COLOR_F text = useBlack ? D2D1::ColorF(D2D1::ColorF::Black)
                                             : D2D1::ColorF(D2D1::ColorF::White);
         const D2D1_COLOR_F secondary =

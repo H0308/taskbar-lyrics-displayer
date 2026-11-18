@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <vector>
 
@@ -130,6 +131,8 @@ struct SongToast::Impl {
     ID2D1Layer* coverLayer = nullptr;
     ID2D1Bitmap* backdropBmp = nullptr;
     ID2D1Effect* backdropBlur = nullptr;
+    float lastBackdropLuminance = 0.0f;
+    bool hasBackdropLuminance = false;
 
     static LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         Impl* self = nullptr;
@@ -269,6 +272,8 @@ struct SongToast::Impl {
         releaseCom(backdropBmp);
         releaseCom(backdropBlur);
         backdropDirty = true;
+        lastBackdropLuminance = 0.0f;
+        hasBackdropLuminance = false;
         releaseCom(brushBackground);
         releaseCom(brushStroke);
         releaseCom(brushText);
@@ -320,6 +325,14 @@ struct SongToast::Impl {
                               sizeof(disableTransitions));
     }
 
+    D2D1_COLOR_F cardFillColor() const {
+        const auto& p = fluent::palette(fluent::ThemeTarget::Window);
+        // 截图模糊已经是弹窗底图，前景只保留一层很薄的 tint，避免再次变成灰蒙蒙。
+        D2D1_COLOR_F cardFill = p.cardFill;
+        cardFill.a = fluent::isDarkMode(fluent::ThemeTarget::Window) ? 0.10f : 0.16f;
+        return cardFill;
+    }
+
     bool createResources() {
         if (!createTextFormats())
             return false;
@@ -331,9 +344,7 @@ struct SongToast::Impl {
             return false;
 
         const auto& p = fluent::palette(fluent::ThemeTarget::Window);
-        // 截图模糊已经是弹窗底图，前景只保留一层很薄的 tint，避免再次变成灰蒙蒙。
-        D2D1_COLOR_F cardFill = p.cardFill;
-        cardFill.a = fluent::isDarkMode(fluent::ThemeTarget::Window) ? 0.10f : 0.16f;
+        const D2D1_COLOR_F cardFill = cardFillColor();
         if (FAILED(rt->CreateSolidColorBrush(cardFill, &brushBackground)) ||
             FAILED(rt->CreateSolidColorBrush(p.cardStroke, &brushStroke)) ||
             FAILED(rt->CreateSolidColorBrush(p.text, &brushText)) ||
@@ -390,9 +401,25 @@ struct SongToast::Impl {
 
     // 文字颜色固定跟随背景明暗，不提供关闭选项。
     void applyBackdropTextContrast(float luminance) {
-        const float blackContrast = (luminance + 0.05f) / 0.05f;
-        const float whiteContrast = 1.05f / (luminance + 0.05f);
-        const bool useBlack = blackContrast >= whiteContrast;
+        auto applyTint = [&luminance](D2D1_COLOR_F tint) {
+            const float alpha = std::clamp(tint.a, 0.0f, 1.0f);
+            if (alpha <= 0.0f)
+                return;
+            const uint8_t tintPixel[] = {
+                static_cast<uint8_t>(std::lround(std::clamp(tint.b, 0.0f, 1.0f) * 255.0f)),
+                static_cast<uint8_t>(std::lround(std::clamp(tint.g, 0.0f, 1.0f) * 255.0f)),
+                static_cast<uint8_t>(std::lround(std::clamp(tint.r, 0.0f, 1.0f) * 255.0f)), 255};
+            const float baseRoot = std::sqrt(std::clamp(luminance, 0.0f, 1.0f));
+            const float tintRoot =
+                std::sqrt(std::clamp(backdropLuminance(tintPixel, 1, 1), 0.0f, 1.0f));
+            const float blendedRoot = baseRoot * (1.0f - alpha) + tintRoot * alpha;
+            luminance = blendedRoot * blendedRoot;
+        };
+        applyTint(cardFillColor());
+        if (media.hasDominantColor)
+            applyTint(fluent::toD2D(media.dominantColor, 0.08f));
+        constexpr float kBlackTextLuminanceThreshold = 0.32f;
+        const bool useBlack = luminance >= kBlackTextLuminanceThreshold;
         const D2D1_COLOR_F text = useBlack ? D2D1::ColorF(D2D1::ColorF::Black)
                                            : D2D1::ColorF(D2D1::ColorF::White);
         const D2D1_COLOR_F secondary =
@@ -464,7 +491,19 @@ struct SongToast::Impl {
             return false;
         }
 
-        const float sampledLuminance = backdropLuminance(pixels, width, height);
+        const int shadowPx = std::max(0, static_cast<int>(std::lround(kShadowPaddingDip * scale())));
+        const int cardWidth = width - shadowPx * 2;
+        const int cardHeight = height - shadowPx * 2;
+        float sampledLuminance = 0.0f;
+        if (cardWidth > 0 && cardHeight > 0) {
+            const auto* cardPixels = static_cast<const uint8_t*>(pixels) +
+                                     (static_cast<size_t>(shadowPx) * width + shadowPx) * 4;
+            sampledLuminance = backdropLuminance(cardPixels, cardWidth, cardHeight, width);
+        } else {
+            sampledLuminance = backdropLuminance(pixels, width, height);
+        }
+        lastBackdropLuminance = sampledLuminance;
+        hasBackdropLuminance = true;
 
         auto* rt = renderer.renderTarget();
         if (!rt) {
@@ -762,6 +801,8 @@ struct SongToast::Impl {
         if (!createResources())
             return false;
         captureBackdrop();
+        if (hasBackdropLuminance)
+            applyBackdropTextContrast(lastBackdropLuminance);
         buildTextLayouts();
         if (coverDirty)
             decodeCover();
