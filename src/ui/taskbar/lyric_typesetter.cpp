@@ -441,6 +441,10 @@ void LyricTypesetter::recreateLyricFormats(const std::wstring& family, LyricFont
                  DWRITE_TEXT_ALIGNMENT_LEADING);
     createFormat(resources_.fmtArtist_, family, style, sizes.artist, DWRITE_FONT_WEIGHT_NORMAL,
                  DWRITE_TEXT_ALIGNMENT_LEADING);
+    createFormat(resources_.fmtRepeatHint_, family, style, sizes.artist,
+                 DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER);
+    if (resources_.fmtRepeatHint_)
+        resources_.fmtRepeatHint_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     createFormat(resources_.fmtLyric_, family, style, sizes.lyric, DWRITE_FONT_WEIGHT_NORMAL,
                  DWRITE_TEXT_ALIGNMENT_LEADING);
     createFormat(resources_.fmtNextLyric_, family, style, sizes.next, DWRITE_FONT_WEIGHT_NORMAL,

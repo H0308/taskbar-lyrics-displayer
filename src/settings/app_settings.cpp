@@ -321,6 +321,7 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
     immersiveBackgroundAdjustment_ = std::clamp(j.value("immersiveBackgroundAdjustment", 0), 0, 1);
     dockBackgroundAdjustment_ = std::clamp(j.value("dockBackgroundAdjustment", 0), 0, 1);
     embeddedResourceMonitor_ = j.value("embeddedResourceMonitor", false);
+    dockResourceSmallFont_ = j.value("dockResourceSmallFont", false);
     dockResourceGpuUsage_ = j.value("dockResourceGpu", false);
     dockResourceDownload_ = j.value("dockResourceDownload", true);
     dockResourceUpload_ = j.value("dockResourceUpload", true);
@@ -553,6 +554,7 @@ nlohmann::json AppSettings::toJson() const {
     j.erase("dockMaskOpacity");
     j.erase("dockBackgroundBlur");
     j["embeddedResourceMonitor"] = embeddedResourceMonitor_;
+    j["dockResourceSmallFont"] = dockResourceSmallFont_;
     j["dockResourceGpu"] = dockResourceGpuUsage_;
     j["dockResourceDownload"] = dockResourceDownload_;
     j["dockResourceUpload"] = dockResourceUpload_;

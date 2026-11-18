@@ -51,7 +51,7 @@ private:
     bool reserveArrow_;
 };
 struct MediaPageLayout {
-    std::array<D2D1_RECT_F, 3> buttons;
+    std::array<D2D1_RECT_F, 4> buttons;
     D2D1_RECT_F source, sourceHit, title, artist, cover, track, timeLeft, timeRight;
 };
 MediaPageLayout mediaPageLayout(float width, float origin);

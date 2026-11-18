@@ -16,7 +16,7 @@
 #include <windows.h>
 
 // 底部控制条操作
-enum class MediaControl { Prev = 0, PlayPause = 1, Next = 2 };
+enum class MediaControl { Prev = 0, PlayPause = 1, Next = 2, Repeat = 3 };
 
 // 悬浮媒体卡片的背景材质
 
@@ -32,6 +32,8 @@ struct OverlayMediaInfo {
     bool canPrev = false;
     bool canPlayPause = false;
     bool canNext = false;
+    bool canRepeat = false;
+    int repeatMode = 0;   // 播放模式：0 顺序播放、1 列表循环、2 单曲循环、3 随机播放
     bool playing = false;
 };
 

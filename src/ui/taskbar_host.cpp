@@ -108,6 +108,9 @@ constexpr UINT_PTR kPlacementTimerId = 4;
 // 沉浸模式让出任务栏：悬停确认（单次）与显隐过渡/离开检测（轮询）。
 constexpr UINT_PTR kImmersiveYieldTimerId = 5;
 constexpr UINT_PTR kImmersivePresenceTimerId = 6;
+// 点击循环按钮后，模式名短暂显示一会儿（单次定时器）。
+constexpr UINT_PTR kRepeatHintTimerId = 7;
+constexpr UINT kRepeatHintMs = 1600;
 constexpr UINT kImmersiveYieldDelayMs = 100;   // 悬停非控件区多久后让出任务栏
 constexpr UINT kImmersiveHideMs = TaskbarPresence::kHideMs; // 淡出时长
 constexpr UINT kImmersiveShowMs = TaskbarPresence::kShowMs; // 淡入时长
@@ -143,14 +146,13 @@ constexpr float kLyricPreviewOpacity = 0.90f;        // 下一行预览透明度
 constexpr int kImmersiveControlPrevious = 0;
 constexpr int kImmersiveControlPlayPause = 1;
 constexpr int kImmersiveControlNext = 2;
-constexpr int kImmersiveControlVolume = 3;
-constexpr int kImmersiveControlExit = 4;
+constexpr int kImmersiveControlRepeat = 3;
+constexpr int kImmersiveControlVolume = 4;
+constexpr int kImmersiveControlExit = 5;
 // Dock 的快捷应用入口使用独立图标和命中项，沉浸模式不显示。
-constexpr int kDockControlQuickApps = 5;
-constexpr int kImmersiveControlMenu = 6;
-constexpr int kImmersiveControlCount = 6; // 沉浸模式显示 6 个，索引 5 保留给 Dock 入口
-constexpr int kExpandedControlCount = 7;
-constexpr int kAppBarControlCount = 7;
+constexpr int kDockControlQuickApps = 6;
+constexpr int kImmersiveControlMenu = 7;
+constexpr int kExpandedControlCount = 8;
 constexpr float kAppBarHeightDip = 48.0f;
 constexpr float kImmersiveControlRadiusFactor = 0.24f;
 constexpr float kImmersiveControlMinRadius = 8.0f;
@@ -596,6 +598,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushLyricDim_;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushLyricGlow_;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushLyricOutline_;
+    std::wstring repeatHintText_;     // 提示词文本（等回读结果确定后再填）
+    int repeatHintTarget_ = -1;       // 本次点击期望的模式；>=0 表示正在等结果
+    ULONGLONG repeatHintUntil_ = 0;   // 提示词消失时刻（0 表示未激活）
     taskbar_detail::TaskbarVinylRenderer vinylRenderer_;
     COLORREF lyricColor_ = RGB(49, 194, 124);         // 已播放颜色，默认 QQ 绿
     COLORREF lyricUnplayedColor_ = RGB(49, 194, 124); // 逐字未播放颜色
@@ -796,15 +801,23 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return embeddedResourceVisible() ? resourceZoneWidth() + kDockResourceZoneGap : 0.0f;
     }
 
-    int expandedControlCount() const {
-        return isAppBarView() ? kAppBarControlCount : kImmersiveControlCount;
+    bool expandedControlVisible(int index) const {
+        if (index < 0 || index >= kExpandedControlCount)
+            return false;
+        if (index == kImmersiveControlRepeat)
+            return media.canRepeat;
+        if (index == kDockControlQuickApps)
+            return isAppBarView();
+        return true;
     }
 
-    bool expandedControlVisible(int index) const {
-        if (!isAppBarView())
-            return index >= 0 && index < kExpandedControlCount && index != kDockControlQuickApps;
-        return (index >= kImmersiveControlPrevious && index <= kDockControlQuickApps) ||
-               index == kImmersiveControlMenu;
+    int expandedControlCount() const {
+        int count = 0;
+        for (int i = 0; i < kExpandedControlCount; ++i) {
+            if (expandedControlVisible(i))
+                ++count;
+        }
+        return count;
     }
 
     bool shouldShowWindow() const {
@@ -892,9 +905,12 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     bool updateMediaInfo(const OverlayMediaInfo& info) {
         bool thumbChanged = info.thumbnail != media.thumbnail;
         bool textChanged = info.title != media.title || info.artist != media.artist;
+        const bool canRepeatChanged = info.canRepeat != media.canRepeat;
         bool controlsChanged = info.canPrev != media.canPrev ||
                                info.canPlayPause != media.canPlayPause ||
-                               info.canNext != media.canNext;
+                               info.canNext != media.canNext ||
+                               canRepeatChanged ||
+                               info.repeatMode != media.repeatMode;
         bool playingChanged = info.playing != media.playing;
         bool platformChanged = info.sourceAppUserModelId != media.sourceAppUserModelId;
         bool dominantColorChanged =
@@ -902,6 +918,19 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             (info.hasDominantColor && info.dominantColor != media.dominantColor);
         bool durationChanged = info.durationMs != media.durationMs;
         media = info;
+        if (canRepeatChanged && isExpandedView()) {
+            requestInvalidation(RenderInvalidation::Layout);
+            immersiveControlHover_ = -1;
+            immersiveControlPressed_ = -1;
+        }
+        if (!media.canRepeat) {
+            if (hwnd && (repeatHintTarget_ >= 0 || repeatHintUntil_ != 0))
+                KillTimer(hwnd, kRepeatHintTimerId);
+            repeatHintTarget_ = -1;
+            repeatHintUntil_ = 0;
+            if (inlineControlHover_ == 3)
+                inlineControlHover_ = -1;
+        }
         if (thumbChanged)
             requestInvalidation(RenderInvalidation::Cover);
         if (platformChanged)
@@ -2264,12 +2293,17 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             resourcePanel_.visibility().download == visibility.download &&
             resourcePanel_.visibility().upload == visibility.upload &&
             resourcePanel_.visibility().gpuUsage == visibility.gpuUsage &&
-            resourcePanel_.visibility().cpuFrequency == visibility.cpuFrequency)
+            resourcePanel_.visibility().cpuFrequency == visibility.cpuFrequency &&
+            resourcePanel_.visibility().smallFont == visibility.smallFont)
             return;
         const bool embeddedChanged =
             resourcePanel_.visibility().embeddedEnabled != visibility.embeddedEnabled;
+        const bool fontChanged = resourcePanel_.visibility().smallFont != visibility.smallFont;
         resourcePanel_.setVisibility(visibility);
-        updateResourceColumnWidths();
+        if (fontChanged)
+            recreateResourceFormat(); // 字号变了必须清缓存，否则 ensureResourceFormat 会沿用旧字号
+        else
+            updateResourceColumnWidths();
         if (embeddedChanged && viewMode_ == TaskbarViewMode::Embedded && hwnd) {
             if (visibility.embeddedEnabled && !isStoppedMode())
                 startResourceMonitoring();
@@ -3163,9 +3197,13 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (!renderer.dwrite())
             renderer.initialize();
         typesetter_.setFactory(renderer.dwrite());
+        // 小字模式用更小的字号：字形更窄，列宽实测值随之变小，块与块自然收紧。
+        // 11.0f 比常规 resource(13.5f) 小一档，和 date 同号，紧凑但不至于难读。
+        const float requested = resourcePanel_.visibility().smallFont
+                                    ? 11.0f
+                                    : fluent::font_sizes::taskbar::resource;
         return typesetter_.ensureResourceFormat(
-            fontFamily_, fontStyle_,
-            fitCompactFontSize(fluent::font_sizes::taskbar::resource, compactTaskbarHeight_ - 2.0f));
+            fontFamily_, fontStyle_, fitCompactFontSize(requested, compactTaskbarHeight_ - 2.0f));
     }
 
     bool updateResourceColumnWidths() {
@@ -3963,8 +4001,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     // ---------- 内嵌悬浮控件布局 ----------
 
     // 上一首/播放/下一首 + 音量按钮整体居中：centers[0..2] 为播放控制，
-    // centers[3] 为音量按钮。返回 false 表示当前不在内嵌控件展示状态。
-    bool inlineControlsLayout(float centers[4], float& cy, float& r) const {
+    // centers[3] 为播放模式按钮，centers[4] 为音量按钮。返回 false 表示当前不在内嵌控件展示状态。
+    // 内嵌悬浮控件：上一首 / 播放 / 下一首 / 播放模式 / 音量。
+    bool inlineControlsLayout(float centers[5], float& cy, float& r) const {
         if (isVerticalTaskbar())
             return false;
         if (!controlsOnHover_ || !mouseOver_ || hoverControlStyle_ != HoverControlStyle::Inline)
@@ -3977,15 +4016,42 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return false;
         cy = layout.h * 0.5f;
         r = layout.h * 0.26f;
-        const float spacing = r * 2.8f;
-        // 音量按钮与下一首之间多留 0.9r：音量字形比三角形宽，等间距会显得挤
-        const float volumeGap = spacing + r * 0.9f;
-        // 组跨度 [cx-spacing, cx+spacing+volumeGap]，整体居中即 cx 左移 volumeGap/2
         const float controlsW = std::max(1.0f, layout.rightW - embeddedResourceExtra());
-        const float cx = layout.leftW + controlsW * 0.5f - volumeGap * 0.5f;
+        if (!media.canRepeat) {
+            const float spacing = r * 2.8f;
+            // 音量按钮与下一首之间多留 0.9r：音量字形比三角形宽，等间距会显得挤
+            const float volumeGap = spacing + r * 0.9f;
+            const float cx = layout.leftW + controlsW * 0.5f - volumeGap * 0.5f;
+            for (int i = 0; i < 3; ++i)
+                centers[i] = cx + (i - 1) * spacing;
+            centers[3] = 0.0f;
+            centers[4] = cx + spacing + volumeGap;
+            return true;
+        }
+        // 五个控件：上一首/播放/下一首/播放模式/音量。
+        constexpr float kIdealPitch = 2.8f;
+        constexpr float kRepeatExtraGap = 0.3f;
+        constexpr float kVolumeExtraGap = 0.4f;
+        constexpr float kInlineControlMargin = 6.0f;
+        // 组宽 = (4*kIdealPitch + kRepeatExtraGap + kVolumeExtraGap + 2) * r = 13.9r
+        constexpr float kInlineGroupUnit =
+            4.0f * kIdealPitch + kRepeatExtraGap + kVolumeExtraGap + 2.0f;
+        const float fitR = (controlsW - kInlineControlMargin * 2.0f) / kInlineGroupUnit;
+        r = std::max(5.0f, std::min(r, fitR));
+        const float maxSpacing =
+            (controlsW - kInlineControlMargin * 2.0f -
+             (2.0f + kRepeatExtraGap + kVolumeExtraGap) * r) /
+            4.0f;
+        const float spacing = std::max(r * 1.3f, std::min(r * kIdealPitch, maxSpacing));
+        // 播放模式与音量字形比播放三角形更宽，按各自半宽补偿中心距，保证视觉净空隙一致。
+        const float repeatGap = spacing + r * kRepeatExtraGap;
+        const float volumeGap = spacing + r * kVolumeExtraGap;
+        const float totalSpan = 2.0f * spacing + repeatGap + volumeGap;
+        const float startX = layout.leftW + controlsW * 0.5f - totalSpan * 0.5f;
         for (int i = 0; i < 3; ++i)
-            centers[i] = cx + (i - 1) * spacing;
-        centers[3] = cx + spacing + volumeGap;
+            centers[i] = startX + i * spacing;
+        centers[3] = centers[2] + repeatGap;
+        centers[4] = centers[3] + volumeGap;
         return true;
     }
 
@@ -4045,6 +4111,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 break;
             case kImmersiveControlNext:
                 enabled = media.canNext;
+                break;
+            case kImmersiveControlRepeat:
+                enabled = media.canRepeat;
                 break;
             case kDockControlQuickApps:
                 enabled = idle.quickStartEnabled && static_cast<bool>(onDockQuickApps);
@@ -4131,6 +4200,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         drawButton(kImmersiveControlPrevious, centers[kImmersiveControlPrevious], r);
         drawButton(kImmersiveControlPlayPause, centers[kImmersiveControlPlayPause], r);
         drawButton(kImmersiveControlNext, centers[kImmersiveControlNext], r);
+        if (expandedControlVisible(kImmersiveControlRepeat))
+            drawRepeatButton(centers[kImmersiveControlRepeat], r);
         drawVolumeButton(centers[kImmersiveControlVolume], r);
         drawExitImmersiveButton(centers[kImmersiveControlExit], r);
         if (expandedControlVisible(kDockControlQuickApps)) {
@@ -4176,11 +4247,82 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         brushHover_->SetColor(color);
     }
 
+    // 内嵌控件的循环按钮：三档（顺序/单曲/随机）各自一个字形，不靠颜色区分。
+    void drawRepeatButton(const D2D1_POINT_2F& c, float r) {
+        auto* rt = drawTarget();
+        if (!rt)
+            return;
+        drawInlineControlBackground(3, c, r, true);
+        media_control::drawRepeat(rt, controlGeometry, c, r * 0.80f, brushBtn_.Get(),
+                                  media.repeatMode);
+    }
+
+    // ---------- 点击循环后的模式提示 ----------
+
+    static const wchar_t* repeatModeName(int mode) {
+        switch (mode) {
+        case 2: return L"单曲循环";
+        case 3: return L"随机播放";
+        case 1: return L"列表循环";
+        default: return L"顺序播放";
+        }
+    }
+
+    // 点击后先等一小拍再出提示词：此时图标已被本地值切到目标模式，两者一致。
+    void armRepeatHint(int targetMode) {
+        repeatHintTarget_ = targetMode;
+        repeatHintUntil_ = 0;
+        if (hwnd)
+            SetTimer(hwnd, kRepeatHintTimerId, 350, nullptr);
+    }
+
+    void onRepeatHintTimer() {
+        if (repeatHintTarget_ >= 0) {
+            repeatHintText_ = repeatModeName(repeatHintTarget_);
+            repeatHintTarget_ = -1;
+            repeatHintUntil_ = GetTickCount64() + kRepeatHintMs;
+            if (hwnd)
+                SetTimer(hwnd, kRepeatHintTimerId, kRepeatHintMs, nullptr);
+            requestFrameAndFlush();
+            return;
+        }
+        if (hwnd)
+            KillTimer(hwnd, kRepeatHintTimerId);
+        repeatHintUntil_ = 0;
+        requestFrameAndFlush();
+    }
+
+    bool repeatHintActive() const {
+        return repeatHintUntil_ != 0 && GetTickCount64() < repeatHintUntil_;
+    }
+
+    void drawRepeatHint(ID2D1RenderTarget* rt, const D2D1_RECT_F& area, ID2D1Brush* brush) {
+        auto* format = typesetter_.resources().fmtRepeatHint_.Get();
+        if (!rt || !brush || !format || repeatHintText_.empty() || !repeatHintActive())
+            return;
+        rt->DrawTextW(repeatHintText_.c_str(), static_cast<UINT32>(repeatHintText_.size()),
+                      format, area, brush);
+    }
+
+    void drawSongInfoSubtitle(float infoX, float infoW, float subtitleY) {
+        if (repeatHintActive()) {
+            // 副标题行临时改为播放模式提示，省掉额外浮层，也不挤占按钮区。
+            const D2D1_RECT_F hintRect =
+                D2D1::RectF(infoX, subtitleY, infoX + infoW, subtitleY + artistHeight_);
+            drawRepeatHint(drawTarget(), hintRect, brushText_.Get());
+        } else {
+            drawScrollingText(typesetter_.resources().artistLayout_.Get(), artistWidth_,
+                              artistHeight_, infoW, infoX, subtitleY, scroll_.artist(),
+                              brushDim_.Get(), nullptr, nullptr, nullptr, 0.0f, 1.0f,
+                              LyricAlignment::Center, false, kTextPadding, true, kTextPadding);
+        }
+    }
+
     void drawVolumeButton(const D2D1_POINT_2F& c, float r) {
         auto* rt = drawTarget();
         if (!rt)
             return;
-        drawInlineControlBackground(3, c, r, appVolume_.available);
+        drawInlineControlBackground(4, c, r, appVolume_.available);
         ID2D1SolidColorBrush* brush =
             appVolume_.available ? brushBtn_.Get() : brushBtnDisabled_.Get();
         const int level = !appVolume_.available || appVolume_.muted ? 0
@@ -4203,7 +4345,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return std::hypot(logicalX - layout.controlCenters[3].x,
                               logicalY - layout.controlCenters[3].y) <= layout.controlRadius + 4.0f;
         }
-        float centers[4]{};
+        float centers[5]{};
         float cy = 0.0f;
         float r = 0.0f;
         if (!inlineControlsLayout(centers, cy, r))
@@ -4213,7 +4355,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         clientPointToLogicalDip(x, y, logicalX, logicalY);
         x = logicalX;
         y = logicalY;
-        return std::hypot(x - centers[3], y - cy) <= r + 4.0f;
+        return std::hypot(x - centers[4], y - cy) <= r + 4.0f;
     }
 
     // 音量按钮的屏幕坐标矩形（音量滑块浮窗的锚点）
@@ -4242,7 +4384,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 return RECT{pt.x - half, pt.y - half, pt.x + half, pt.y + half};
             }
         }
-        float centers[4]{};
+        float centers[5]{};
         float cy = 0.0f;
         float r = 0.0f;
         if (!inlineControlsLayout(centers, cy, r)) {
@@ -4251,7 +4393,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return rc;
         }
         const float s = scale();
-        POINT pt = logicalDipToClientPoint(centers[3], cy);
+        POINT pt = logicalDipToClientPoint(centers[4], cy);
         ClientToScreen(hwnd, &pt);
         const int half = static_cast<int>(std::lround((r + 6.0f) * s));
         return RECT{pt.x - half, pt.y - half, pt.x + half, pt.y + half};
@@ -4474,6 +4616,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         case kImmersiveControlPrevious:
         case kImmersiveControlPlayPause:
         case kImmersiveControlNext:
+        case kImmersiveControlRepeat:
+            if (index == kImmersiveControlRepeat)
+                armRepeatHint(SmtcSnapshot::nextPlayMode(media.repeatMode));
             if (onControl)
                 onControl(static_cast<MediaControl>(index));
             break;
@@ -4562,7 +4707,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (x < leftW || x > w)
             return -1;
 
-        float centers[4]{};
+        float centers[5]{};
         float cy = 0.0f;
         float r = 0.0f;
         if (!inlineControlsLayout(centers, cy, r))
@@ -4574,6 +4719,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             if (std::hypot(x - centers[i], y - cy) <= r + 4.0f)
                 return i;
         }
+        // 索引与 MediaControl 枚举同值（3=播放模式）。
+        if (media.canRepeat && std::hypot(x - centers[3], y - cy) <= r + 4.0f)
+            return 3;
         return -1;
     }
 
@@ -5554,22 +5702,20 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                               infoW, infoX, infoY, scroll_.title(), brushText_.Get(), nullptr,
                               nullptr, nullptr, 0.0f, 1.0f, LyricAlignment::Center, false,
                               kTextPadding, true, kTextPadding);
-            drawScrollingText(typesetter_.resources().artistLayout_.Get(), artistWidth_,
-                              artistHeight_, infoW, infoX, infoY + titleHeight_ + infoGap,
-                              scroll_.artist(), brushDim_.Get(), nullptr, nullptr, nullptr, 0.0f,
-                              1.0f, LyricAlignment::Center, false, kTextPadding, true,
-                              kTextPadding);
+            drawSongInfoSubtitle(infoX, infoW, infoY + titleHeight_ + infoGap);
             drawSongInfoDivider(leftW, h);
         }
 
         if (showControls) {
-            float centers[4]{};
+            float centers[5]{};
             float cy = 0.0f;
             float r = 0.0f;
             if (inlineControlsLayout(centers, cy, r)) {
                 for (int i = 0; i < 3; ++i)
                     drawButton(i, D2D1::Point2F(centers[i], cy), r);
-                drawVolumeButton(D2D1::Point2F(centers[3], cy), r);
+                if (media.canRepeat)
+                    drawRepeatButton(D2D1::Point2F(centers[3], cy), r);
+                drawVolumeButton(D2D1::Point2F(centers[4], cy), r);
             }
         } else {
             if (showSpectrum && !isExpandedView()) {
@@ -6196,22 +6342,20 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                                   titleHeight_, infoW, infoX, infoY, scroll_.title(),
                                   brushText_.Get(), nullptr, nullptr, nullptr, 0.0f, 1.0f,
                                   LyricAlignment::Center, false, kTextPadding, true, kTextPadding);
-                drawScrollingText(typesetter_.resources().artistLayout_.Get(), artistWidth_,
-                                  artistHeight_, infoW, infoX, infoY + titleHeight_ + infoGap,
-                                  scroll_.artist(), brushDim_.Get(), nullptr, nullptr, nullptr,
-                                  0.0f, 1.0f, LyricAlignment::Center, false, kTextPadding, true,
-                                  kTextPadding);
+                drawSongInfoSubtitle(infoX, infoW, infoY + titleHeight_ + infoGap);
                 drawSongInfoDivider(leftW, h);
             }
 
             if (showControls) {
-                float centers[4]{};
+                float centers[5]{};
                 float cy = 0.0f;
                 float r = 0.0f;
                 if (inlineControlsLayout(centers, cy, r)) {
                     for (int i = 0; i < 3; ++i)
                         drawButton(i, D2D1::Point2F(centers[i], cy), r);
-                    drawVolumeButton(D2D1::Point2F(centers[3], cy), r);
+                    if (media.canRepeat)
+                        drawRepeatButton(D2D1::Point2F(centers[3], cy), r);
+                    drawVolumeButton(D2D1::Point2F(centers[4], cy), r);
                 }
             } else {
                 if (showSpectrum && !isExpandedView()) {
@@ -6820,6 +6964,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 onImmersiveYieldTimer();
             else if (wp == kImmersivePresenceTimerId)
                 onImmersivePresenceTimer();
+            else if (wp == kRepeatHintTimerId)
+                onRepeatHintTimer();
             return 0;
         case WM_DISPLAYCHANGE:
             // 显示拓扑/分辨率变化（远程接入、虚拟屏开关等）是设备丢失的前置信号，
@@ -6942,9 +7088,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             // 内嵌控件的音量按钮：悬停弹出音量滑块浮窗
             const bool volHover = isExpandedView() ? immersiveHover == kImmersiveControlVolume
                                                    : hitVolumeButton(mouseX, mouseY);
-            const int inlineHover = isExpandedView() ? -1
-                                    : volHover       ? 3
-                                                     : hitButton(mouseX, mouseY);
+            // 播放模式是 3、音量是 4，不能像以前那样让音量也返回 3，
+            // 否则鼠标停在播放模式上会同时被判成音量按钮，反复弹出音量浮窗造成闪烁。
+            int inlineHover = isExpandedView() ? -1 : hitButton(mouseX, mouseY);
+            if (inlineHover < 0 && volHover)
+                inlineHover = 4;
             if (inlineHover != inlineControlHover_) {
                 inlineControlHover_ = inlineHover;
                 requestFrameAndFlush();
@@ -7081,6 +7229,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             if (hitAlbumCover(mx, my))
                 return 0;
             int btn = hitButton(mx, my);
+            // 循环按钮点击后先记下期望模式，等回读结果出来再显示提示词。
+            if (btn == static_cast<int>(MediaControl::Repeat))
+                armRepeatHint(SmtcSnapshot::nextPlayMode(media.repeatMode));
             if (btn >= 0 && onControl)
                 onControl(static_cast<MediaControl>(btn));
             // 卡片的当前页面自己判断是否为点击展开；这样无播放时的每日一言卡片

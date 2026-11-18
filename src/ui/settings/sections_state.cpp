@@ -341,6 +341,10 @@ void SettingsSections::syncTaskbarModeRows(const SettingsState& s) {
         row->checked = s.dockResourceCpuFrequency;
         row->enabled = resourceExtrasEnabled;
     }
+    if (auto* row = findRow(kIdDockResourceSmallFont)) {
+        row->checked = s.dockResourceSmallFont;
+        row->enabled = resourceExtrasEnabled;
+    }
     settings_ui::updateSpectrumRows(rows[kSpectrumPage], s);
 }
 

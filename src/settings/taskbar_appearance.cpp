@@ -52,7 +52,7 @@ TaskbarAppearance resolveTaskbarAppearance(const AppSettings& settings,
     result.dockResourceVisibility =
         DockResourceVisibility{settings.embeddedResourceMonitor_, settings.dockResourceDownload_,
                                settings.dockResourceUpload_, settings.dockResourceGpuUsage_,
-                               settings.dockResourceCpuFrequency_};
+                               settings.dockResourceCpuFrequency_, settings.dockResourceSmallFont_};
     result.albumCoverVisible = settings.albumCoverVisible_;
     result.platformIconVisible = settings.platformIconVisible_;
     result.contextMenuEnabled = settings.taskbarContextMenuEnabled_;

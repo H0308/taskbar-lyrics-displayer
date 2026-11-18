@@ -10,6 +10,8 @@
 #include <windows.h>
 #include <tlhelp32.h>
 
+#include <winrt/Windows.Media.h>
+
 #include <chrono>
 #include <condition_variable>
 #include <cwchar>
@@ -120,10 +122,32 @@ std::wstring sessionSourceAppUserModelId(const Session& session) {
     }
 }
 
+// ---- 播放模式（顺序/列表/单曲/随机）----
+int playModeFrom(int repeatMode, bool shuffle) {
+    if (shuffle)
+        return 3;
+    if (repeatMode == 2)
+        return 1;
+    if (repeatMode == 1)
+        return 2;
+    return 0;
+}
+
+int repeatModeFor(int mode) {
+    switch (mode) {
+    case 1: return 2; // 列表循环
+    case 2: return 1; // 单曲循环
+    case 3: return 2; // 随机：底层仍是列表，靠 shuffle 区分
+    default: return 0;
+    }
+}
+
+bool shuffleFor(int mode) { return mode == 3; }
+
 } // namespace
 
 struct SmtcMonitor::Impl {
-    enum class ControlAction { PlayPause, SkipNext, SkipPrevious };
+    enum class ControlAction { PlayPause, SkipNext, SkipPrevious, CycleRepeat };
 
     struct RefreshSignal {
         std::mutex mtx;
@@ -186,6 +210,10 @@ struct SmtcMonitor::Impl {
     int64_t sampledPositionMs = 0;
     int64_t sampledDurationMs = 0;
     int64_t sampledAnchorMs = 0;
+    int pendingPlayMode_ = -1;
+    int64_t pendingPlayModeUntilMs_ = 0;
+    bool repeatInitialLogged_ = false;
+    bool repeatMissingLogged_ = false;
 
     // Windows 在其他 SMTC 应用成为当前会话时，可能从枚举结果中漏掉
     // 已暂停的音乐会话。只要该会话所属的音乐播放器仍在运行，就保留暂停快照；
@@ -593,7 +621,8 @@ struct SmtcMonitor::Impl {
                 playbackChanged = snap.status != previous.status ||
                                   snap.canPrev != previous.canPrev ||
                                   snap.canPlayPause != previous.canPlayPause ||
-                                  snap.canNext != previous.canNext;
+                                  snap.canNext != previous.canNext ||
+                                  snap.canRepeat != previous.canRepeat;
             }
             previous = snap;
         }
@@ -652,6 +681,75 @@ struct SmtcMonitor::Impl {
             auto info = currentSession.GetPlaybackInfo();
             timelineSample = smtc::readTimelineSample(timeline);
             playbackSample = smtc::readPlaybackSample(info);
+            const bool repeatSupported = playbackSample.canRepeat &&
+                                         next.player != SmtcPlayerType::QQMusic &&
+                                         next.player != SmtcPlayerType::Soda;
+            if (!repeatSupported) {
+                pendingPlayMode_ = -1;
+                pendingPlayModeUntilMs_ = 0;
+                next.repeatMode = 0;
+                next.shuffle = false;
+            } else {
+                int reportedRepeat = -1; // 本次上报的原始循环模式（-1 表示播放器没报）
+                bool reportedShuffle = false;
+                if (info) {
+                    // 循环模式由播放器上报，可能为空（不支持时），保持上一次的值。
+                    if (auto mode = info.AutoRepeatMode()) {
+                        const int value = static_cast<int>(mode.Value());
+                        if (!repeatInitialLogged_) {
+                            repeatInitialLogged_ = true;
+                            runtime_log::writef(L"[smtc] repeat initial=%d (0 关/1 单曲/2 列表)",
+                                                value);
+                        }
+                        next.repeatMode = value;
+                        reportedRepeat = value;
+                        if (auto shuffleActive = info.IsShuffleActive()) {
+                            next.shuffle = shuffleActive.Value();
+                            reportedShuffle = shuffleActive.Value();
+                        } else {
+                            reportedShuffle = next.shuffle;
+                        }
+                    }
+                }
+                {
+                    // 刚切换过模式时，上报值可能还是旧的：以本地权威值稳定界面。
+                    // 网易云是异步生效的（实测 1~2 秒才回读到新值），所以不能立刻判死。
+                    // 注意：判定必须用 reportedRepeat 这份"播放器原始上报值"，
+                    // 不能用 next.repeatMode —— next 是从上一帧继承来的，里面已经含
+                    // 本地的覆盖值，用它判断会自己确认自己，第一帧就把预期值清掉。
+                    const int pending = pendingPlayMode_;
+                    const bool pendingValid =
+                        pending >= 0 && smtc::nowUtcMs() < pendingPlayModeUntilMs_;
+                    if (pendingValid) {
+                        const bool confirmed =
+                            reportedRepeat >= 0 &&
+                            playModeFrom(reportedRepeat, reportedShuffle) == pending;
+                        if (confirmed) {
+                            // 播放器真的跟上来了，停止覆盖。
+                            pendingPlayMode_ = -1;
+                            pendingPlayModeUntilMs_ = 0;
+                        } else {
+                            next.repeatMode = repeatModeFor(pending);
+                            next.shuffle = shuffleFor(pending);
+                        }
+                    } else if (pending >= 0) {
+                        // 窗口到期仍未生效：放掉本地值并留痕，界面回到真实状态。
+                        pendingPlayMode_ = -1;
+                        pendingPlayModeUntilMs_ = 0;
+                        const int actualMode = playModeFrom(next.repeatMode, next.shuffle);
+                        std::wostringstream reject;
+                        reject << L"phase=operation-rejected action=play-mode wanted=" << pending
+                               << L" actual=" << actualMode;
+                        writeSmtcControlLog(reject.str());
+                    }
+                }
+                if (info && !info.AutoRepeatMode()) {
+                    if (!repeatMissingLogged_) {
+                        repeatMissingLogged_ = true;
+                        runtime_log::writef(L"[smtc] repeat unsupported: AutoRepeatMode is null");
+                    }
+                }
+            }
         } catch (...) {
         }
 
@@ -711,7 +809,11 @@ struct SmtcMonitor::Impl {
                       next.positionMs != snap.positionMs || next.anchorUtcMs != snap.anchorUtcMs ||
                       next.timelineStale != snap.timelineStale ||
                       next.thumbnail != snap.thumbnail || next.canPrev != snap.canPrev ||
-                      next.canPlayPause != snap.canPlayPause || next.canNext != snap.canNext;
+                      next.canPlayPause != snap.canPlayPause || next.canNext != snap.canNext ||
+                      next.canRepeat != snap.canRepeat ||
+                      next.repeatMode != snap.repeatMode || next.shuffle != snap.shuffle;
+            if (next.repeatMode != snap.repeatMode || next.shuffle != snap.shuffle)
+                runtime_log::writef(L"[smtc] play-mode=%d (0 顺序/1 列表/2 单曲/3 随机)", next.playMode());
             snap = std::move(next);
             if (props && !thumbCache_ && !thumbnailPending &&
                 now >= thumbnailRetryAtMs) {
@@ -775,6 +877,10 @@ struct SmtcMonitor::Impl {
             sampledPositionMs = 0;
             sampledDurationMs = 0;
             sampledAnchorMs = 0;
+            pendingPlayMode_ = -1;
+            pendingPlayModeUntilMs_ = 0;
+            repeatInitialLogged_ = false;
+            repeatMissingLogged_ = false;
             for (auto& adapter : adapters) {
                 if (adapter)
                     adapter->reset();
@@ -1044,6 +1150,85 @@ struct SmtcMonitor::Impl {
             startControlOperation(L"previous", L"TrySkipPreviousAsync", current, snapshotCopy,
                                   [current] { return current.TrySkipPreviousAsync(); });
             break;
+        case ControlAction::CycleRepeat: {
+            // 只保留三档：顺序播放(0) → 单曲循环(2) → 随机播放(3) → 顺序播放。
+            // 列表循环(1) 不再是独立档位；播放器自己上报列表循环时按顺序播放处理。
+            // 基准优先取本地权威模式：播放器上报滞后时，仍能保证每次点击前进一档。
+            const int curMode = snapshotCopy.playMode();
+            const int pending = pendingPlayMode_;
+            const bool pendingValid = pending >= 0 && smtc::nowUtcMs() < pendingPlayModeUntilMs_;
+            const int base = pendingValid ? pending : curMode;
+            const int nextMode = SmtcSnapshot::nextPlayMode(base);
+
+            const auto repeatMode =
+                static_cast<winrt::Windows::Media::MediaPlaybackAutoRepeatMode>(
+                    repeatModeFor(nextMode));
+            const bool wantShuffle = shuffleFor(nextMode);
+
+            if (!current || !snapshotCopy.canRepeat) {
+                writeSmtcControlLog(
+                    !current ? L"phase=operation-skipped action=play-mode reason=no-session"
+                             : L"phase=operation-skipped action=play-mode reason=unsupported");
+                break;
+            }
+            // 先把本地权威值定下来，后续上报即使滞后也不会影响下一次点击。
+            pendingPlayMode_ = nextMode;
+            // 网易云写入后 1~2 秒才回读得到新值，窗口给到 3.5 秒足够覆盖；
+            // 一旦回读到目标值会提前撤掉覆盖（见刷新路径）。
+            pendingPlayModeUntilMs_ = smtc::nowUtcMs() + 3500;
+            try {
+                // 带超时等待异步调用，避免播放器未响应时阻塞 SMTC 轮询线程。
+                auto waitControl = [](auto&& op) -> bool {
+                    if (!op)
+                        return false;
+                    const auto status = op.wait_for(std::chrono::milliseconds(1500));
+                    if (status != winrt::Windows::Foundation::AsyncStatus::Completed) {
+                        if (status == winrt::Windows::Foundation::AsyncStatus::Started)
+                            op.Cancel();
+                        return false;
+                    }
+                    op.GetResults();
+                    return true;
+                };
+                // 两个维度按顺序落地，避免并发互相覆盖。
+                // 顺序有讲究：开随机时先设循环再开随机；关随机时先关随机再设循环。
+                // 反过来做的话，网易云会把刚设好的循环又按"随机"改回去。
+                const bool completed =
+                    wantShuffle
+                        ? (waitControl(current.TryChangeAutoRepeatModeAsync(repeatMode)) &&
+                           waitControl(current.TryChangeShuffleActiveAsync(true)))
+                        : (waitControl(current.TryChangeShuffleActiveAsync(false)) &&
+                           waitControl(current.TryChangeAutoRepeatModeAsync(repeatMode)));
+                if (!completed) {
+                    pendingPlayMode_ = -1;
+                    pendingPlayModeUntilMs_ = 0;
+                    writeSmtcControlLog(
+                        L"phase=operation-failed action=play-mode reason=timeout-or-canceled");
+                    break;
+                }
+                // 回读校验：确认真的落下去了，失败也留痕，方便排查播放器不支持的情况。
+                int readRepeat = -1;
+                bool readShuffle = false;
+                if (auto verify = current.GetPlaybackInfo()) {
+                    if (auto rm = verify.AutoRepeatMode())
+                        readRepeat = static_cast<int>(rm.Value());
+                    if (auto sh = verify.IsShuffleActive())
+                        readShuffle = sh.Value();
+                }
+                std::wostringstream line;
+                line << L"phase=operation-complete action=play-mode from=" << base
+                     << L" mode=" << nextMode << L" readRepeat=" << readRepeat
+                     << L" readShuffle=" << (readShuffle ? 1 : 0)
+                     << L" (readback right after call, 网易云异步生效可能仍是旧值)";
+                writeSmtcControlLog(line.str());
+                requestRefresh(refreshSignal);
+            } catch (...) {
+                pendingPlayMode_ = -1;
+                pendingPlayModeUntilMs_ = 0;
+                writeSmtcControlLog(L"phase=operation-failed action=play-mode");
+            }
+            break;
+        }
         }
     }
 
@@ -1143,4 +1328,8 @@ void SmtcMonitor::skipNext() {
 
 void SmtcMonitor::skipPrevious() {
     Impl::requestControl(impl_->refreshSignal, Impl::ControlAction::SkipPrevious);
+}
+
+void SmtcMonitor::cycleRepeatMode() {
+    Impl::requestControl(impl_->refreshSignal, Impl::ControlAction::CycleRepeat);
 }

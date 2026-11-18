@@ -33,6 +33,23 @@ struct SmtcSnapshot {
     bool canPrev = false;
     bool canPlayPause = false;
     bool canNext = false;
+    bool canRepeat = false;
+    // 原始 SMTC 循环维度：0 关闭、1 单曲循环、2 列表循环（AutoRepeatMode）。
+    int repeatMode = 0;
+    bool shuffle = false; // 随机播放是独立开关（IsShuffleActive），不在 AutoRepeatMode 里
+    // 合并成用户视角的四种播放模式：0 顺序、1 列表循环、2 单曲循环、3 随机播放。
+    int playMode() const {
+        if (shuffle)
+            return 3;
+        if (repeatMode == 2)
+            return 1;
+        if (repeatMode == 1)
+            return 2;
+        return 0;
+    }
+    static constexpr int nextPlayMode(int mode) noexcept {
+        return mode == 2 ? 3 : (mode == 3 ? 0 : 2);
+    }
 };
 
 // 监听 QQ、汽水和 Spotify 的系统媒体会话及 Genres 中带 NCM-{ID} 的网易云增强会话。
@@ -53,6 +70,8 @@ public:
     void playPause();
     void skipNext();
     void skipPrevious();
+    // 切换播放模式：顺序播放 → 单曲循环 → 随机播放 → 顺序播放（由播放器通过 SMTC 执行）。
+    void cycleRepeatMode();
 
 private:
     struct Impl;

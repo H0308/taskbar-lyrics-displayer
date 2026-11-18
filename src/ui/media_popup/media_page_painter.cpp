@@ -59,7 +59,8 @@ void drawMediaContent(const PagePaintContext& context, ID2D1DeviceContext* rt, f
                     artistLayout, artistWidth, artistHeight, artistScrollOffset);
     drawMediaPet(context, rt, w);
     drawProgress(context, rt, w, media);
-    for (int i = 0; i < 3; ++i)
+    const int buttonCount = media.canRepeat ? 4 : 3;
+    for (int i = 0; i < buttonCount; ++i)
         drawButton(context, rt, i, media);
 }
 
@@ -98,7 +99,8 @@ void drawMediaSnapshot(const PagePaintContext& context, ID2D1DeviceContext* rt, 
                     snapshotArtistHeight, categorySnapshot.artistScrollOffset);
     drawMediaPet(context, rt, w);
     drawProgress(context, rt, w, snapshot);
-    for (int i = 0; i < 3; ++i)
+    const int buttonCount = snapshot.canRepeat ? 4 : 3;
+    for (int i = 0; i < buttonCount; ++i)
         drawButton(context, rt, i, snapshot);
     releaseCom(snapshotTitleLayout);
     releaseCom(snapshotArtistLayout);
@@ -210,6 +212,11 @@ void drawButton(const PagePaintContext& context, ID2D1DeviceContext* rt, int ind
     ID2D1Brush* iconBrush = enabled ? brushText : brushDisabled;
     if (index == 1 && enabled)
         iconBrush = brushTextOnAccent;
+    if (index == 3) {
+        media_control::drawRepeat(rt, controlGeometry, D2D1::Point2F(cx, cy), 8.0f, iconBrush,
+                                  content.repeatMode);
+        return;
+    }
     const float radius = index == 1 ? 9.5f : 8.5f;
     media_control::draw(rt, controlGeometry, index, content.playing, D2D1::Point2F(cx, cy), radius,
                         iconBrush);

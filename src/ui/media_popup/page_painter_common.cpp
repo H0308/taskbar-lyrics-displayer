@@ -34,7 +34,13 @@ std::wstring formatPlaybackDuration(int64_t milliseconds) {
 }
 
 bool buttonEnabled(bool available, int index, const OverlayMediaInfo& content) {
-    return available && (index == 1 ? content.canPlayPause : true);
+    if (!available)
+        return false;
+    if (index == 1)
+        return content.canPlayPause;
+    if (index == 3)
+        return content.canRepeat;
+    return true;
 }
 bool idleCopyAvailable(const IdlePresentation& content) {
     return content.showText && content.showQuote && content.copyEnabled && !content.loading &&

@@ -2208,10 +2208,10 @@ struct MediaPopup::Impl {
     int hitButton(float x, float y) const {
         if (categoryTransition.active())
             return -1;
-        for (int i = 0; i < 3; ++i) {
-            if (media_popup_paint::buttonEnabled(available, i, media) &&
+        for (size_t i = 0; i < mediaLayout_.buttons.size(); ++i) {
+            if (media_popup_paint::buttonEnabled(available, static_cast<int>(i), media) &&
                 contains(mediaLayout_.buttons[i], x, y))
-                return i;
+                return static_cast<int>(i);
         }
         return -1;
     }
@@ -3586,10 +3586,18 @@ void MediaPopup::setMedia(const OverlayMediaInfo& info, bool available,
                              info.canPrev != impl_->media.canPrev ||
                              info.canPlayPause != impl_->media.canPlayPause ||
                              info.canNext != impl_->media.canNext ||
+                             info.canRepeat != impl_->media.canRepeat ||
+                             info.repeatMode != impl_->media.repeatMode ||
                              info.playing != impl_->media.playing;
         impl_->songTransitionPending = false;
         impl_->media = info;
         impl_->available = available;
+        if (!info.canRepeat) {
+            if (impl_->hoverButton == 3)
+                impl_->hoverButton = -1;
+            if (impl_->pressedButton == 3)
+                impl_->pressedButton = -1;
+        }
         impl_->syncPetMode(textChanged);
         if (coverChanged)
             impl_->coverDirty = true;

@@ -39,6 +39,7 @@ public:
     struct Resources {
         Microsoft::WRL::ComPtr<IDWriteTextFormat> fmtTitle_;
         Microsoft::WRL::ComPtr<IDWriteTextFormat> fmtArtist_;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> fmtRepeatHint_;
         Microsoft::WRL::ComPtr<IDWriteTextFormat> fmtLyric_;
         Microsoft::WRL::ComPtr<IDWriteTextFormat> fmtNextLyric_;
         Microsoft::WRL::ComPtr<IDWriteTextFormat> fmtSecondary_;

@@ -214,6 +214,10 @@ void App::onControl(MediaControl c) {
         name = L"next";
         monitor.skipNext();
         break;
+    case MediaControl::Repeat:
+        name = L"repeat";
+        monitor.cycleRepeatMode();
+        break;
     }
     runtime_log::writef(L"[action][media-control] command=%s", name);
 }
