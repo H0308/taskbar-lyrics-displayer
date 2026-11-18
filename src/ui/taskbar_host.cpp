@@ -146,14 +146,13 @@ constexpr float kLyricPreviewOpacity = 0.90f;        // 下一行预览透明度
 constexpr int kImmersiveControlPrevious = 0;
 constexpr int kImmersiveControlPlayPause = 1;
 constexpr int kImmersiveControlNext = 2;
-constexpr int kImmersiveControlVolume = 3;
-constexpr int kImmersiveControlExit = 4;
+constexpr int kImmersiveControlRepeat = 3;
+constexpr int kImmersiveControlVolume = 4;
+constexpr int kImmersiveControlExit = 5;
 // Dock 的快捷应用入口使用独立图标和命中项，沉浸模式不显示。
-constexpr int kDockControlQuickApps = 5;
-constexpr int kImmersiveControlMenu = 6;
-constexpr int kImmersiveControlCount = 6; // 沉浸模式显示 6 个，索引 5 保留给 Dock 入口
-constexpr int kExpandedControlCount = 7;
-constexpr int kAppBarControlCount = 7;
+constexpr int kDockControlQuickApps = 6;
+constexpr int kImmersiveControlMenu = 7;
+constexpr int kExpandedControlCount = 8;
 constexpr float kAppBarHeightDip = 48.0f;
 constexpr float kImmersiveControlRadiusFactor = 0.24f;
 constexpr float kImmersiveControlMinRadius = 8.0f;
@@ -802,15 +801,23 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return embeddedResourceVisible() ? resourceZoneWidth() + kDockResourceZoneGap : 0.0f;
     }
 
-    int expandedControlCount() const {
-        return isAppBarView() ? kAppBarControlCount : kImmersiveControlCount;
+    bool expandedControlVisible(int index) const {
+        if (index < 0 || index >= kExpandedControlCount)
+            return false;
+        if (index == kImmersiveControlRepeat)
+            return media.canRepeat;
+        if (index == kDockControlQuickApps)
+            return isAppBarView();
+        return true;
     }
 
-    bool expandedControlVisible(int index) const {
-        if (!isAppBarView())
-            return index >= 0 && index < kExpandedControlCount && index != kDockControlQuickApps;
-        return (index >= kImmersiveControlPrevious && index <= kDockControlQuickApps) ||
-               index == kImmersiveControlMenu;
+    int expandedControlCount() const {
+        int count = 0;
+        for (int i = 0; i < kExpandedControlCount; ++i) {
+            if (expandedControlVisible(i))
+                ++count;
+        }
+        return count;
     }
 
     bool shouldShowWindow() const {
@@ -898,10 +905,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     bool updateMediaInfo(const OverlayMediaInfo& info) {
         bool thumbChanged = info.thumbnail != media.thumbnail;
         bool textChanged = info.title != media.title || info.artist != media.artist;
+        const bool canRepeatChanged = info.canRepeat != media.canRepeat;
         bool controlsChanged = info.canPrev != media.canPrev ||
                                info.canPlayPause != media.canPlayPause ||
                                info.canNext != media.canNext ||
-                               info.canRepeat != media.canRepeat ||
+                               canRepeatChanged ||
                                info.repeatMode != media.repeatMode;
         bool playingChanged = info.playing != media.playing;
         bool platformChanged = info.sourceAppUserModelId != media.sourceAppUserModelId;
@@ -910,6 +918,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             (info.hasDominantColor && info.dominantColor != media.dominantColor);
         bool durationChanged = info.durationMs != media.durationMs;
         media = info;
+        if (canRepeatChanged && isExpandedView()) {
+            requestInvalidation(RenderInvalidation::Layout);
+            immersiveControlHover_ = -1;
+            immersiveControlPressed_ = -1;
+        }
         if (!media.canRepeat) {
             if (hwnd && (repeatHintTarget_ >= 0 || repeatHintUntil_ != 0))
                 KillTimer(hwnd, kRepeatHintTimerId);
@@ -4097,6 +4110,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             case kImmersiveControlNext:
                 enabled = media.canNext;
                 break;
+            case kImmersiveControlRepeat:
+                enabled = media.canRepeat;
+                break;
             case kDockControlQuickApps:
                 enabled = idle.quickStartEnabled && static_cast<bool>(onDockQuickApps);
                 break;
@@ -4182,6 +4198,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         drawButton(kImmersiveControlPrevious, centers[kImmersiveControlPrevious], r);
         drawButton(kImmersiveControlPlayPause, centers[kImmersiveControlPlayPause], r);
         drawButton(kImmersiveControlNext, centers[kImmersiveControlNext], r);
+        if (expandedControlVisible(kImmersiveControlRepeat))
+            drawRepeatButton(centers[kImmersiveControlRepeat], r);
         drawVolumeButton(centers[kImmersiveControlVolume], r);
         drawExitImmersiveButton(centers[kImmersiveControlExit], r);
         if (expandedControlVisible(kDockControlQuickApps)) {
@@ -4596,6 +4614,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         case kImmersiveControlPrevious:
         case kImmersiveControlPlayPause:
         case kImmersiveControlNext:
+        case kImmersiveControlRepeat:
+            if (index == kImmersiveControlRepeat)
+                armRepeatHint(SmtcSnapshot::nextPlayMode(media.repeatMode));
             if (onControl)
                 onControl(static_cast<MediaControl>(index));
             break;
