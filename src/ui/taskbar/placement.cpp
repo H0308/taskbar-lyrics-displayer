@@ -1,6 +1,7 @@
 #include "ui/taskbar/placement.h"
 #include <shellapi.h>
 #include <algorithm>
+#include <cstdlib>
 namespace taskbar_detail {
 std::vector<std::pair<int, int>> occupiedIntervals(const OccupiedRegions& input) {
     std::vector<std::pair<int, int>> v;
@@ -30,28 +31,6 @@ std::vector<std::pair<int, int>> occupiedIntervals(const OccupiedRegions& input)
     }
     return merged;
 }
-int previewMajorPixels(const WindowPlacement& anchor, bool vertical, int desiredMajor) {
-    const int anchorMajor = anchor.availableMajor > 0 ? anchor.availableMajor
-                                                      : (vertical ? anchor.height : anchor.width);
-    const int currentMajor =
-        desiredMajor > 0 ? desiredMajor : (vertical ? anchor.height : anchor.width);
-    return std::clamp(currentMajor, 1, std::max(1, anchorMajor));
-}
-WindowPlacement dragPreview(const WindowPlacement& anchor, int mode, bool vertical,
-                            int desiredMajor) {
-    WindowPlacement preview = anchor;
-    const int previewMajor = previewMajorPixels(anchor, vertical, desiredMajor);
-    if (vertical) {
-        preview.height = previewMajor;
-        if (mode == 0)
-            preview.y = anchor.y + anchor.height - preview.height;
-    } else {
-        preview.width = previewMajor;
-        if (mode == 0)
-            preview.x = anchor.x + anchor.width - preview.width;
-    }
-    return preview;
-}
 TaskbarPlacementStatus calculatePlacement(const PlacementInput& input, WindowPlacement& placement) {
     // 空闲区间 = 任务栏主轴减去占用区间
     struct Span {
@@ -80,10 +59,17 @@ TaskbarPlacementStatus calculatePlacement(const PlacementInput& input, WindowPla
     int availableMajor = 0;
     int x = 0;
     int y = 0;
+    // align: 0 = 居左，1 = 居右（模式 1/3 为居右）。
+    int align = input.positionMode % 2;
     auto place = [&](const Span& s, int w) {
         availableMajor = std::max(1, usableMajor(s));
         pxMajor = std::min(w, std::max(1, majorEnd - majorStart));
-        int major = input.positionMode == 1 ? s.l + input.gap : s.r - input.gap - pxMajor;
+        int major;
+        if (align == 0) {
+            major = s.l + input.gap;
+        } else {
+            major = s.r - input.gap - pxMajor;
+        }
         if (pxMajor <= majorEnd - majorStart)
             major = std::clamp(major, majorStart, majorEnd - pxMajor);
         else
@@ -108,29 +94,44 @@ TaskbarPlacementStatus calculatePlacement(const PlacementInput& input, WindowPla
         place(full, input.compressedMinMajor);
         result = TaskbarPlacementStatus::ForcedOverlap;
     } else {
-        // 原位优先：模式 0 锚定通知区域之前的主轴末端空闲区，模式 1 锚定
-        // 任务栏起始端空闲区。横向对应右/左，纵向对应下/上。
-        const Span& pref = input.positionMode == 1 ? spans.front() : spans.back();
-        if (usableMajor(pref) >= input.compressedMinMajor) {
-            place(pref, std::min(usableMajor(pref), input.maxMajor)); // 原位优先：被挤压先收缩长度
-            result = usableMajor(pref) < input.minMajor ? TaskbarPlacementStatus::Compressed
-                                                        : TaskbarPlacementStatus::Safe;
+        // 目标空白区：模式 0/1 取第一空白区，2/3 取第二空白区（单空白区时二者相同，
+        // 天然满足"2、3 自动等同 0、1"）。
+        const Span* target = (input.positionMode == 0 || input.positionMode == 1)
+                                 ? &spans.front()
+                                 : &spans.back();
+        if (usableMajor(*target) >= input.compressedMinMajor) {
+            // 原位优先：被挤压先收缩长度
+            place(*target, std::min(usableMajor(*target), input.maxMajor));
+            result = usableMajor(*target) < input.minMajor ? TaskbarPlacementStatus::Compressed
+                                                           : TaskbarPlacementStatus::Safe;
         } else {
-            // 原位压到安全最小长度仍放不下：换到容得下的最大空闲区。
-            const Span* best = nullptr;
+            // 原位压到安全最小长度仍放不下：就近换到容得下的空闲区。
+            const Span* rec = nullptr;
+            long long bestScore = 0;
+            const long long ref = align == 0 ? target->l : target->r;
             for (const auto& s : spans) {
-                if (usableMajor(s) >= input.compressedMinMajor &&
-                    (!best || s.r - s.l > best->r - best->l))
-                    best = &s;
+                if (usableMajor(s) < input.compressedMinMajor)
+                    continue;
+                const int w = std::min(usableMajor(s), input.maxMajor);
+                if (w <= 0)
+                    continue;
+                const int low = s.l + input.gap;
+                const int high = std::max(low, s.r - input.gap - w);
+                const int candidate = align == 0 ? low : high;
+                const long long score = std::llabs((long long)candidate - ref);
+                if (!rec || score < bestScore) {
+                    rec = &s;
+                    bestScore = score;
+                }
             }
-            if (best) {
-                place(*best, std::min(usableMajor(*best), input.maxMajor));
+            if (rec) {
+                place(*rec, std::min(usableMajor(*rec), input.maxMajor));
                 result = TaskbarPlacementStatus::Relocated;
             } else if (input.allowOverlap) {
                 // 用户已明确允许重叠时，仍把窗口限制在任务栏主轴范围内，
                 // 只允许与已探测到的控件相交，不让窗口越出任务栏；尺寸使用
                 // 压缩后的最小值，避免强制开启时又恢复为标准尺寸。
-                place(pref, input.compressedMinMajor);
+                place(*target, input.compressedMinMajor);
                 result = TaskbarPlacementStatus::ForcedOverlap;
             } else {
                 return TaskbarPlacementStatus::NoSpace;

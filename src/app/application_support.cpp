@@ -5,10 +5,14 @@ const wchar_t* trayCommandName(int command) {
     switch (command) {
     case kCmdToggleTaskbar:
         return L"toggle-taskbar";
-    case kCmdTaskbarPosNotify:
-        return L"taskbar-position-notify";
-    case kCmdTaskbarPosLeft:
-        return L"taskbar-position-left";
+    case kCmdTaskbarPosFirstLeft:
+        return L"taskbar-position-first-left";
+    case kCmdTaskbarPosFirstRight:
+        return L"taskbar-position-first-right";
+    case kCmdTaskbarPosLastLeft:
+        return L"taskbar-position-last-left";
+    case kCmdTaskbarPosLastRight:
+        return L"taskbar-position-last-right";
     case kCmdSpectrum:
         return L"spectrum";
     case kCmdAutoStart:

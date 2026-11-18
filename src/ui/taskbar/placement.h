@@ -27,6 +27,8 @@ struct PlacementInput {
     UINT edge = 0;
     bool vertical = false;
     bool allowOverlap = false;
+    // 位置模式：0/1 = 第一空白区居左/居右；
+    // 2/3 = 第二空白区居左/居右（任务栏只剩一处空白区时自动等同 0/1）。
     int positionMode = 0;
     int gap = 0;
     int minMajor = 0;
@@ -38,6 +40,4 @@ struct PlacementInput {
 };
 std::vector<std::pair<int, int>> occupiedIntervals(const OccupiedRegions& input);
 TaskbarPlacementStatus calculatePlacement(const PlacementInput& input, WindowPlacement& placement);
-WindowPlacement dragPreview(const WindowPlacement& anchor, int mode, bool vertical,
-                            int desiredMajor);
 } // namespace taskbar_detail

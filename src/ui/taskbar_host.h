@@ -63,8 +63,8 @@ public:
     void setImmersiveMenuCallback(std::function<void(POINT)> cb);
     // Dock 模式快捷应用按钮：显示每日一言“快捷启动”配置中的应用；沉浸模式不显示。
     void setDockQuickAppsCallback(std::function<void(POINT)> cb);
-    // 拖动歌词并吸附到另一有效锚点后通知应用层持久化位置。
-    void setPositionModeChangedCallback(std::function<void(int)> cb);
+    // 拖动歌词结束后通知应用层持久化位置（目标锚定模式 0-3）。
+    void setPositionModeChangedCallback(std::function<void(int mode)> cb);
     void setStatusTextCycleCompletedCallback(std::function<void()> cb);
     void setPlacementStatusCallback(std::function<void(TaskbarPlacementStatus)> cb);
     void setAllowOverlap(bool on);
@@ -121,10 +121,9 @@ public:
     void show() override;
     void hide() override;
 
-    // 任务栏上的锚定位置：0 = 最右空闲区（通知区域左侧，默认）；
-    // 1 = 最左空闲区（居中任务栏时在开始按钮左侧，左对齐时在应用图标右侧）。
-    // 两种模式都会自动避开小组件/搜索/任务视图/应用图标/TrafficMonitor/酷狗官方任务栏歌词：
-    // 原位优先收缩，压到最小宽度仍放不下时换到容得下的最大空闲区
+    // 位置模式：0/1 = 第一空白区居左/居右；2/3 = 第二空白区居左/居右。
+    // 布局自动避开小组件/搜索/任务视图/应用图标/TrafficMonitor/酷狗官方任务栏歌词：
+    // 原位优先收缩，压到最小宽度仍放不下时就近换到容得下的空闲区。
     void setPositionMode(int mode);
     // Explorer 重启后重建/重附着（托盘主窗口收到 TaskbarCreated 广播后调用）；
     // 广播只投递给顶层窗口，作为任务栏子窗口的歌词窗自己收不到

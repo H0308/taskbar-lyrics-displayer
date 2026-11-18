@@ -302,7 +302,7 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
                                      : lightLyricAppearance_;
         hasGlobalLyricAppearance_ = true;
     }
-    taskbarPosition_ = std::clamp(j.value("taskbarPosition", 0), 0, 1);
+    taskbarPosition_ = std::clamp(j.value("taskbarPosition", 0), 0, 3);
     const int savedViewMode = j.contains("taskbarViewMode")
                                   ? j.value("taskbarViewMode", 0)
                                   : (j.value("taskbarImmersive", false) ? 1 : 0);

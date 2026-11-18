@@ -51,6 +51,7 @@ private:
 };
 
 // 按下与拖动共用一次手势，只有越过阈值后才进入拖动。
+// candidate 在这里表示任务栏主轴上的偏移量（像素，相对任务栏起始端）。
 class TaskbarDragGesture {
 public:
     bool pressed() const { return pressed_; }
@@ -58,24 +59,24 @@ public:
     POINT cursor() const { return cursor_; }
     int candidate() const { return candidate_; }
     int previewMajor() const { return previewMajor_; }
-    void press(POINT point, int mode) {
+    void press(POINT point, int offset) {
         pressed_ = true;
         start_ = cursor_ = point;
-        candidate_ = mode;
+        candidate_ = offset;
     }
     bool move(POINT point, int thresholdX, int thresholdY) {
         cursor_ = point;
         return !dragging_ && (std::abs(point.x - start_.x) >= thresholdX ||
                               std::abs(point.y - start_.y) >= thresholdY);
     }
-    void begin(int previewMajor, int mode) {
+    void begin(int previewMajor, int offset) {
         dragging_ = true;
         previewMajor_ = previewMajor;
-        candidate_ = mode;
+        candidate_ = offset;
     }
     void end() { pressed_ = dragging_ = false; }
     void clearPreview() { previewMajor_ = 0; }
-    void setCandidate(int mode) { candidate_ = mode; }
+    void setCandidate(int offset) { candidate_ = offset; }
 
 private:
     bool pressed_ = false, dragging_ = false;

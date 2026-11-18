@@ -106,14 +106,22 @@ std::vector<fluent::FluentMenuItem> App::buildMenuItems(bool fullTrayMenu) {
             pos.text = L"任务栏位置";
             pos.icon = settings_icon::Kind::Position;
             fluent::FluentMenuItem sub;
-            sub.id = kCmdTaskbarPosNotify;
-            sub.text = L"通知区域左侧";
+            sub.id = kCmdTaskbarPosFirstLeft;
+            sub.text = L"第一空白区左侧";
             sub.icon = settings_icon::Kind::Position;
             sub.checked = settings_.taskbarPosition_ == 0;
             pos.submenu.push_back(sub);
-            sub.id = kCmdTaskbarPosLeft;
-            sub.text = L"任务栏最左侧";
+            sub.id = kCmdTaskbarPosFirstRight;
+            sub.text = L"第一空白区右侧";
             sub.checked = settings_.taskbarPosition_ == 1;
+            pos.submenu.push_back(sub);
+            sub.id = kCmdTaskbarPosLastLeft;
+            sub.text = L"第二空白区左侧";
+            sub.checked = settings_.taskbarPosition_ == 2;
+            pos.submenu.push_back(sub);
+            sub.id = kCmdTaskbarPosLastRight;
+            sub.text = L"第二空白区右侧";
+            sub.checked = settings_.taskbarPosition_ == 3;
             pos.submenu.push_back(sub);
             items.push_back(std::move(pos));
         }
@@ -309,11 +317,16 @@ void App::onMenuCommand(int cmd, const wchar_t* source) {
     case kCmdRenderModeMinimal:
         applyRenderMode(static_cast<int>(RenderMode::Minimal));
         break;
-    case kCmdTaskbarPosNotify:
-    case kCmdTaskbarPosLeft:
+    case kCmdTaskbarPosFirstLeft:
+    case kCmdTaskbarPosFirstRight:
+    case kCmdTaskbarPosLastLeft:
+    case kCmdTaskbarPosLastRight:
         if (settings_.taskbarViewMode_ != TaskbarViewMode::Embedded)
             break;
-        settings_.taskbarPosition_ = cmd == kCmdTaskbarPosLeft ? 1 : 0;
+        settings_.taskbarPosition_ = cmd == kCmdTaskbarPosFirstLeft   ? 0
+                                     : cmd == kCmdTaskbarPosFirstRight ? 1
+                                     : cmd == kCmdTaskbarPosLastLeft   ? 2
+                                                                      : 3;
         logSettingInt(L"taskbar-position", settings_.taskbarPosition_);
         forEachHost([&](TaskbarHost* host) { host->setPositionMode(settings_.taskbarPosition_); });
         saveSettings();

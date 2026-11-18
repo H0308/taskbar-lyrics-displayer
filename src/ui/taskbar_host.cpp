@@ -455,7 +455,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     bool centerAlign_ = true;
     UINT taskbarEdge_ = ABE_BOTTOM;
     bool lightTheme_ = false;
-    int positionMode_ = 0; // 0 = 通知区域前；1 = 任务栏起始端
+    int positionMode_ = 0; // 0/1 第一空白区居左/居右；2/3 第二空白区居左/居右
 
     // 工作线程只持有独立状态，不持有 Impl；窗口销毁只发停止信号，不能 join。
     // 最后一个持有者负责回收尚未拾取的结果，允许跨进程调用晚于窗口销毁返回。
@@ -499,7 +499,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     std::function<void(POINT)> onContextMenu;
     std::function<void(POINT)> onImmersiveMenu;
     std::function<void(POINT)> onDockQuickApps;
-    std::function<void(int)> onPositionModeChanged;
+    std::function<void(int mode)> onPositionModeChanged;
     bool mouseOver_ = false;
     bool trackingLeave_ = false;
     int immersiveControlHover_ = -1;
@@ -517,6 +517,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     using ImmersivePresence = TaskbarPresence::Phase;
     TaskbarPresence presence_;
     TaskbarDragGesture drag_;
+    int dragStartOffset_ = 0; // 拖动起始时窗口主轴偏移（px，相对任务栏起始端）
+    POINT dragStartCursor_{}; // 拖动起始时鼠标屏幕位置
     bool immersiveYieldArmed_ = false;
     bool immersivePresenceTimerRunning_ = false;
 
@@ -1293,7 +1295,6 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     }
 
     TaskbarPlacementStatus calculateWindowPlacement(WindowPlacement& placement,
-                                                    int positionMode = -1,
                                                     bool updateStatus = true) {
         auto finishStatus = [&](TaskbarPlacementStatus status) {
             return updateStatus ? setPlacementStatus(status) : status;
@@ -1329,8 +1330,6 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return finishStatus(TaskbarPlacementStatus::Unavailable);
         syncCompactTaskbarLayout(vertical ? 0 : crossPx);
 
-        const int effectivePositionMode = positionMode < 0 ? positionMode_ : positionMode;
-
         int gap = std::max(4, (int)std::lround(4.0f * scale()));
         float minWidthDip = vertical ? kVerticalMinLengthDip : kMinWidthDip;
         float maxWidthDip = vertical ? kVerticalMaxLengthDip : kMaxWidthDip;
@@ -1364,7 +1363,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         input.edge = taskbarEdge_;
         input.vertical = vertical;
         input.allowOverlap = allowOverlap_;
-        input.positionMode = effectivePositionMode;
+        input.positionMode = positionMode_;
         input.gap = gap;
         input.minMajor = minW;
         input.compressedMinMajor = compressedMinW;
@@ -1466,58 +1465,145 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return true;
     }
 
-    static bool usableDragPlacement(TaskbarPlacementStatus status) {
-        return status != TaskbarPlacementStatus::Unavailable &&
-               status != TaskbarPlacementStatus::NoSpace;
+    // 主轴空白区间（屏幕坐标）：占用区间取逆，供拖动贴靠与模式解析使用。
+    // 小于 8px 的缝隙视为测量噪声，不构成空白区。
+    std::vector<std::pair<int, int>> freeGapIntervals() const {
+        constexpr int kMinFreeGapPx = 8;
+        std::vector<std::pair<int, int>> gaps;
+        const bool vertical = isVerticalTaskbar();
+        const int majorStart = vertical ? rcTaskbar_.top : rcTaskbar_.left;
+        const int majorEnd = vertical ? rcTaskbar_.bottom : rcTaskbar_.right;
+        const auto occupied = occupiedIntervals();
+        int cursor = majorStart;
+        for (const auto& o : occupied) {
+            if (o.first > cursor) {
+                const int gapEnd = std::min(o.first, majorEnd);
+                if (gapEnd - cursor >= kMinFreeGapPx)
+                    gaps.emplace_back(cursor, gapEnd);
+            }
+            cursor = std::max(cursor, std::min(o.second, majorEnd));
+        }
+        if (cursor < majorEnd && majorEnd - cursor >= kMinFreeGapPx)
+            gaps.emplace_back(cursor, majorEnd);
+        if (gaps.empty() && occupied.empty())
+            gaps.emplace_back(majorStart, majorEnd);
+        return gaps;
     }
-
-    WindowPlacement dragPreviewFromAnchor(const WindowPlacement& anchor, int mode) const {
-        return taskbar_detail::dragPreview(anchor, mode, isVerticalTaskbar(), drag_.previewMajor());
-    }
-
-    bool dragPreviewPlacementAt(POINT cursorScreen, WindowPlacement& placement, int& mode) {
-        bool found = false;
-        long long bestDistance = 0;
-        const int cursorMajor = isVerticalTaskbar() ? cursorScreen.y : cursorScreen.x;
-        for (int candidateMode = 0; candidateMode <= 1; ++candidateMode) {
-            WindowPlacement anchor;
-            const TaskbarPlacementStatus status =
-                calculateWindowPlacement(anchor, candidateMode, false);
-            if (!usableDragPlacement(status))
+ 
+    // 拖动落点：在 16px 阈值内贴靠到空白区左右边缘，否则保持跟手位置。
+    static int draggedMajorStart(int requestedScreen, int previewMajor,
+                                 const std::vector<std::pair<int, int>>& gaps) {
+        constexpr int kSnapThresholdPx = 16;
+        const int endScreen = requestedScreen + previewMajor;
+        int best = requestedScreen;
+        int bestDistance = kSnapThresholdPx + 1;
+        for (const auto& g : gaps) {
+            if (g.second - g.first < previewMajor / 2)
                 continue;
-
-            const WindowPlacement preview = dragPreviewFromAnchor(anchor, candidateMode);
-            const int previewStart = isVerticalTaskbar() ? preview.y : preview.x;
-            const int previewLength = isVerticalTaskbar() ? preview.height : preview.width;
-            const long long distance =
-                std::llabs(static_cast<long long>(cursorMajor) * 2 -
-                           (static_cast<long long>(previewStart) * 2 + previewLength));
-            if (!found || distance < bestDistance ||
-                (distance == bestDistance && candidateMode == positionMode_)) {
-                found = true;
-                bestDistance = distance;
-                placement = preview;
-                mode = candidateMode;
+            const int toLeft = std::abs(requestedScreen - g.first);
+            if (toLeft <= kSnapThresholdPx && toLeft < bestDistance) {
+                bestDistance = toLeft;
+                best = g.first;
+            }
+            const int toRight = std::abs(endScreen - g.second);
+            if (toRight <= kSnapThresholdPx && toRight < bestDistance) {
+                bestDistance = toRight;
+                best = g.second - previewMajor;
             }
         }
-        return found;
+        return best;
+    }
+
+    // 提交拖拽时按落点解析锚定模式：0/1 = 第一空白区左/右，2/3 = 第二空白区左/右；
+    // 未贴靠返回 -1（保持当前模式）。第一、第二空白区为同一处时只命中 0/1（满足 2→0、3→1）。
+    int resolveSnappedMode(int startPx, int previewMajor) const {
+        if (previewMajor <= 0)
+            return -1;
+        const auto gaps = freeGapIntervals();
+        if (gaps.empty())
+            return -1;
+        constexpr int kSnapThresholdPx = 16;
+        const int endPx = startPx + previewMajor;
+        const auto& first = gaps.front();
+        const auto& last = gaps.back();
+        int best = -1;
+        int bestDistance = kSnapThresholdPx + 1;
+        auto consider = [&](int distance, int mode) {
+            if (distance <= kSnapThresholdPx && distance < bestDistance) {
+                bestDistance = distance;
+                best = mode;
+            }
+        };
+        consider(std::abs(startPx - first.first), 0);
+        consider(std::abs(endPx - first.second), 1);
+        if (&last != &first) {
+            consider(std::abs(startPx - last.first), 2);
+            consider(std::abs(endPx - last.second), 3);
+        }
+        return best;
+    }
+
+    // 拖动中的预览矩形：主轴起点由 updateDragPreviewPlacement 计算并贴靠。
+    WindowPlacement dragPlacementAt(int startScreen, int previewMajor) const {
+        WindowPlacement preview;
+        const bool vertical = isVerticalTaskbar();
+        const int crossMargin = std::max(2, (int)std::lround(2.0f * scale()));
+        int crossPx = 0;
+        {
+            WindowPlacement current;
+            if (currentWindowPlacement(current))
+                crossPx = vertical ? current.width : current.height;
+        }
+        if (crossPx <= 0) {
+            const int taskbarCrossPx = taskbarCrossPixels(rcTaskbar_, taskbarEdge_);
+            crossPx = taskbarCrossPx - crossMargin * 2;
+            if (crossPx < 16)
+                crossPx = taskbarCrossPx;
+        }
+        if (vertical) {
+            preview.x = taskbarEdge_ == ABE_LEFT ? rcTaskbar_.left + crossMargin
+                                                 : rcTaskbar_.right - crossMargin - crossPx;
+            preview.y = startScreen;
+            preview.width = crossPx;
+            preview.height = previewMajor;
+        } else {
+            preview.x = startScreen;
+            preview.y = rcTaskbar_.top + crossMargin;
+            preview.width = previewMajor;
+            preview.height = crossPx;
+        }
+        return preview;
     }
 
     bool updateDragPreviewPlacement() {
         if (!drag_.dragging())
             return false;
-        WindowPlacement placement;
-        int mode = positionMode_;
-        if (!dragPreviewPlacementAt(drag_.cursor(), placement, mode))
+        const bool vertical = isVerticalTaskbar();
+        const int majorStart = vertical ? rcTaskbar_.top : rcTaskbar_.left;
+        const int majorLen = vertical ? rcTaskbar_.bottom - rcTaskbar_.top
+                                      : rcTaskbar_.right - rcTaskbar_.left;
+        const int previewMajor = drag_.previewMajor();
+        if (previewMajor <= 0)
             return false;
-
-        drag_.setCandidate(mode);
+        const int maxStart = std::max(0, majorLen - previewMajor);
+        const POINT cursor = drag_.cursor();
+        const int cursorMajor = vertical ? cursor.y : cursor.x;
+        const int dragStartMajor = vertical ? dragStartCursor_.y : dragStartCursor_.x;
+        int startPx =
+            std::clamp(dragStartOffset_ + (cursorMajor - dragStartMajor), 0, maxStart);
+        const auto gaps = freeGapIntervals();
+        if (!gaps.empty()) {
+            startPx = std::clamp(draggedMajorStart(majorStart + startPx, previewMajor, gaps) -
+                                     majorStart,
+                                 0, maxStart);
+        }
+        drag_.setCandidate(startPx);
+        const WindowPlacement preview = dragPlacementAt(majorStart + startPx, previewMajor);
         WindowPlacement current;
-        if (currentWindowPlacement(current) && current.x == placement.x &&
-            current.y == placement.y && current.width == placement.width &&
-            current.height == placement.height)
+        if (currentWindowPlacement(current) && current.x == preview.x && current.y == preview.y &&
+            current.width == preview.width && current.height == preview.height)
             return false;
-        applyWindowPlacement(placement, true, true);
+        applyWindowPlacement(preview, true, true);
         return true;
     }
 
@@ -1530,7 +1616,14 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const int preview = currentWindowPlacement(current)
                                 ? (isVerticalTaskbar() ? current.height : current.width)
                                 : 0;
-        drag_.begin(preview, positionMode_);
+        drag_.begin(preview, 0);
+        const int majorStart = isVerticalTaskbar() ? rcTaskbar_.top : rcTaskbar_.left;
+        RECT rect{};
+        dragStartOffset_ = GetWindowRect(hwnd, &rect)
+                               ? (isVerticalTaskbar() ? rect.top : rect.left) - majorStart
+                               : 0;
+        dragStartCursor_ = drag_.cursor();
+        drag_.setCandidate(dragStartOffset_);
         SetCursor(LoadCursorW(nullptr, IDC_SIZEALL));
         cancelSceneWindowResize();
         setSongTransitionPending(false);
@@ -1551,7 +1644,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
     void finishLyricDrag(bool commit) {
         const bool wasDragging = drag_.dragging();
-        const int committedMode = drag_.candidate();
+        const int committedStartPx = drag_.candidate();
+        const int committedMajor = drag_.previewMajor();
         drag_.end();
         if (GetCapture() == hwnd)
             ReleaseCapture();
@@ -1562,8 +1656,13 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         trackingLeave_ = false;
         mouseOver_ = false;
         immersiveControlHover_ = -1;
-        if (commit)
-            positionMode_ = committedMode;
+        if (commit) {
+            const int snappedMode = resolveSnappedMode(committedStartPx, committedMajor);
+            if (snappedMode >= 0)
+                // 贴靠到空白区边缘：自动切换到对应的锚定模式（0-3）。
+                positionMode_ = snappedMode;
+            // 未贴靠（-1）：不改变当前模式（四锚定模式，无自由落点）。
+        }
         requestInvalidation(RenderInvalidation::Layout);
         adjustPosition();
         requestFrameAndFlush();
@@ -3106,7 +3205,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     }
 
     void setPositionMode(int mode) {
-        mode = mode == 1 ? 1 : 0;
+        mode = std::clamp(mode, 0, 3);
         if (positionMode_ == mode)
             return;
         positionMode_ = mode;
@@ -7184,7 +7283,14 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             }
             POINT pressPoint{};
             GetCursorPos(&pressPoint);
-            drag_.press(pressPoint, positionMode_);
+            updateRects();
+            const int majorStart = isVerticalTaskbar() ? rcTaskbar_.top : rcTaskbar_.left;
+            RECT windowRect{};
+            const int currentOffset = GetWindowRect(hwnd, &windowRect)
+                                          ? (isVerticalTaskbar() ? windowRect.top : windowRect.left) -
+                                                majorStart
+                                          : 0;
+            drag_.press(pressPoint, currentOffset);
             SetCapture(hwnd);
             if (inlineControlHover_ >= 0)
                 requestFrameAndFlush();

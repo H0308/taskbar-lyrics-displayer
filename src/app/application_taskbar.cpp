@@ -402,7 +402,6 @@ void App::configureTaskbarHostCallbacks(TaskbarHost* host, bool primary) {
     host->setImmersiveMenuCallback([this](POINT pt) { showTrayMenu(pt); });
     host->setContextMenuCallback([this](POINT pt) { showTaskbarMenu(pt); });
     host->setPositionModeChangedCallback([this](int mode) {
-        mode = mode == 1 ? 1 : 0;
         if (settings_.taskbarPosition_ == mode)
             return;
         settings_.taskbarPosition_ = mode;

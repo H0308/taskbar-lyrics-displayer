@@ -46,6 +46,7 @@ struct AppSettings {
     int holidayCalendarYear_ = 0;
     int64_t holidayCalendarUpdatedAt_ = 0;
     std::vector<HolidayDayInfo> holidayCalendar_;
+    // 位置模式：0/1 = 第一空白区居左/居右；2/3 = 第二空白区居左/居右。
     int taskbarPosition_ = 0;
     TaskbarViewMode taskbarViewMode_ = TaskbarViewMode::Embedded;
     std::wstring taskbarMonitorId_;
