@@ -453,6 +453,7 @@ void SettingsSections::onCommand(int id, int option) {
             actions.onWindowTheme(themeModeFromIndex(row->selected));
         break;
     case kIdRenderMode:
+        state.renderMode = std::clamp(row->selected, 0, kRenderModeMinimal);
         if (actions.onRenderMode)
             actions.onRenderMode(row->selected);
         break;

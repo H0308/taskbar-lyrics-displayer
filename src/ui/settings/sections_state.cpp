@@ -17,10 +17,7 @@ Row* SettingsSections::findRow(int id) {
 }
 
 bool SettingsSections::minimalModeActive() const {
-    if (state.renderMode == kRenderModeMinimal)
-        return true;
-    const auto* mode = findRow(kIdRenderMode);
-    return mode && mode->selected == kRenderModeMinimal;
+    return state.renderMode == kRenderModeMinimal;
 }
 
 void SettingsSections::updateFloatingCardRowsEnabled() {
@@ -478,6 +475,7 @@ void SettingsSections::syncThemeFontRows(const SettingsState& s) {
 
 void SettingsSections::update(const SettingsState& s) {
     state = s;
+    syncThemeFontRows(s);
     syncIdleRows(s);
     syncDisplayRows(s);
     syncTaskbarModeRows(s);
@@ -486,7 +484,6 @@ void SettingsSections::update(const SettingsState& s) {
     syncMediaControlRows(s);
     syncFloatingCardRows(s);
     syncSongToastRows(s);
-    syncThemeFontRows(s);
     settings_ui::updateLyricRows(rows[kLyricsPage], s);
     updateImmersiveRowsEnabled();
 }
