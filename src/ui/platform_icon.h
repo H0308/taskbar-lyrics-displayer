@@ -20,7 +20,7 @@ bool readExeIconPixels(const std::wstring& path, std::vector<BYTE>& pixels, UINT
                        UINT& height);
 bool readExeDisplayName(const std::wstring& path, std::wstring& name);
 
-// 激活媒体来源对应的播放器窗口；没有可见实例时再按来源标识启动它。
+// 激活媒体来源对应的已有播放器主窗口（含网易云托盘隐藏主窗口）；找不到可激活窗口时再按来源标识启动。
 bool launchSourceApp(const std::wstring& sourceAppUserModelId);
 
 // 按配置的 EXE 路径激活已运行实例，未运行时启动该路径。
