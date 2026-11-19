@@ -110,18 +110,84 @@ jobs:
       - name: Verify staging tree
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
+
+          $stageDir = (Resolve-Path 'dist/package').Path
+          $stagedExe = Join-Path $stageDir 'WindowsTaskbarLyrics.exe'
           $requiredFiles = @(
-            'dist/package/WindowsTaskbarLyrics.exe',
-            'dist/package/libcurl.dll',
-            'dist/package/z.dll',
-            'dist/package/LICENSE'
+            $stagedExe,
+            (Join-Path $stageDir 'LICENSE')
           )
           foreach ($file in $requiredFiles) {
             if (-not (Test-Path $file -PathType Leaf)) {
               throw "Required staged file was not installed: $file"
             }
           }
-          $process = Start-Process 'dist/package/WindowsTaskbarLyrics.exe' -ArgumentList '--verify-release' -Wait -PassThru
+
+          $systemDir = Join-Path $env:SystemRoot 'System32'
+          $queue = [System.Collections.Generic.Queue[string]]::new()
+          $visited = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+          $verifiedDlls = [System.Collections.Generic.List[string]]::new()
+
+          $queue.Enqueue($stagedExe)
+          [void]$visited.Add($stagedExe)
+
+          while ($queue.Count -gt 0) {
+            $binary = $queue.Dequeue()
+            $output = & dumpbin /nologo /dependents $binary
+            if ($LASTEXITCODE -ne 0) {
+              throw "dumpbin failed for $binary with exit code $LASTEXITCODE."
+            }
+
+            $inDependencies = $false
+            $foundAnyDependency = $false
+            foreach ($line in $output) {
+              if ($line -match '^\s*Image has the following dependencies:\s*$') {
+                $inDependencies = $true
+                continue
+              }
+              if ($line -match '^\s*(Image has the following |Summary\s*$)') {
+                $inDependencies = $false
+                continue
+              }
+              if (-not $inDependencies) {
+                continue
+              }
+              if ($line -match '^\s+([^\s]+\.dll)\s*$') {
+                $foundAnyDependency = $true
+                $dll = $Matches[1]
+                if ($dll -match '^(api-ms-|ext-ms-)') {
+                  continue
+                }
+                if (Test-Path (Join-Path $systemDir $dll) -PathType Leaf) {
+                  continue
+                }
+
+                $stagedDll = Join-Path $stageDir $dll
+                if (-not (Test-Path $stagedDll -PathType Leaf)) {
+                  throw "Required runtime dependency of $binary was not installed: $stagedDll"
+                }
+                if ($visited.Add($stagedDll)) {
+                  $verifiedDlls.Add($dll)
+                  $queue.Enqueue($stagedDll)
+                }
+              }
+            }
+
+            if (-not $foundAnyDependency) {
+              throw "Unable to parse runtime dependencies from dumpbin output for: $binary"
+            }
+          }
+
+          Write-Host "Verified staged runtime DLLs: $($verifiedDlls -join ', ')"
+
+          $originalPath = $env:PATH
+          try {
+            $env:PATH = "$systemDir;$env:SystemRoot"
+            $process = Start-Process $stagedExe -ArgumentList '--verify-release' -WorkingDirectory $stageDir -Wait -PassThru
+          } finally {
+            $env:PATH = $originalPath
+          }
           if ($process.ExitCode -ne 0) {
             throw "Staged Release verification failed with exit code $($process.ExitCode)."
           }
