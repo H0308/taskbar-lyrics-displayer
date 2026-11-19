@@ -1,4 +1,5 @@
 #include "media/playback_controller.h"
+#include "media/player_source.h"
 #include "media/track_identity.h"
 #include "logging/runtime_logger.h"
 #include "util/dominant_color.h"
@@ -85,25 +86,26 @@ TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap,
     state_.lastPlayer_ = snap.player;
     const std::wstring key = makeTrackKey(snap);
     // 切入 Spotify 或椒盐音乐时即使曲目文案还没到，也要释放前一个播放器的歌词和封面。
-    const bool enteringSampled = usesSampledLyricPath(snap.player) &&
+    const bool enteringSampled = player_source::usesMetadataLyricPath(snap.player) &&
                                  snap.player != previousPlayer;
     const bool trackChanged = key != state_.currentKey && (!snap.title.empty() || enteringSampled);
     // 同一播放器、来源和歌曲文案下的时长补齐保留封面及专辑色。
-    // 汽水和采样适配器（Spotify／椒盐音乐）的曲目与时间线分别更新，已知时长也可能需要修正。
+    // 汽水和元数据路径播放器（Spotify／椒盐音乐）的曲目与时间线分别更新，已知时长也可能需要修正。
+    const auto matchesPreviousDurationKey = [&]() {
+        if (!player_source::usesMetadataLyricPath(snap.player))
+            return true;
+        SmtcSnapshot previousDurationSnap = snap;
+        previousDurationSnap.durationMs = state_.currentDurationMs;
+        previousDurationSnap.timelineStale = false;
+        return state_.currentKey == makeTrackKey(previousDurationSnap);
+    };
     const bool durationOnlyTrackUpdate =
         trackChanged && snap.player == previousPlayer && !snap.timelineStale &&
         (state_.currentDurationMs <= 0 || snap.player == SmtcPlayerType::Soda ||
-         usesSampledLyricPath(snap.player)) &&
-        (!usesSampledLyricPath(snap.player) ||
-         state_.currentKey == (snap.player == SmtcPlayerType::SaltPlayer
-                                   ? LyricProvider::makeSaltPlayerKey(
-                                         snap.title, snap.artist, snap.album,
-                                         state_.currentDurationMs)
-                                   : LyricProvider::makeSpotifyKey(
-                                         snap.title, snap.artist, snap.album,
-                                         state_.currentDurationMs))) &&
+         player_source::usesMetadataLyricPath(snap.player)) &&
         snap.durationMs > 0 && snap.title == state_.currentTitle &&
-        snap.artist == state_.currentArtist && snap.sourceAppUserModelId == previousSourceAppId;
+        snap.artist == state_.currentArtist && snap.sourceAppUserModelId == previousSourceAppId &&
+        matchesPreviousDurationKey();
     // QQ 的曲目键包含时长，切歌后时间线更新会让 trackChanged 再触发一次；
     // 切歌弹窗只认标题/艺术家身份变化，避免同一首歌弹两次。
     const bool songIdentityChanged = !snap.title.empty() && (snap.title != state_.currentTitle ||
@@ -113,7 +115,8 @@ TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap,
         (!state_.lastSmtcThumbnail || state_.lastSmtcThumbnail != snap.thumbnail);
     // 同曲属性事件补齐的新封面也需要重新取色，相同图片无需重复取色。
     const bool nativeCoverChanged =
-        (snap.player == SmtcPlayerType::Soda || usesSampledLyricPath(snap.player)) &&
+        (snap.player == SmtcPlayerType::Soda ||
+         player_source::usesMetadataLyricPath(snap.player)) &&
         newSmtcThumbnail &&
         (!state_.lastCover_ || (snap.thumbnail != state_.lastCover_ &&
                                 *snap.thumbnail != *state_.lastCover_));
@@ -148,7 +151,7 @@ TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap,
             state_.hasAlbumColor_ = false;
         // 跟随专辑开启时不回退配置色：沿用上一首的专辑色直到新封面取色完成，
         // 避免歌词加载窗口期配置色闪一下再切回专辑色
-        state_.lyricLoading_ = !usesSampledLyricPath(snap.player);
+        state_.lyricLoading_ = !player_source::usesMetadataLyricPath(snap.player);
         if (snap.player == SmtcPlayerType::SaltPlayer) {
             cancelLyricDebounce();
             if (!snap.title.empty()) {
@@ -251,7 +254,8 @@ void PlaybackController::applyManualLyrics(LyricResult result, const SmtcSnapsho
     if (!state_.lastSmtcThumbnail || state_.lastSmtcThumbnail->empty()) {
         if (snap.player == SmtcPlayerType::NetEase)
             requestNeteaseCoverFallback(snap.neteaseSongId);
-        else if (snap.player == SmtcPlayerType::QQMusic || usesSampledLyricPath(snap.player)) {
+        else if (snap.player == SmtcPlayerType::QQMusic ||
+                 player_source::usesMetadataLyricPath(snap.player)) {
             if (!result.info.albummid.empty())
                 requestQqCoverFallback(result.info.albummid, snap.player);
             else
@@ -327,13 +331,14 @@ CoverProvider::ReadyCallback PlaybackController::coverReadyCallback(CoverSource 
 void PlaybackController::requestQqCoverFallback(const std::wstring& albummid,
                                                 SmtcPlayerType player) {
     if (!albummid.empty())
-        coverProvider.requestAsync(albummid, coverReadyCallback(CoverSource::QqApi,
-                                                               usesSampledLyricPath(player)));
+        coverProvider.requestAsync(
+            albummid, coverReadyCallback(CoverSource::QqApi,
+                                         player_source::usesMetadataLyricPath(player)));
 }
 
 void PlaybackController::requestMusicBrainzCover(const SmtcSnapshot& snap) {
     // 椒盐音乐与 Spotify 同样缺少可靠的第三方专辑标识，按专辑名查询 MusicBrainz。
-    if (!usesSampledLyricPath(snap.player))
+    if (!player_source::usesMetadataLyricPath(snap.player))
         return;
     const auto& artist = snap.albumArtist.empty() ? snap.artist : snap.albumArtist;
     coverProvider.requestMusicBrainzAsync(snap.album, artist,
@@ -411,12 +416,13 @@ void PlaybackController::startLyricRequest(const SmtcSnapshot& snap, bool forceO
         provider.requestSodaAsync(snap.title, snap.artist, snap.album, durationMs, postLyricResult);
     } else {
         using Source = LyricProvider::RequestSource;
-        const Source source = usesSampledLyricPath(snap.player) ? Source::SampledPlayer
-                              : forceLocal ? Source::PreferLocal
-                              : forceOnline ? Source::PreferOnline
-                                            : Source::Default;
+        const Source source = snap.player == SmtcPlayerType::SaltPlayer ? Source::SaltPlayer
+                              : snap.player == SmtcPlayerType::Spotify  ? Source::Spotify
+                              : forceLocal                              ? Source::PreferLocal
+                              : forceOnline                             ? Source::PreferOnline
+                                                                        : Source::Default;
         provider.requestAsync(snap.title, snap.artist, durationMs, postLyricResult, source,
-                              persistOrder, snap.album, snap.player);
+                              persistOrder, snap.album);
     }
 }
 
@@ -505,7 +511,8 @@ void PlaybackController::onLyricReady(std::unique_ptr<LyricPayload> payload) {
         runtime_log::writef(L"[lyric] not found: %s", state_.currentKey.c_str());
     }
     // SMTC 没有封面时，使用已匹配的专辑标识或单独查询曲目信息。
-    if ((snap.player == SmtcPlayerType::QQMusic || usesSampledLyricPath(snap.player)) &&
+    if ((snap.player == SmtcPlayerType::QQMusic ||
+         player_source::usesMetadataLyricPath(snap.player)) &&
         (!snap.thumbnail || snap.thumbnail->empty()) &&
         (!state_.lastSmtcThumbnail || state_.lastSmtcThumbnail->empty()) &&
         (!state_.lastCover_ || state_.lastCover_->empty())) {

@@ -3,6 +3,7 @@
 #include "app/presentation_model.h"
 #include "graphics/pixel_luminance.h"
 #include "media/playback_controller.h"
+#include "media/player_source.h"
 #include "media/track_identity.h"
 #include "settings/app_settings.h"
 #include "util/base64.h"
@@ -370,4 +371,166 @@ TEST_CASE("utility_logic.base64_and_backdrop_luminance") {
     };
     const float mixedLuminance = graphics::backdropLuminance(halfWhiteHalfBlackPixels, 2, 2);
     EXPECT_TRUE(mixedLuminance > 0.0f && mixedLuminance < 0.15f);
+}
+
+TEST_CASE("track_identity.salt_player_and_spotify_isolate_album_and_platform") {
+    EXPECT_TRUE(player_source::usesMetadataLyricPath(SmtcPlayerType::Spotify));
+    EXPECT_TRUE(player_source::usesMetadataLyricPath(SmtcPlayerType::SaltPlayer));
+    EXPECT_FALSE(player_source::usesMetadataLyricPath(SmtcPlayerType::QQMusic));
+    EXPECT_FALSE(player_source::usesMetadataLyricPath(SmtcPlayerType::NetEase));
+    EXPECT_FALSE(player_source::usesMetadataLyricPath(SmtcPlayerType::Soda));
+    EXPECT_FALSE(player_source::usesMetadataLyricPath(SmtcPlayerType::Unknown));
+
+    SmtcSnapshot saltSnap;
+    saltSnap.sessionAlive = true;
+    saltSnap.player = SmtcPlayerType::SaltPlayer;
+    saltSnap.title = L"歌曲";
+    saltSnap.artist = L"歌手";
+    saltSnap.album = L"专辑A";
+    saltSnap.durationMs = 200000;
+
+    SmtcSnapshot saltAlbumB = saltSnap;
+    saltAlbumB.album = L"专辑B";
+
+    SmtcSnapshot spotifySnap = saltSnap;
+    spotifySnap.player = SmtcPlayerType::Spotify;
+
+    const std::wstring saltKey = makeTrackKey(saltSnap);
+    const std::wstring saltAlbumBKey = makeTrackKey(saltAlbumB);
+    const std::wstring spotifyKey = makeTrackKey(spotifySnap);
+    EXPECT_EQ(saltKey, std::wstring(L"saltplayer|歌曲|歌手|40|专辑A"));
+    EXPECT_NE(saltKey, saltAlbumBKey);
+    EXPECT_NE(saltKey, spotifyKey);
+
+    EXPECT_TRUE(snapshotMatchesTrackKey(saltSnap, saltKey));
+    EXPECT_FALSE(snapshotMatchesTrackKey(spotifySnap, saltKey));
+
+    SmtcSnapshot transientSalt = saltSnap;
+    transientSalt.title.clear();
+    EXPECT_TRUE(snapshotMatchesTrackKey(transientSalt, saltKey));
+    EXPECT_FALSE(snapshotMatchesTrackKey(transientSalt, spotifyKey));
+
+    SmtcSnapshot transientSpotify = spotifySnap;
+    transientSpotify.title.clear();
+    EXPECT_FALSE(snapshotMatchesTrackKey(transientSpotify, saltKey));
+
+    saltSnap.sessionAlive = false;
+    EXPECT_FALSE(snapshotMatchesTrackKey(saltSnap, saltKey));
+}
+
+TEST_CASE("playback_controller.salt_player_debounce_duration_update_and_transient_title") {
+    MessageOnlyTimerWindow timerWindow;
+    EXPECT_TRUE(timerWindow.hwnd() != nullptr);
+
+    auto thumbA = std::make_shared<const std::vector<uint8_t>>(std::vector<uint8_t>{1, 2, 3});
+    auto thumbB = std::make_shared<const std::vector<uint8_t>>(std::vector<uint8_t>{4, 5, 6});
+    SmtcSnapshot currentSnap;
+    currentSnap.sessionAlive = true;
+    currentSnap.player = SmtcPlayerType::SaltPlayer;
+    currentSnap.sourceAppUserModelId =
+        L"Sakawish.SaltPlayerforWindows_q65q631pyh094!SaltPlayerforWindows";
+    currentSnap.title = L"歌曲A";
+    currentSnap.artist = L"歌手A";
+    currentSnap.album = L"专辑1";
+    currentSnap.durationMs = 200000;
+    currentSnap.status = PlaybackStatus::Playing;
+    currentSnap.thumbnail = thumbA;
+
+    PlaybackController controller(
+        [&] { return currentSnap; }, [](const SmtcSnapshot&, PresentationUpdate) {},
+        [](const SmtcSnapshot&) {}, [] {});
+    controller.setTimerWindow(timerWindow.hwnd());
+
+    // 1. 首次进入椒盐音乐曲目 A：挂载 200ms 防抖并保留封面
+    const TrackChange first =
+        controller.updateTrack(currentSnap, currentSnap.sourceAppUserModelId);
+    EXPECT_TRUE(first.trackChanged);
+    EXPECT_FALSE(first.durationOnly);
+    EXPECT_TRUE(first.songIdentityChanged);
+    EXPECT_TRUE(controller.state().lyricLoading_);
+    EXPECT_TRUE(controller.state().lyricDebounceArmed_);
+    EXPECT_EQ(controller.state().lastCover_, thumbA);
+
+    // 2. 旧歌名 + 新时长：识别为仅时长更新，保留封面、刷新代次并继续挂起防抖
+    const uint64_t genBeforeDuration = controller.state().requestGeneration_;
+    currentSnap.durationMs = 215000;
+    const TrackChange durationUpdate =
+        controller.updateTrack(currentSnap, currentSnap.sourceAppUserModelId);
+    EXPECT_TRUE(durationUpdate.trackChanged);
+    EXPECT_TRUE(durationUpdate.durationOnly);
+    EXPECT_FALSE(durationUpdate.songIdentityChanged);
+    EXPECT_TRUE(controller.state().lyricLoading_);
+    EXPECT_TRUE(controller.state().lyricDebounceArmed_);
+    EXPECT_EQ(controller.state().lastCover_, thumbA);
+    EXPECT_TRUE(controller.state().requestGeneration_ > genBeforeDuration);
+
+    // 3. 新歌名 B 到达并清空封面：识别为完整切歌并释放旧封面
+    currentSnap.title = L"歌曲B";
+    currentSnap.artist = L"歌手B";
+    currentSnap.thumbnail.reset();
+    const TrackChange songBChange =
+        controller.updateTrack(currentSnap, currentSnap.sourceAppUserModelId);
+    EXPECT_TRUE(songBChange.trackChanged);
+    EXPECT_FALSE(songBChange.durationOnly);
+    EXPECT_TRUE(songBChange.songIdentityChanged);
+    EXPECT_TRUE(controller.state().lastCover_ == nullptr);
+    EXPECT_TRUE(controller.state().lyricDebounceArmed_);
+    EXPECT_TRUE(controller.state().lyricLoading_);
+
+    // 4. 同歌名歌手但专辑变化：不视为 durationOnly
+    currentSnap.album = L"专辑2";
+    currentSnap.thumbnail = thumbB;
+    const TrackChange albumChange =
+        controller.updateTrack(currentSnap, currentSnap.sourceAppUserModelId);
+    EXPECT_TRUE(albumChange.trackChanged);
+    EXPECT_FALSE(albumChange.durationOnly);
+    EXPECT_FALSE(albumChange.songIdentityChanged);
+    EXPECT_EQ(controller.state().lastCover_, thumbB);
+    EXPECT_EQ(controller.state().lastSmtcThumbnail, thumbB);
+    EXPECT_TRUE(controller.state().lyricDebounceArmed_);
+
+    PresentationModel model;
+    AppSettings settings;
+    IdleFrameInput idle;
+    EXPECT_EQ(model.update(currentSnap, settings, controller.state(), idle, {}).statusText,
+              std::wstring(L"歌曲B - 歌手B"));
+
+    // 5. 过渡期空标题触发防抖回调：续挂防抖，不递增 requestGeneration_
+    const uint64_t genBeforeTransient = controller.state().requestGeneration_;
+    currentSnap.title.clear();
+    controller.onLyricDebounce();
+    EXPECT_TRUE(controller.state().lyricDebounceArmed_);
+    EXPECT_TRUE(controller.state().lyricLoading_);
+    EXPECT_EQ(controller.state().requestGeneration_, genBeforeTransient);
+
+    // 6. 恢复标题并手动应用歌词：取消防抖且后续重复 onLyricDebounce 为无操作
+    currentSnap.title = L"歌曲B";
+    LyricResult manual;
+    manual.ok = true;
+    manual.fromManual = true;
+    manual.lines = {{1000, L"手动歌词"}};
+    controller.applyManualLyrics(manual, currentSnap);
+    EXPECT_FALSE(controller.state().lyricDebounceArmed_);
+    EXPECT_FALSE(controller.state().lyricLoading_);
+    EXPECT_TRUE(controller.state().currentLyricsFromManual_);
+    const uint64_t genAfterManual = controller.state().requestGeneration_;
+    controller.onLyricDebounce();
+    EXPECT_EQ(controller.state().requestGeneration_, genAfterManual);
+    EXPECT_FALSE(controller.state().lyricLoading_);
+
+    // 7. 无歌词与会话关闭文案
+    PlaybackState emptyState;
+    emptyState.lastPlayer_ = SmtcPlayerType::SaltPlayer;
+    emptyState.currentKey = controller.state().currentKey;
+    emptyState.currentTitle = L"歌曲B";
+    emptyState.currentArtist = L"歌手B";
+    EXPECT_EQ(model.update(currentSnap, settings, emptyState, idle, {}).statusText,
+              std::wstring(L"歌曲B - 歌手B"));
+    SmtcSnapshot closedSnap = currentSnap;
+    closedSnap.sessionAlive = false;
+    IdleFrameInput noIdle;
+    noIdle.presentation.showText = false;
+    noIdle.presentation.quickStartEnabled = false;
+    EXPECT_EQ(model.update(closedSnap, settings, controller.state(), noIdle, {}).statusText,
+              std::wstring(L"椒盐音乐未运行"));
 }

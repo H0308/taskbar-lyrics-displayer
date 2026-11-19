@@ -26,4 +26,10 @@ constexpr bool showsTrackInfoBeforeLyrics(SmtcPlayerType player) noexcept {
            player == SmtcPlayerType::SaltPlayer;
 }
 
+// Spotify 与椒盐音乐均无原生平台歌词接口：使用带专辑的曲目键、读取 AlbumArtist、
+// 走通用在线多源歌词与 QQ／MusicBrainz 封面回退，无歌词时保持展示曲目信息。
+constexpr bool usesMetadataLyricPath(SmtcPlayerType player) noexcept {
+    return player == SmtcPlayerType::Spotify || player == SmtcPlayerType::SaltPlayer;
+}
+
 } // namespace player_source

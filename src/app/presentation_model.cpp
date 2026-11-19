@@ -113,11 +113,10 @@ void fillPresentationFrame(PresentationFrame& frame, const SmtcSnapshot& snap,
             frame.statusText.clear();
     } else if (!snap.sessionAlive)
         frame.statusText = notRunningStatus(playback);
-    else if (playback.lyricLoading_ && snap.player != SmtcPlayerType::Spotify &&
-             snap.player != SmtcPlayerType::SaltPlayer &&
+    else if (playback.lyricLoading_ && !player_source::usesMetadataLyricPath(snap.player) &&
              snap.player != SmtcPlayerType::QQMusic && snap.player != SmtcPlayerType::NetEase)
         frame.statusText = L"歌词加载中…";
-    else if (snap.player == SmtcPlayerType::Spotify || snap.player == SmtcPlayerType::SaltPlayer ||
+    else if (player_source::usesMetadataLyricPath(snap.player) ||
              (player_source::showsTrackInfoBeforeLyrics(snap.player) &&
               (playback.lyricLoading_ || !playback.currentLyrics_.empty()))) {
         frame.statusText = snap.title.empty() ? playback.currentTitle : snap.title;

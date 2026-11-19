@@ -1,4 +1,5 @@
 #include "ui/manual_search_dialog.h"
+#include "media/player_source.h"
 #include "ui/font_sizes.h"
 
 #include "ui/app_icon.h"
@@ -1392,8 +1393,7 @@ void ManualSearchDialog::setTargetSong(const std::wstring& title, const std::wst
     const bool changed = title != impl_->targetTitle || artist != impl_->targetArtist ||
                          neteaseSongId != impl_->targetNeteaseSongId ||
                          player != impl_->targetPlayer ||
-                         ((player == SmtcPlayerType::Spotify ||
-                           player == SmtcPlayerType::SaltPlayer) &&
+                         (player_source::usesMetadataLyricPath(player) &&
                           album != impl_->targetAlbum);
     impl_->targetDurationMs = durationMs;
     if (!changed)

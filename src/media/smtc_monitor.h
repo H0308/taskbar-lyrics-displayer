@@ -52,7 +52,7 @@ struct SmtcSnapshot {
     }
 };
 
-// 监听 QQ、汽水和 Spotify 的系统媒体会话及 Genres 中带 NCM-{ID} 的网易云增强会话。
+// 监听 QQ、汽水、Spotify 和椒盐音乐的系统媒体会话及 Genres 中带 NCM-{ID} 的网易云增强会话。
 class SmtcMonitor {
 public:
     using ChangeCallback = std::function<void()>; // 快照变化后触发（后台刷新/封面线程）

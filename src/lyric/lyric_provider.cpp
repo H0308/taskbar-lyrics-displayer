@@ -571,18 +571,20 @@ LyricProvider::~LyricProvider() = default;
 
 void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& artist,
                                  int64_t durationMs, ReadyCallback cb, RequestSource source,
-                                 bool persistOrder, const std::wstring& album,
-                                 SmtcPlayerType player) {
-    // 采样适配器（Spotify／椒盐音乐）自带专辑字段，使用带专辑的键；
-    // 其它来源沿用 QQ 的纯元数据键。
-    const bool sampled = source == RequestSource::SampledPlayer;
+                                 bool persistOrder, const std::wstring& album) {
+    // Spotify 与椒盐音乐使用带专辑的曲目键走通用在线多源路径；其它来源沿用 QQ 键。
+    const bool sampled =
+        source == RequestSource::Spotify || source == RequestSource::SaltPlayer;
     const SmtcPlayerType requestPlayer =
-        sampled ? player : SmtcPlayerType::QQMusic;
+        source == RequestSource::SaltPlayer ? SmtcPlayerType::SaltPlayer
+        : source == RequestSource::Spotify  ? SmtcPlayerType::Spotify
+                                            : SmtcPlayerType::QQMusic;
     const std::wstring key =
-        requestPlayer == SmtcPlayerType::SaltPlayer
+        source == RequestSource::SaltPlayer
             ? makeSaltPlayerKey(title, artist, album, durationMs)
-            : sampled ? makeSpotifyKey(title, artist, album, durationMs)
-                      : makeKey(title, artist, durationMs);
+            : source == RequestSource::Spotify
+                  ? makeSpotifyKey(title, artist, album, durationMs)
+                  : makeKey(title, artist, durationMs);
     const uint64_t gen = ++impl_->generation;
     Impl* impl = impl_.get();
     Impl::Worker worker;
@@ -594,7 +596,8 @@ void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& 
         const lyric_detail::LyricRequest request{impl->generation, gen};
         lyric_detail::RequestDiagnosticsScope diagnostics(cb);
         const wchar_t* requestSource = requestPlayer == SmtcPlayerType::SaltPlayer ? L"SaltPlayer"
-                                      : sampled ? L"Spotify" : L"QQ";
+                                      : requestPlayer == SmtcPlayerType::Spotify ? L"Spotify"
+                                                                                 : L"QQ";
         const auto player = requestPlayer;
         runtime_log::writef(L"[lyric][request][%ls] title=\"%ls\" artist=\"%ls\" duration=%lldms",
                             requestSource, title.c_str(), artist.c_str(),
