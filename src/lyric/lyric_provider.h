@@ -88,13 +88,17 @@ public:
     LyricProvider(const LyricProvider&) = delete;
     LyricProvider& operator=(const LyricProvider&) = delete;
 
-    enum class RequestSource { Default, PreferOnline, PreferLocal, Spotify };
+    // Spotify 与椒盐音乐使用同一套「元数据匹配 + 通用在线多源」路径，
+    // 统一记为采样适配器来源；其它播放器沿用各自的原生歌词流程。
+    enum class RequestSource { Default, PreferOnline, PreferLocal, SampledPlayer };
 
     // 异步请求歌词；优先按版本标注匹配，无合适结果时按匹配分排序。
     // persistOrder 在后台保存单曲的本地/在线顺序标记，不阻塞调用线程。
+    // player 只用于来源标记、key 前缀与手动歌词文件名，不改变搜索顺序。
     void requestAsync(const std::wstring& title, const std::wstring& artist, int64_t durationMs,
                       ReadyCallback cb, RequestSource source = RequestSource::Default,
-                      bool persistOrder = false, const std::wstring& album = {});
+                      bool persistOrder = false, const std::wstring& album = {},
+                      SmtcPlayerType player = SmtcPlayerType::QQMusic);
 
     // 按网易云歌曲 ID 异步取歌词：优先 YRC，失败后回退网易云 LRC。
     // 曲目元数据用于手动覆盖和原生未命中后的通用匹配。
@@ -140,6 +144,9 @@ public:
                                 int64_t durationMs);
     static std::wstring makeSpotifyKey(const std::wstring& title, const std::wstring& artist,
                                        const std::wstring& album, int64_t durationMs);
+    // 椒盐音乐的曲目身份：同样带上专辑，避免同专辑不同版本的封面互相覆盖
+    static std::wstring makeSaltPlayerKey(const std::wstring& title, const std::wstring& artist,
+                                          const std::wstring& album, int64_t durationMs);
     // 二分定位：最后一个 ms <= positionMs 的行号；无则 -1
     static int findLine(const std::vector<LyricLine>& lines, int64_t positionMs);
 

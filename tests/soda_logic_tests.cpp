@@ -194,6 +194,10 @@ TEST_CASE("player_source.session_aliases_process_mapping_and_unknown_source") {
         {L"spotify", SmtcPlayerType::Spotify, L"Spotify.exe"},
         {L"SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", SmtcPlayerType::Spotify, L"Spotify.exe"},
         {L"spotifyab.spotifymusic_AnotherPublisher123!SPOTIFY", SmtcPlayerType::Spotify, L"Spotify.exe"},
+        {L"Salt Player for Windows.exe", SmtcPlayerType::SaltPlayer, L"Salt Player for Windows.exe"},
+        {L"salt player for windows.exe", SmtcPlayerType::SaltPlayer, L"Salt Player for Windows.exe"},
+        {L"Sakawish.SaltPlayerforWindows_q65q631pyh094!SaltPlayerforWindows",
+         SmtcPlayerType::SaltPlayer, L"Salt Player for Windows.exe"},
     };
     for (const auto& item : cases) {
         const auto* source = player_source::find(std::wstring(item.session));
@@ -220,6 +224,20 @@ TEST_CASE("player_source.spotify_matching_preserves_application_boundaries") {
         L"SpotifyAB.SpotifyMusic_publisher!Other",
         L"SpotifyAB.SpotifyMusic_publisher!SpotifyExtra",
         L"SpotifyAB.SpotifyMusic_publisher!Other!Spotify",
+    };
+    for (const auto* session : rejected)
+        EXPECT_TRUE(player_source::find(std::wstring(session)) == nullptr);
+}
+
+TEST_CASE("player_source.salt_player_package_session_matching_preserves_boundaries") {
+    const wchar_t* rejected[]{
+        L"Sakawish.SaltPlayerforWindows_",
+        L"Sakawish.SaltPlayerforWindows_!SaltPlayerforWindows",
+        L"Sakawish.SaltPlayerforWindows_q65q631pyh094",
+        L"Sakawish.SaltPlayerforWindows_q65q631pyh094!Other",
+        L"Other.Sakawish.SaltPlayerforWindows_q65q631pyh094!SaltPlayerforWindows",
+        L"Sakawish.SaltPlayerforWindows_q65q631pyh094!SaltPlayerforWindowsExtra",
+        L"Sakawish.SaltPlayerforWindows_q65-631!SaltPlayerforWindows",
     };
     for (const auto* session : rejected)
         EXPECT_TRUE(player_source::find(std::wstring(session)) == nullptr);

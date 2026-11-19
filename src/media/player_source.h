@@ -22,7 +22,8 @@ const Definition* find(const std::wstring& sessionId) noexcept;
 
 constexpr bool showsTrackInfoBeforeLyrics(SmtcPlayerType player) noexcept {
     return player == SmtcPlayerType::QQMusic || player == SmtcPlayerType::NetEase ||
-           player == SmtcPlayerType::Soda || player == SmtcPlayerType::Spotify;
+           player == SmtcPlayerType::Soda || player == SmtcPlayerType::Spotify ||
+           player == SmtcPlayerType::SaltPlayer;
 }
 
 } // namespace player_source

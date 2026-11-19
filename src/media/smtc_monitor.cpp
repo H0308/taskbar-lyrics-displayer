@@ -71,6 +71,8 @@ const wchar_t* playerName(SmtcPlayerType player) noexcept {
         return L"Soda Music";
     case SmtcPlayerType::Spotify:
         return L"Spotify";
+    case SmtcPlayerType::SaltPlayer:
+        return L"Salt Player";
     default:
         return L"Unknown";
     }
@@ -226,6 +228,7 @@ struct SmtcMonitor::Impl {
         adapters.emplace_back(std::make_unique<smtc::NeteaseSmtcAdapter>());
         adapters.emplace_back(std::make_unique<smtc::SampledSmtcAdapter>(SmtcPlayerType::Soda));
         adapters.emplace_back(std::make_unique<smtc::SampledSmtcAdapter>(SmtcPlayerType::Spotify));
+        adapters.emplace_back(std::make_unique<smtc::SampledSmtcAdapter>(SmtcPlayerType::SaltPlayer));
     }
 
     ~Impl() {
@@ -654,7 +657,8 @@ struct SmtcMonitor::Impl {
                 next.title = props.Title().c_str();
                 next.artist = props.Artist().c_str();
                 next.album = props.AlbumTitle().c_str();
-                if (next.player == SmtcPlayerType::Spotify)
+                if (next.player == SmtcPlayerType::Spotify ||
+                    next.player == SmtcPlayerType::SaltPlayer)
                     next.albumArtist = props.AlbumArtist().c_str();
                 if (next.player == SmtcPlayerType::NetEase) {
                     for (const auto& genre : props.Genres()) {
@@ -1056,9 +1060,10 @@ struct SmtcMonitor::Impl {
         }
 
         if (!found && selectedSessionAlive && selectedSession) {
-            // 汽水和 Spotify 的展示以 SMTC 会话为准，会话消失后不能仅凭进程维持展示。
+            // 汽水、Spotify 和椒盐音乐的展示以 SMTC 会话为准，会话消失后不能仅凭进程维持展示。
             // 仍经过下面的稳定窗口，短暂的会话重建不会立即清空展示。
             if (selectedPlayer != SmtcPlayerType::Soda && selectedPlayer != SmtcPlayerType::Spotify &&
+                selectedPlayer != SmtcPlayerType::SaltPlayer &&
                 playerProcessAlive(selectedPlayer)) {
                 sessionLossCandidateSince = {};
                 return;

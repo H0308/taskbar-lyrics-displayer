@@ -84,6 +84,7 @@ std::wstring manualFileName(const std::wstring& title, const std::wstring& artis
     std::swprintf(hex, 17, L"%016llx",
                   static_cast<unsigned long long>(fnv1a64(lyric_detail::toUtf8(key))));
     const wchar_t* prefix = player == SmtcPlayerType::Spotify ? L"spotify-"
+                            : player == SmtcPlayerType::SaltPlayer ? L"saltplayer-"
                             : player == SmtcPlayerType::Soda ? L"soda-"
                             : player == SmtcPlayerType::NetEase ? L"netease-" : L"qq-";
     return std::wstring(prefix) + readable + L"-" + hex + L".json";
@@ -395,7 +396,10 @@ struct LyricProvider::Impl {
             return false;
         CacheEntry entry;
         if (!loadOverrideFile(path, entry)) {
-            if (player == SmtcPlayerType::Soda || player == SmtcPlayerType::Spotify)
+            // 只有早期 QQ／网易云保存过无平台前缀的文件；汽水、Spotify 和椒盐音乐
+            // 从一开始就带前缀，不需要回退到旧命名。
+            if (player == SmtcPlayerType::Soda || player == SmtcPlayerType::Spotify ||
+                player == SmtcPlayerType::SaltPlayer)
                 return false;
             // 兼容改名前已经存在的无前缀文件；新保存的文件只使用带前缀路径。
             const std::wstring legacyPath = overrideFilePath(key, title, artist, player, true);
@@ -567,21 +571,31 @@ LyricProvider::~LyricProvider() = default;
 
 void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& artist,
                                  int64_t durationMs, ReadyCallback cb, RequestSource source,
-                                 bool persistOrder, const std::wstring& album) {
-    const bool spotify = source == RequestSource::Spotify;
-    const std::wstring key = spotify ? makeSpotifyKey(title, artist, album, durationMs)
-                                     : makeKey(title, artist, durationMs);
+                                 bool persistOrder, const std::wstring& album,
+                                 SmtcPlayerType player) {
+    // 采样适配器（Spotify／椒盐音乐）自带专辑字段，使用带专辑的键；
+    // 其它来源沿用 QQ 的纯元数据键。
+    const bool sampled = source == RequestSource::SampledPlayer;
+    const SmtcPlayerType requestPlayer =
+        sampled ? player : SmtcPlayerType::QQMusic;
+    const std::wstring key =
+        requestPlayer == SmtcPlayerType::SaltPlayer
+            ? makeSaltPlayerKey(title, artist, album, durationMs)
+            : sampled ? makeSpotifyKey(title, artist, album, durationMs)
+                      : makeKey(title, artist, durationMs);
     const uint64_t gen = ++impl_->generation;
     Impl* impl = impl_.get();
     Impl::Worker worker;
     auto done = worker.done;
     worker.thread = std::thread([impl, gen, key, title, artist, album, durationMs,
-                                 cb = std::move(cb), spotify, source, persistOrder, done]() mutable {
+                                 cb = std::move(cb), sampled, source, persistOrder, done,
+                                 requestPlayer]() mutable {
         DoneFlag flag{done};
         const lyric_detail::LyricRequest request{impl->generation, gen};
         lyric_detail::RequestDiagnosticsScope diagnostics(cb);
-        const wchar_t* requestSource = spotify ? L"Spotify" : L"QQ";
-        const auto player = spotify ? SmtcPlayerType::Spotify : SmtcPlayerType::QQMusic;
+        const wchar_t* requestSource = requestPlayer == SmtcPlayerType::SaltPlayer ? L"SaltPlayer"
+                                      : sampled ? L"Spotify" : L"QQ";
+        const auto player = requestPlayer;
         runtime_log::writef(L"[lyric][request][%ls] title=\"%ls\" artist=\"%ls\" duration=%lldms",
                             requestSource, title.c_str(), artist.c_str(),
                             static_cast<long long>(durationMs));
@@ -597,7 +611,7 @@ void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& 
                 runtime_log::writef(L"[lyric][source=manual][%ls] title=\"%ls\" artist=\"%ls\"",
                                     requestSource, title.c_str(), artist.c_str());
             } else {
-                localConfigured = !spotify && impl->qqLocalLyricsEnabled &&
+                localConfigured = !sampled && impl->qqLocalLyricsEnabled &&
                                   !impl->qqLocalLyricsDir.empty();
                 if (!localConfigured && impl->cacheGet(key, entry)) {
                     ready = {true, std::move(entry.lines), std::move(entry.info)};
@@ -617,7 +631,7 @@ void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& 
         bool fromCache = false;
 
         // 本地索引可能仍在构建，顺序标记的读写必须留在工作线程，不能阻塞 UI 线程。
-        if (persistOrder && !spotify)
+        if (persistOrder && !sampled)
             impl->setLocalOrderOverride(title, artist, source == RequestSource::PreferOnline);
 
         bool onlineFirst = source == RequestSource::PreferOnline;
@@ -785,6 +799,12 @@ std::wstring LyricProvider::makeKey(const std::wstring& title, const std::wstrin
 std::wstring LyricProvider::makeSpotifyKey(const std::wstring& title, const std::wstring& artist,
                                            const std::wstring& album, int64_t durationMs) {
     return L"spotify|" + makeKey(title, artist, durationMs) + L'|' + album;
+}
+
+std::wstring LyricProvider::makeSaltPlayerKey(const std::wstring& title,
+                                              const std::wstring& artist,
+                                              const std::wstring& album, int64_t durationMs) {
+    return L"saltplayer|" + makeKey(title, artist, durationMs) + L'|' + album;
 }
 
 int LyricProvider::findLine(const std::vector<LyricLine>& lines, int64_t positionMs) {
@@ -1110,9 +1130,11 @@ void LyricProvider::setManualOverride(const std::wstring& title, const std::wstr
                                       const std::wstring& album) {
     std::lock_guard<std::mutex> lk(impl_->mtx);
     const std::wstring key =
-        player == SmtcPlayerType::Spotify ? makeSpotifyKey(title, artist, album, durationMs)
-        : player == SmtcPlayerType::NetEase ? L"netease|" + info.neteaseSongId
-        : (player == SmtcPlayerType::Soda ? L"soda|" : L"") + makeKey(title, artist, durationMs);
+        player == SmtcPlayerType::SaltPlayer
+            ? makeSaltPlayerKey(title, artist, album, durationMs)
+            : player == SmtcPlayerType::Spotify ? makeSpotifyKey(title, artist, album, durationMs)
+            : player == SmtcPlayerType::NetEase ? L"netease|" + info.neteaseSongId
+            : (player == SmtcPlayerType::Soda ? L"soda|" : L"") + makeKey(title, artist, durationMs);
     auto& stored = impl_->manualOverrides[key]; // 同一首歌重复手动选择时覆盖旧记录
     stored = CacheEntry{std::move(lines), std::move(info)};
     // 写入这首歌自己的文件

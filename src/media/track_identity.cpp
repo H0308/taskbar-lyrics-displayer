@@ -3,6 +3,7 @@
 
 namespace {
 constexpr wchar_t kSpotifyTrackPrefix[] = L"spotify|";
+constexpr wchar_t kSaltPlayerTrackPrefix[] = L"saltplayer|";
 }
 
 std::wstring makeTrackKey(const SmtcSnapshot& snap) {
@@ -13,6 +14,8 @@ std::wstring makeTrackKey(const SmtcSnapshot& snap) {
     const int64_t durationMs = snap.timelineStale ? 0 : snap.durationMs;
     if (snap.player == SmtcPlayerType::Spotify)
         return LyricProvider::makeSpotifyKey(snap.title, snap.artist, snap.album, durationMs);
+    if (snap.player == SmtcPlayerType::SaltPlayer)
+        return LyricProvider::makeSaltPlayerKey(snap.title, snap.artist, snap.album, durationMs);
     const wchar_t* prefix = snap.player == SmtcPlayerType::Soda ? L"soda|" : L"qq|";
     return prefix + LyricProvider::makeKey(snap.title, snap.artist, durationMs);
 }
@@ -22,8 +25,12 @@ bool snapshotMatchesTrackKey(const SmtcSnapshot& snap, const std::wstring& key) 
         return false;
     // SMTC 的 Changing/Opened 过渡可能暂时没有完整文案；此时保留当前会话，
     // 待下一份完整快照再做曲目身份判断。
-    if (snap.title.empty() && snap.neteaseSongId.empty())
-        return snap.player != SmtcPlayerType::Spotify || key.empty() ||
-               key.starts_with(kSpotifyTrackPrefix);
+    if (snap.title.empty() && snap.neteaseSongId.empty()) {
+        if (snap.player == SmtcPlayerType::Spotify)
+            return key.empty() || key.starts_with(kSpotifyTrackPrefix);
+        if (snap.player == SmtcPlayerType::SaltPlayer)
+            return key.empty() || key.starts_with(kSaltPlayerTrackPrefix);
+        return key.empty() || key.starts_with(L"qq|") || key.starts_with(L"soda|");
+    }
     return key.empty() || makeTrackKey(snap) == key;
 }

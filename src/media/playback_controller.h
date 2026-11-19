@@ -8,6 +8,12 @@
 
 enum class CoverSource { None, Smtc, QqApi, NeteaseApi, MusicBrainz };
 
+// 椒盐音乐与 Spotify 同为「只有离散时间线、歌词依赖通用在线多源」的适配器：
+// 切歌即请求、不等待 QQ 的切歌防抖，也不使用 QQ 本地歌词索引。
+constexpr bool usesSampledLyricPath(SmtcPlayerType player) noexcept {
+    return player == SmtcPlayerType::Spotify || player == SmtcPlayerType::SaltPlayer;
+}
+
 struct CoverPayload {
     std::wstring key;
     uint64_t requestGeneration = 0;

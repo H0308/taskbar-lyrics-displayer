@@ -19,6 +19,8 @@ const wchar_t* notRunningStatus(const PlaybackState& playback) {
         return L"汽水音乐未运行";
     if (playback.lastPlayer_ == SmtcPlayerType::Spotify)
         return L"Spotify 未运行";
+    if (playback.lastPlayer_ == SmtcPlayerType::SaltPlayer)
+        return L"椒盐音乐未运行";
     return playback.lastPlayer_ == SmtcPlayerType::NetEase ? L"网易云音乐未运行" : L"QQ 音乐未运行";
 }
 
@@ -112,9 +114,10 @@ void fillPresentationFrame(PresentationFrame& frame, const SmtcSnapshot& snap,
     } else if (!snap.sessionAlive)
         frame.statusText = notRunningStatus(playback);
     else if (playback.lyricLoading_ && snap.player != SmtcPlayerType::Spotify &&
+             snap.player != SmtcPlayerType::SaltPlayer &&
              snap.player != SmtcPlayerType::QQMusic && snap.player != SmtcPlayerType::NetEase)
         frame.statusText = L"歌词加载中…";
-    else if (snap.player == SmtcPlayerType::Spotify ||
+    else if (snap.player == SmtcPlayerType::Spotify || snap.player == SmtcPlayerType::SaltPlayer ||
              (player_source::showsTrackInfoBeforeLyrics(snap.player) &&
               (playback.lyricLoading_ || !playback.currentLyrics_.empty()))) {
         frame.statusText = snap.title.empty() ? playback.currentTitle : snap.title;

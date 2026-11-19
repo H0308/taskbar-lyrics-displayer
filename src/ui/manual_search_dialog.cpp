@@ -1392,7 +1392,9 @@ void ManualSearchDialog::setTargetSong(const std::wstring& title, const std::wst
     const bool changed = title != impl_->targetTitle || artist != impl_->targetArtist ||
                          neteaseSongId != impl_->targetNeteaseSongId ||
                          player != impl_->targetPlayer ||
-                         (player == SmtcPlayerType::Spotify && album != impl_->targetAlbum);
+                         ((player == SmtcPlayerType::Spotify ||
+                           player == SmtcPlayerType::SaltPlayer) &&
+                          album != impl_->targetAlbum);
     impl_->targetDurationMs = durationMs;
     if (!changed)
         return;
