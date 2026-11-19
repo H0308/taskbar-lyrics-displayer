@@ -5,6 +5,7 @@
 #include "logging/runtime_logger.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <cmath>
 #include <cwctype>
 #include <utility>
 
@@ -230,6 +231,34 @@ const char* fullscreenRenderModeConfigName(RenderMode mode) {
 }
 } // namespace
 
+TaskbarAnchorSpec AppSettings::taskbarAnchor() const {
+    if (taskbarPosition_ == 1)
+        return TaskbarAnchorSpec::outerStart();
+    if (taskbarPosition_ == 2)
+        return TaskbarAnchorSpec::relative(taskbarAnchorRatio_, taskbarAnchorEdge_);
+    return TaskbarAnchorSpec::outerEnd();
+}
+
+void AppSettings::setTaskbarAnchor(const TaskbarAnchorSpec& anchor) {
+    const int mode = std::clamp(anchor.mode, 0, 2);
+    taskbarPosition_ = mode;
+    if (mode == 0) {
+        taskbarAnchorRatio_ = 1.0;
+        taskbarAnchorEdge_ = TaskbarAnchorEdge::End;
+        return;
+    }
+    if (mode == 1) {
+        taskbarAnchorRatio_ = 0.0;
+        taskbarAnchorEdge_ = TaskbarAnchorEdge::Start;
+        return;
+    }
+    const double finiteRatio = std::isfinite(anchor.ratio) ? anchor.ratio : 0.0;
+    const double clamped = std::clamp(finiteRatio, 0.0, 1.0);
+    taskbarAnchorRatio_ = std::round(clamped * 10000.0) / 10000.0;
+    taskbarAnchorEdge_ =
+        anchor.edge == TaskbarAnchorEdge::Start ? TaskbarAnchorEdge::Start : TaskbarAnchorEdge::End;
+}
+
 void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
                            bool& migrateLegacyLogDirectory) {
     tickTickEnabled_ = j.value("tickTickEnabled", hasTickTickToken);
@@ -302,7 +331,12 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
                                      : lightLyricAppearance_;
         hasGlobalLyricAppearance_ = true;
     }
-    taskbarPosition_ = std::clamp(j.value("taskbarPosition", 0), 0, 1);
+    const int pos = std::clamp(j.value("taskbarPosition", 0), 0, 2);
+    const double ratio = std::clamp(j.value("taskbarAnchorRatio", pos == 1 ? 0.0 : 1.0), 0.0, 1.0);
+    const TaskbarAnchorEdge edge =
+        j.value("taskbarAnchorAlign", pos == 1 ? 0 : 1) == 0 ? TaskbarAnchorEdge::Start
+                                                            : TaskbarAnchorEdge::End;
+    setTaskbarAnchor({pos, ratio, edge});
     const int savedViewMode = j.contains("taskbarViewMode")
                                   ? j.value("taskbarViewMode", 0)
                                   : (j.value("taskbarImmersive", false) ? 1 : 0);
@@ -545,6 +579,13 @@ nlohmann::json AppSettings::toJson() const {
         j["holidayCalendar"]["days"].push_back(
             {{"date", day.date}, {"type", day.type}, {"name", utf8Of(day.name)}});
     j["taskbarPosition"] = taskbarPosition_;
+    if (taskbarPosition_ == 2) {
+        j["taskbarAnchorRatio"] = taskbarAnchorRatio_;
+        j["taskbarAnchorAlign"] = taskbarAnchorEdge_ == TaskbarAnchorEdge::Start ? 0 : 1;
+    } else {
+        j.erase("taskbarAnchorRatio");
+        j.erase("taskbarAnchorAlign");
+    }
     j["taskbarViewMode"] = static_cast<int>(taskbarViewMode_);
     j["taskbarMonitor"] = utf8Of(taskbarMonitorId_);
     j["appBarEdge"] = appBarEdge_ == AppBarEdge::Bottom ? 1 : 0;

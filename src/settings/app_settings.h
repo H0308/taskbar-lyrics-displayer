@@ -47,6 +47,8 @@ struct AppSettings {
     int64_t holidayCalendarUpdatedAt_ = 0;
     std::vector<HolidayDayInfo> holidayCalendar_;
     int taskbarPosition_ = 0;
+    double taskbarAnchorRatio_ = 1.0;
+    TaskbarAnchorEdge taskbarAnchorEdge_ = TaskbarAnchorEdge::End;
     TaskbarViewMode taskbarViewMode_ = TaskbarViewMode::Embedded;
     std::wstring taskbarMonitorId_;
     AppBarEdge appBarEdge_ = AppBarEdge::Top;
@@ -111,6 +113,8 @@ struct AppSettings {
     int logRetentionDays_ = 30;
 
     // 保留既有字段读取规则及主题初始化顺序；迁移标志在部分字段异常时仍保留。
+    TaskbarAnchorSpec taskbarAnchor() const;
+    void setTaskbarAnchor(const TaskbarAnchorSpec& anchor);
     void readJson(const nlohmann::json& document, bool hasTickTickToken,
                   bool& migrateLegacyLogDirectory);
     nlohmann::json toJson() const;

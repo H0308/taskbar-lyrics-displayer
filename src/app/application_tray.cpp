@@ -1,4 +1,5 @@
 #include "app/application_internal.h"
+#include "ui/taskbar/placement.h"
 namespace lyrics_app {
 bool App::createTrayWindow(HINSTANCE inst) {
     WNDCLASSEXW wc{};
@@ -62,7 +63,9 @@ void App::updateTrayIcon() {
     Shell_NotifyIconW(NIM_ADD, &nid);
 }
 
-std::vector<fluent::FluentMenuItem> App::buildMenuItems(bool fullTrayMenu) {
+std::vector<fluent::FluentMenuItem> App::buildMenuItems(bool fullTrayMenu,
+                                                        const TaskbarHost* menuHost) {
+    activeTaskbarAnchorMenuSpecs_.clear();
     std::vector<fluent::FluentMenuItem> items;
     auto addItem = [&items](int id, const wchar_t* text, settings_icon::Kind icon,
                             bool checked = false, bool enabled = true) {
@@ -102,20 +105,44 @@ std::vector<fluent::FluentMenuItem> App::buildMenuItems(bool fullTrayMenu) {
     items.push_back(std::move(performance));
     if (taskbarEnabled) {
         if (settings_.taskbarViewMode_ == TaskbarViewMode::Embedded) {
+            const TaskbarHost* targetHost = menuHost ? menuHost : taskbarHost.get();
+            std::vector<TaskbarAnchorOption> anchorOptions;
+            if (targetHost) {
+                const auto found = taskbarAnchorOptions_.find(targetHost);
+                if (found != taskbarAnchorOptions_.end())
+                    anchorOptions = found->second;
+            }
+            if (anchorOptions.empty()) {
+                const bool vertical =
+                    targetHost ? targetHost->isVerticalTaskbar() : taskbarVertical_;
+                const int posMode = settings_.taskbarPosition_;
+                anchorOptions = {
+                    {TaskbarAnchorSpec::outerStart(), 0, 1, true, vertical, posMode == 1},
+                    {TaskbarAnchorSpec::outerEnd(), 0, 1, true, vertical, posMode != 1},
+                };
+            }
+
             fluent::FluentMenuItem pos;
             pos.text = L"任务栏位置";
             pos.icon = settings_icon::Kind::Position;
-            fluent::FluentMenuItem sub;
-            sub.id = kCmdTaskbarPosNotify;
-            sub.text = L"通知区域左侧";
-            sub.icon = settings_icon::Kind::Position;
-            sub.checked = settings_.taskbarPosition_ == 0;
-            pos.submenu.push_back(sub);
-            sub.id = kCmdTaskbarPosLeft;
-            sub.text = L"任务栏最左侧";
-            sub.checked = settings_.taskbarPosition_ == 1;
-            pos.submenu.push_back(sub);
-            items.push_back(std::move(pos));
+            const size_t limit =
+                std::min(anchorOptions.size(), static_cast<size_t>(kCmdTaskbarAnchorMax));
+            for (size_t i = 0; i < limit; ++i) {
+                const std::wstring label =
+                    taskbar_detail::formatTaskbarAnchorLabel(anchorOptions, i);
+                if (label.empty())
+                    continue;
+                fluent::FluentMenuItem sub;
+                sub.id =
+                    kCmdTaskbarAnchorBase + static_cast<int>(activeTaskbarAnchorMenuSpecs_.size());
+                sub.text = label;
+                sub.icon = settings_icon::Kind::Position;
+                sub.checked = anchorOptions[i].active;
+                pos.submenu.push_back(std::move(sub));
+                activeTaskbarAnchorMenuSpecs_.push_back(anchorOptions[i].spec);
+            }
+            if (!pos.submenu.empty())
+                items.push_back(std::move(pos));
         }
         fluent::FluentMenuItem viewMode;
         viewMode.text = L"展示模式";
@@ -219,8 +246,8 @@ void App::showTrayMenu(POINT screenPt) {
                              [this](int cmd) { onMenuCommand(cmd, L"tray"); });
 }
 
-void App::showTaskbarMenu(POINT screenPt) {
-    fluent::FluentMenu::show(trayHwnd, screenPt, buildMenuItems(false),
+void App::showTaskbarMenu(POINT screenPt, const TaskbarHost* menuHost) {
+    fluent::FluentMenu::show(trayHwnd, screenPt, buildMenuItems(false, menuHost),
                              [this](int cmd) { onMenuCommand(cmd, L"taskbar-menu"); });
 }
 
@@ -292,6 +319,14 @@ void App::launchIdleApp(const std::wstring& path) {
 
 void App::onMenuCommand(int cmd, const wchar_t* source) {
     runtime_log::writef(L"[action][%s] command=%s id=%d", source, trayCommandName(cmd), cmd);
+    if (cmd >= kCmdTaskbarAnchorBase &&
+        cmd < kCmdTaskbarAnchorBase + static_cast<int>(activeTaskbarAnchorMenuSpecs_.size())) {
+        if (settings_.taskbarViewMode_ == TaskbarViewMode::Embedded) {
+            const size_t index = static_cast<size_t>(cmd - kCmdTaskbarAnchorBase);
+            applyTaskbarAnchor(activeTaskbarAnchorMenuSpecs_[index], L"taskbar-position");
+        }
+        return;
+    }
     switch (cmd) {
     case kCmdToggleTaskbar:
         toggleTaskbar();
@@ -308,15 +343,6 @@ void App::onMenuCommand(int cmd, const wchar_t* source) {
         break;
     case kCmdRenderModeMinimal:
         applyRenderMode(static_cast<int>(RenderMode::Minimal));
-        break;
-    case kCmdTaskbarPosNotify:
-    case kCmdTaskbarPosLeft:
-        if (settings_.taskbarViewMode_ != TaskbarViewMode::Embedded)
-            break;
-        settings_.taskbarPosition_ = cmd == kCmdTaskbarPosLeft ? 1 : 0;
-        logSettingInt(L"taskbar-position", settings_.taskbarPosition_);
-        forEachHost([&](TaskbarHost* host) { host->setPositionMode(settings_.taskbarPosition_); });
-        saveSettings();
         break;
     case kCmdTaskbarModeEmbedded:
         applyTaskbarViewMode(0);

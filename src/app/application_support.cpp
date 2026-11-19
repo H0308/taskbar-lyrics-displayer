@@ -5,10 +5,6 @@ const wchar_t* trayCommandName(int command) {
     switch (command) {
     case kCmdToggleTaskbar:
         return L"toggle-taskbar";
-    case kCmdTaskbarPosNotify:
-        return L"taskbar-position-notify";
-    case kCmdTaskbarPosLeft:
-        return L"taskbar-position-left";
     case kCmdSpectrum:
         return L"spectrum";
     case kCmdAutoStart:
@@ -78,6 +74,9 @@ const wchar_t* trayCommandName(int command) {
     case kCmdExit:
         return L"exit";
     default:
+        if (command >= kCmdTaskbarAnchorBase &&
+            command < kCmdTaskbarAnchorBase + kCmdTaskbarAnchorMax)
+            return L"taskbar-position-anchor";
         return L"unknown";
     }
 }

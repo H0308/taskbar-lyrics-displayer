@@ -457,7 +457,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     bool centerAlign_ = true;
     UINT taskbarEdge_ = ABE_BOTTOM;
     bool lightTheme_ = false;
-    int positionMode_ = 0; // 0 = 通知区域前；1 = 任务栏起始端
+    TaskbarAnchorSpec anchor_ = TaskbarAnchorSpec::outerEnd();
 
     // 工作线程只持有独立状态，不持有 Impl；窗口销毁只发停止信号，不能 join。
     // 最后一个持有者负责回收尚未拾取的结果，允许跨进程调用晚于窗口销毁返回。
@@ -501,7 +501,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     std::function<void(POINT)> onContextMenu;
     std::function<void(POINT)> onImmersiveMenu;
     std::function<void(POINT)> onDockQuickApps;
-    std::function<void(int)> onPositionModeChanged;
+    std::function<void(TaskbarAnchorSpec)> onAnchorChanged_;
+    std::function<void(std::vector<TaskbarAnchorOption>)> onAnchorOptionsChanged_;
+    std::vector<TaskbarAnchorOption> publishedAnchorOptions_;
     bool mouseOver_ = false;
     bool trackingLeave_ = false;
     int immersiveControlHover_ = -1;
@@ -520,6 +522,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     using ImmersivePresence = TaskbarPresence::Phase;
     TaskbarPresence presence_;
     TaskbarDragGesture drag_;
+    std::vector<taskbar_detail::TaskbarAnchorSlot> dragAnchors_;
     bool immersiveYieldArmed_ = false;
     bool immersivePresenceTimerRunning_ = false;
 
@@ -1300,44 +1303,54 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         mediaPopup.hideImmediate();
     }
 
-    TaskbarPlacementStatus calculateWindowPlacement(WindowPlacement& placement,
-                                                    int positionMode = -1,
-                                                    bool updateStatus = true) {
-        auto finishStatus = [&](TaskbarPlacementStatus status) {
-            return updateStatus ? setPlacementStatus(status) : status;
-        };
+    static TaskbarAnchorSpec normalizeAnchor(TaskbarAnchorSpec anchor) {
+        const int mode = std::clamp(anchor.mode, 0, 2);
+        if (mode == 0)
+            return TaskbarAnchorSpec::outerEnd();
+        if (mode == 1)
+            return TaskbarAnchorSpec::outerStart();
+        const double finiteRatio = std::isfinite(anchor.ratio) ? anchor.ratio : 0.0;
+        const double rounded =
+            std::round(std::clamp(finiteRatio, 0.0, 1.0) * 10000.0) / 10000.0;
+        return TaskbarAnchorSpec::relative(
+            rounded, anchor.edge == TaskbarAnchorEdge::Start ? TaskbarAnchorEdge::Start
+                                                             : TaskbarAnchorEdge::End);
+    }
+
+    static std::vector<TaskbarAnchorOption> anchorOptionsFromSlots(
+        const std::vector<taskbar_detail::TaskbarAnchorSlot>& slots, int activeIndex,
+        bool vertical) {
+        std::vector<TaskbarAnchorOption> options;
+        options.reserve(slots.size());
+        for (size_t i = 0; i < slots.size(); ++i) {
+            TaskbarAnchorOption option;
+            option.spec = slots[i].spec;
+            option.spanIndex = slots[i].spanIndex;
+            option.spanCount = slots[i].spanCount;
+            option.spanHasBothEdges = slots[i].spanHasBothEdges;
+            option.vertical = vertical;
+            option.active = static_cast<int>(i) == activeIndex;
+            options.push_back(option);
+        }
+        return options;
+    }
+
+    bool buildEmbeddedPlacementInput(taskbar_detail::PlacementInput& input,
+                                     const TaskbarAnchorSpec& anchor) {
         if (!hwnd || !taskbar_)
-            return finishStatus(TaskbarPlacementStatus::Unavailable);
+            return false;
 
         updateRects();
 
         const bool vertical = isVerticalTaskbar();
-        if (viewMode_ == TaskbarViewMode::Immersive) {
-            RECT client{};
-            POINT origin{0, 0};
-            if (!GetClientRect(taskbar_, &client) || client.right <= client.left ||
-                client.bottom <= client.top || !ClientToScreen(taskbar_, &origin))
-                return finishStatus(TaskbarPlacementStatus::Unavailable);
-
-            placement.x = origin.x;
-            placement.y = origin.y;
-            placement.width = client.right - client.left;
-            placement.height = client.bottom - client.top;
-            placement.availableMajor = vertical ? placement.height : placement.width;
-            syncCompactTaskbarLayout(placement.height);
-            return finishStatus(TaskbarPlacementStatus::Safe);
-        }
-
         const int taskbarCross = taskbarCrossPixels(rcTaskbar_, taskbarEdge_);
         const int crossMargin = std::max(2, (int)std::lround(2.0f * scale()));
         int crossPx = taskbarCross - crossMargin * 2;
         if (crossPx < 16)
             crossPx = taskbarCross;
         if (crossPx <= 0)
-            return finishStatus(TaskbarPlacementStatus::Unavailable);
+            return false;
         syncCompactTaskbarLayout(vertical ? 0 : crossPx);
-
-        const int effectivePositionMode = positionMode < 0 ? positionMode_ : positionMode;
 
         int gap = std::max(4, (int)std::lround(4.0f * scale()));
         float minWidthDip = vertical ? kVerticalMinLengthDip : kMinWidthDip;
@@ -1376,20 +1389,80 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             }
         }
 
-        taskbar_detail::PlacementInput input;
+        input = taskbar_detail::PlacementInput{};
         input.taskbar = rcTaskbar_;
         input.edge = taskbarEdge_;
         input.vertical = vertical;
         input.allowOverlap = allowOverlap_;
-        input.positionMode = effectivePositionMode;
+        input.positionMode = anchor.mode;
+        input.anchorRatio = anchor.ratio;
+        input.anchorEdge = anchor.edge;
         input.gap = gap;
         input.minMajor = minW;
         input.compressedMinMajor = compressedMinW;
         input.maxMajor = maxW;
         input.crossPixels = crossPx;
         input.crossMargin = crossMargin;
+        input.minDistinctAnchorOffset = std::max(24, (int)std::lround(32.0f * scale()));
         input.occupied = occupiedIntervals();
-        return finishStatus(taskbar_detail::calculatePlacement(input, placement));
+        return true;
+    }
+
+    void syncAvailableAnchorOptions(const taskbar_detail::PlacementInput& input,
+                                    const WindowPlacement& placement,
+                                    TaskbarPlacementStatus status) {
+        std::vector<TaskbarAnchorOption> options;
+        if (status != TaskbarPlacementStatus::NoSpace &&
+            status != TaskbarPlacementStatus::Unavailable) {
+            const auto slots = taskbar_detail::collectAvailableAnchors(input, 0);
+            const int activeIndex =
+                taskbar_detail::findActiveAnchorIndex(slots, anchor_, placement, input.vertical);
+            options = anchorOptionsFromSlots(slots, activeIndex, input.vertical);
+        }
+        if (options == publishedAnchorOptions_)
+            return;
+        publishedAnchorOptions_ = std::move(options);
+        if (onAnchorOptionsChanged_)
+            onAnchorOptionsChanged_(publishedAnchorOptions_);
+    }
+
+    TaskbarPlacementStatus calculateWindowPlacement(WindowPlacement& placement,
+                                                    bool updateStatus = true) {
+        auto finishStatus = [&](TaskbarPlacementStatus status) {
+            return updateStatus ? setPlacementStatus(status) : status;
+        };
+        if (!hwnd || !taskbar_)
+            return finishStatus(TaskbarPlacementStatus::Unavailable);
+
+        updateRects();
+
+        const bool vertical = isVerticalTaskbar();
+        if (viewMode_ == TaskbarViewMode::Immersive) {
+            RECT client{};
+            POINT origin{0, 0};
+            if (!GetClientRect(taskbar_, &client) || client.right <= client.left ||
+                client.bottom <= client.top || !ClientToScreen(taskbar_, &origin))
+                return finishStatus(TaskbarPlacementStatus::Unavailable);
+
+            placement.x = origin.x;
+            placement.y = origin.y;
+            placement.width = client.right - client.left;
+            placement.height = client.bottom - client.top;
+            placement.availableMajor = vertical ? placement.height : placement.width;
+            syncCompactTaskbarLayout(placement.height);
+            return finishStatus(TaskbarPlacementStatus::Safe);
+        }
+
+        taskbar_detail::PlacementInput input;
+        if (!buildEmbeddedPlacementInput(input, anchor_)) {
+            if (updateStatus && (probeReady_ || allowOverlap_))
+                syncAvailableAnchorOptions(input, placement, TaskbarPlacementStatus::Unavailable);
+            return finishStatus(TaskbarPlacementStatus::Unavailable);
+        }
+        const TaskbarPlacementStatus status = taskbar_detail::calculatePlacement(input, placement);
+        if (updateStatus && (probeReady_ || allowOverlap_))
+            syncAvailableAnchorOptions(input, placement, status);
+        return finishStatus(status);
     }
 
     void applyWindowPlacement(const WindowPlacement& placement, bool bringToFront = true,
@@ -1483,71 +1556,71 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return true;
     }
 
-    static bool usableDragPlacement(TaskbarPlacementStatus status) {
-        return status != TaskbarPlacementStatus::Unavailable &&
-               status != TaskbarPlacementStatus::NoSpace;
-    }
-
-    WindowPlacement dragPreviewFromAnchor(const WindowPlacement& anchor, int mode) const {
-        return taskbar_detail::dragPreview(anchor, mode, isVerticalTaskbar(), drag_.previewMajor());
-    }
-
-    bool dragPreviewPlacementAt(POINT cursorScreen, WindowPlacement& placement, int& mode) {
-        bool found = false;
-        long long bestDistance = 0;
-        const int cursorMajor = isVerticalTaskbar() ? cursorScreen.y : cursorScreen.x;
-        for (int candidateMode = 0; candidateMode <= 1; ++candidateMode) {
-            WindowPlacement anchor;
-            const TaskbarPlacementStatus status =
-                calculateWindowPlacement(anchor, candidateMode, false);
-            if (!usableDragPlacement(status))
-                continue;
-
-            const WindowPlacement preview = dragPreviewFromAnchor(anchor, candidateMode);
-            const int previewStart = isVerticalTaskbar() ? preview.y : preview.x;
-            const int previewLength = isVerticalTaskbar() ? preview.height : preview.width;
-            const long long distance =
-                std::llabs(static_cast<long long>(cursorMajor) * 2 -
-                           (static_cast<long long>(previewStart) * 2 + previewLength));
-            if (!found || distance < bestDistance ||
-                (distance == bestDistance && candidateMode == positionMode_)) {
-                found = true;
-                bestDistance = distance;
-                placement = preview;
-                mode = candidateMode;
-            }
-        }
-        return found;
-    }
-
     bool updateDragPreviewPlacement() {
-        if (!drag_.dragging())
+        if (!drag_.dragging() || dragAnchors_.empty())
             return false;
-        WindowPlacement placement;
-        int mode = positionMode_;
-        if (!dragPreviewPlacementAt(drag_.cursor(), placement, mode))
+        const bool vertical = isVerticalTaskbar();
+        const POINT cursor = drag_.cursor();
+        const int effectiveMajor = (vertical ? cursor.y : cursor.x) - drag_.grabOffset();
+        const int hysteresisPx = std::max(6, (int)std::lround(10.0f * scale()));
+        const int currentIdx = drag_.candidate();
+        const int nextIdx = taskbar_detail::selectDragAnchorIndex(dragAnchors_, effectiveMajor,
+                                                                  vertical, currentIdx, hysteresisPx);
+        if (nextIdx < 0 || nextIdx >= static_cast<int>(dragAnchors_.size()))
             return false;
 
-        drag_.setCandidate(mode);
+        drag_.setCandidate(nextIdx);
+        const WindowPlacement& placement =
+            dragAnchors_[static_cast<size_t>(nextIdx)].previewPlacement;
         WindowPlacement current;
-        if (currentWindowPlacement(current) && current.x == placement.x &&
-            current.y == placement.y && current.width == placement.width &&
-            current.height == placement.height)
-            return false;
-        applyWindowPlacement(placement, true, true);
-        return true;
+        const bool sameBox = currentWindowPlacement(current) && current.x == placement.x &&
+                             current.y == placement.y && current.width == placement.width &&
+                             current.height == placement.height;
+        if (!sameBox)
+            applyWindowPlacement(placement, true, true);
+        return !sameBox || nextIdx != currentIdx;
     }
 
     void beginLyricDrag() {
         if (isExpandedView() || drag_.dragging())
             return;
         WindowPlacement current;
+        const bool hasCurrent = currentWindowPlacement(current);
+        const bool vertical = isVerticalTaskbar();
         // 预览表达的是用户此刻看到的整个任务栏歌词宿主，而非单独歌词文本：
         // 当前 HWND 主轴尺寸已包含封面、歌曲信息、歌词区和独立频谱。
-        const int preview = currentWindowPlacement(current)
-                                ? (isVerticalTaskbar() ? current.height : current.width)
-                                : 0;
-        drag_.begin(preview, positionMode_);
+        const int preview = hasCurrent ? (vertical ? current.height : current.width) : 0;
+        taskbar_detail::PlacementInput input;
+        if (!buildEmbeddedPlacementInput(input, anchor_)) {
+            drag_.end();
+            if (GetCapture() == hwnd)
+                ReleaseCapture();
+            return;
+        }
+        dragAnchors_ = taskbar_detail::collectAvailableAnchors(input, preview);
+        if (dragAnchors_.empty()) {
+            drag_.end();
+            if (GetCapture() == hwnd)
+                ReleaseCapture();
+            return;
+        }
+        int initialIdx =
+            taskbar_detail::findActiveAnchorIndex(dragAnchors_, anchor_, current, vertical);
+        if (initialIdx < 0)
+            initialIdx = 0;
+
+        int grabOffset = 0;
+        if (hasCurrent) {
+            const POINT cursor = drag_.cursor();
+            const int cursorStartMajor = vertical ? cursor.y : cursor.x;
+            const int currentStart = vertical ? current.y : current.x;
+            const int currentLen = vertical ? current.height : current.width;
+            const int currentCenter = currentStart + currentLen / 2;
+            const int limit = std::max(1, preview / 2);
+            grabOffset = std::clamp(cursorStartMajor - currentCenter, -limit, limit);
+        }
+
+        drag_.begin(preview, initialIdx, grabOffset);
         SetCursor(LoadCursorW(nullptr, IDC_SIZEALL));
         cancelSceneWindowResize();
         setSongTransitionPending(false);
@@ -1569,7 +1642,12 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
     void finishLyricDrag(bool commit) {
         const bool wasDragging = drag_.dragging();
-        const int committedMode = drag_.candidate();
+        const int committedIdx = drag_.candidate();
+        const bool hasCommitted = commit && wasDragging && committedIdx >= 0 &&
+                                  committedIdx < static_cast<int>(dragAnchors_.size());
+        const TaskbarAnchorSpec committedSpec =
+            hasCommitted ? dragAnchors_[static_cast<size_t>(committedIdx)].spec : anchor_;
+        dragAnchors_.clear();
         drag_.end();
         if (GetCapture() == hwnd)
             ReleaseCapture();
@@ -1580,13 +1658,13 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         trackingLeave_ = false;
         mouseOver_ = false;
         immersiveControlHover_ = -1;
-        if (commit)
-            positionMode_ = committedMode;
+        if (hasCommitted)
+            anchor_ = normalizeAnchor(committedSpec);
         requestInvalidation(RenderInvalidation::Layout);
         adjustPosition();
         requestFrameAndFlush();
-        if (commit && onPositionModeChanged)
-            onPositionModeChanged(positionMode_);
+        if (hasCommitted && onAnchorChanged_)
+            onAnchorChanged_(anchor_);
         drag_.clearPreview();
     }
 
@@ -2377,7 +2455,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (!on)
             spectrum_.clearBands();
         // 先改窗口宽度再渲染：若在 render 内经 Layout 失效改大小，
-        // render 结尾的 present 会用旧尺寸位图把窗口尺寸拽回去（与 setPositionMode 同序）
+        // render 结尾的 present 会用旧尺寸位图把窗口尺寸拽回去（与 setAnchor 同序）
         adjustPosition();
         requestFrameAndFlush();
     }
@@ -3158,11 +3236,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                        D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
     }
 
-    void setPositionMode(int mode) {
-        mode = mode == 1 ? 1 : 0;
-        if (positionMode_ == mode)
+    void setAnchor(TaskbarAnchorSpec anchor) {
+        anchor = normalizeAnchor(anchor);
+        if (anchor_ == anchor)
             return;
-        positionMode_ = mode;
+        anchor_ = anchor;
         adjustPosition();
         requestFrameAndFlush();
     }
@@ -3230,6 +3308,10 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         renderState_.setWindowPhase(RenderState::WindowPhase::Hidden);
         probeReady_ = false;
         placementProbe_.clearResult();
+        dragAnchors_.clear();
+        drag_.end();
+        drag_.clearPreview();
+        publishedAnchorOptions_.clear();
         if (createWindow(inst, targetMonitorDeviceName_, viewMode_)) {
             if (isAppBarView()) {
                 renderState_.setVisibilitySuppressed(false);
@@ -7406,7 +7488,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             }
             POINT pressPoint{};
             GetCursorPos(&pressPoint);
-            drag_.press(pressPoint, positionMode_);
+            drag_.press(pressPoint, -1);
             SetCapture(hwnd);
             if (inlineControlHover_ >= 0)
                 requestFrameAndFlush();
@@ -7555,6 +7637,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             stopPlacementTimer();
             stopProbe();
             stopResourceMonitoring();
+            dragAnchors_.clear();
             drag_.end();
             volumePopup_.destroy();
             mediaPopup.destroy();
@@ -7793,10 +7876,18 @@ void TaskbarHost::setDockQuickAppsCallback(std::function<void(POINT)> cb) {
     });
 }
 
-void TaskbarHost::setPositionModeChangedCallback(std::function<void(int)> cb) {
+void TaskbarHost::setAnchorChangedCallback(std::function<void(TaskbarAnchorSpec)> cb) {
     cb = callbacks_->callback(std::move(cb));
     thread_->invoke([=, this]() mutable {
-        impl_->onPositionModeChanged = std::move(cb);
+        impl_->onAnchorChanged_ = std::move(cb);
+    });
+}
+
+void TaskbarHost::setAnchorOptionsChangedCallback(
+    std::function<void(std::vector<TaskbarAnchorOption>)> cb) {
+    cb = callbacks_->callback(std::move(cb));
+    thread_->invoke([=, this]() mutable {
+        impl_->onAnchorOptionsChanged_ = std::move(cb);
     });
 }
 
@@ -7956,9 +8047,9 @@ bool TaskbarHost::backgroundBlurAvailable() const {
     });
 }
 
-void TaskbarHost::setPositionMode(int mode) {
+void TaskbarHost::setAnchor(TaskbarAnchorSpec anchor) {
     thread_->invoke([=, this]() mutable {
-        impl_->setPositionMode(mode);
+        impl_->setAnchor(anchor);
     });
 }
 

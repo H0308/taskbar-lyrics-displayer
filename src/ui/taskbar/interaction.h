@@ -58,6 +58,7 @@ public:
     POINT cursor() const { return cursor_; }
     int candidate() const { return candidate_; }
     int previewMajor() const { return previewMajor_; }
+    int grabOffset() const { return grabOffset_; }
     void press(POINT point, int mode) {
         pressed_ = true;
         start_ = cursor_ = point;
@@ -68,17 +69,21 @@ public:
         return !dragging_ && (std::abs(point.x - start_.x) >= thresholdX ||
                               std::abs(point.y - start_.y) >= thresholdY);
     }
-    void begin(int previewMajor, int mode) {
+    void begin(int previewMajor, int mode, int grabOffset = 0) {
         dragging_ = true;
         previewMajor_ = previewMajor;
         candidate_ = mode;
+        grabOffset_ = grabOffset;
     }
     void end() { pressed_ = dragging_ = false; }
-    void clearPreview() { previewMajor_ = 0; }
+    void clearPreview() {
+        previewMajor_ = 0;
+        grabOffset_ = 0;
+    }
     void setCandidate(int mode) { candidate_ = mode; }
 
 private:
     bool pressed_ = false, dragging_ = false;
     POINT start_{}, cursor_{};
-    int candidate_ = 0, previewMajor_ = 0;
+    int candidate_ = 0, previewMajor_ = 0, grabOffset_ = 0;
 };

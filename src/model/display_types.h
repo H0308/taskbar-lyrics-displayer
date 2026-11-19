@@ -74,6 +74,51 @@ enum class TaskbarPlacementStatus {
     ForcedOverlap,
 };
 
+// 任务栏可用空白区内的停靠边：Start 对应横向左端/竖向上端，End 对应横向右端/竖向下端。
+enum class TaskbarAnchorEdge {
+    Start = 0,
+    End = 1,
+};
+
+// 任务栏锚点规格：0 = 末区末端（通知区域左侧，默认）；1 = 首区起始端（任务栏最左侧）；
+// 2 = 按归一化主轴比例与停靠边匹配任意中间空闲区域。
+struct TaskbarAnchorSpec {
+    int mode = 0;
+    double ratio = 1.0;
+    TaskbarAnchorEdge edge = TaskbarAnchorEdge::End;
+
+    static constexpr TaskbarAnchorSpec outerEnd() { return {0, 1.0, TaskbarAnchorEdge::End}; }
+    static constexpr TaskbarAnchorSpec outerStart() { return {1, 0.0, TaskbarAnchorEdge::Start}; }
+    static constexpr TaskbarAnchorSpec relative(double anchorRatio, TaskbarAnchorEdge anchorEdge) {
+        const double clamped =
+            !(anchorRatio >= 0.0) ? 0.0 : (anchorRatio > 1.0 ? 1.0 : anchorRatio);
+        return {2, clamped, anchorEdge};
+    }
+
+    bool operator==(const TaskbarAnchorSpec& other) const {
+        if (mode != other.mode)
+            return false;
+        if (mode != 2)
+            return true;
+        if (edge != other.edge)
+            return false;
+        const double diff = ratio - other.ratio;
+        return (diff < 0.0 ? -diff : diff) < 1e-4;
+    }
+};
+
+// 提供给托盘/任务栏右键菜单的动态可用锚点描述。
+struct TaskbarAnchorOption {
+    TaskbarAnchorSpec spec;
+    int spanIndex = 0;
+    int spanCount = 1;
+    bool spanHasBothEdges = false;
+    bool vertical = false;
+    bool active = false;
+
+    bool operator==(const TaskbarAnchorOption&) const = default;
+};
+
 // 复用 Dock 资源区；CPU、内存为基础指标，其余指标按开关紧凑排列。
 struct DockResourceVisibility {
     bool embeddedEnabled = false;

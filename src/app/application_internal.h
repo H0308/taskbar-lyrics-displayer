@@ -100,8 +100,6 @@ constexpr UINT kCmdPickFont = 105;
 constexpr UINT kCmdExit = 106;
 constexpr UINT kCmdManualSearch = 107;
 constexpr UINT kCmdFontColorEffect = 108;
-constexpr UINT kCmdTaskbarPosNotify = 109;
-constexpr UINT kCmdTaskbarPosLeft = 110;
 constexpr UINT kCmdSpectrum = 111;
 constexpr UINT kCmdAutoStart = 112;
 constexpr UINT kCmdFollowAlbum = 113;
@@ -135,6 +133,8 @@ constexpr UINT kCmdRestart = 140;
 constexpr int kCmdTaskbarMonitorAll = 150;
 constexpr int kCmdTaskbarMonitorBase = 151;
 constexpr int kDockQuickAppCommandBase = 21000;
+constexpr int kCmdTaskbarAnchorBase = 22000;
+constexpr int kCmdTaskbarAnchorMax = 64;
 constexpr int kUpdatePromptReleasePage = 1;
 constexpr int kUpdatePromptDownload = 2;
 constexpr int kUpdatePromptAbout = 3;
@@ -212,6 +212,8 @@ private:
     std::vector<std::unique_ptr<TaskbarHost>> additionalTaskbarHosts_;
     std::vector<std::wstring> activeTaskbarDisplayIds_;
     std::vector<std::pair<int, std::wstring>> taskbarMonitorMenuItems_;
+    std::unordered_map<const TaskbarHost*, std::vector<TaskbarAnchorOption>> taskbarAnchorOptions_;
+    std::vector<TaskbarAnchorSpec> activeTaskbarAnchorMenuSpecs_;
     bool taskbarAllowOverlap_ = false;
     bool taskbarNoSpaceClosePending_ = false;
     bool taskbarRebuildPending_ = false;
@@ -543,6 +545,11 @@ private:
 
     void configureTaskbarHostCallbacks(TaskbarHost* host, bool primary);
 
+    bool isLiveTaskbarHost(const TaskbarHost* host) const;
+
+    void applyTaskbarAnchor(const TaskbarAnchorSpec& anchor, const wchar_t* logSource,
+                            const TaskbarHost* alreadyAppliedHost = nullptr);
+
     TaskbarCreateResult createTaskbar(HINSTANCE inst, bool allowOverlap = false);
 
     void destroyTaskbar();
@@ -585,10 +592,11 @@ private:
     bool createTrayWindow(HINSTANCE inst);
     void destroyTray();
     void updateTrayIcon();
-    std::vector<fluent::FluentMenuItem> buildMenuItems(bool fullTrayMenu);
+    std::vector<fluent::FluentMenuItem> buildMenuItems(bool fullTrayMenu,
+                                                       const TaskbarHost* menuHost = nullptr);
     void showTrayMenu();
     void showTrayMenu(POINT screenPt);
-    void showTaskbarMenu(POINT screenPt);
+    void showTaskbarMenu(POINT screenPt, const TaskbarHost* menuHost = nullptr);
     void showDockQuickApps(POINT screenPt);
     std::vector<fluent::FluentMenuItem> buildDockQuickAppItems();
     void onDockQuickAppCommand(int command);

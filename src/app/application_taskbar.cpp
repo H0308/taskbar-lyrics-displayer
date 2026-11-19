@@ -400,14 +400,14 @@ void App::configureTaskbarHostCallbacks(TaskbarHost* host, bool primary) {
     host->setImmersiveExitCallback([this] { applyTaskbarViewMode(0); });
     host->setDockQuickAppsCallback([this](POINT pt) { showDockQuickApps(pt); });
     host->setImmersiveMenuCallback([this](POINT pt) { showTrayMenu(pt); });
-    host->setContextMenuCallback([this](POINT pt) { showTaskbarMenu(pt); });
-    host->setPositionModeChangedCallback([this](int mode) {
-        mode = mode == 1 ? 1 : 0;
-        if (settings_.taskbarPosition_ == mode)
-            return;
-        settings_.taskbarPosition_ = mode;
-        logSettingInt(L"taskbar-position-drag", settings_.taskbarPosition_);
-        saveSettings();
+    host->setContextMenuCallback([this, host](POINT pt) { showTaskbarMenu(pt, host); });
+    host->setAnchorChangedCallback([this, host](TaskbarAnchorSpec anchor) {
+        if (isLiveTaskbarHost(host))
+            applyTaskbarAnchor(anchor, L"taskbar-position-drag", host);
+    });
+    host->setAnchorOptionsChangedCallback([this, host](std::vector<TaskbarAnchorOption> options) {
+        if (isLiveTaskbarHost(host))
+            taskbarAnchorOptions_[host] = std::move(options);
     });
     host->setAppVolumeCallback([this](AppVolumeRequest request) {
         if (request.revision <= appVolumeRequestRevision_)
@@ -431,6 +431,30 @@ void App::configureTaskbarHostCallbacks(TaskbarHost* host, bool primary) {
     host->setIdleTaskCompleteCallback(
         [this](const IdleTaskInfo& task) { idle_.completeTickTickTask(task); });
     host->setMediaPopupOpenedCallback([this] { idle_.refreshTickTickTasks(); });
+}
+
+bool App::isLiveTaskbarHost(const TaskbarHost* host) const {
+    if (!host)
+        return false;
+    if (taskbarHost.get() == host)
+        return true;
+    return std::any_of(additionalTaskbarHosts_.begin(), additionalTaskbarHosts_.end(),
+                       [host](const auto& item) { return item.get() == host; });
+}
+
+void App::applyTaskbarAnchor(const TaskbarAnchorSpec& anchor, const wchar_t* logSource,
+                             const TaskbarHost* alreadyAppliedHost) {
+    if (settings_.taskbarAnchor() == anchor)
+        return;
+    settings_.setTaskbarAnchor(anchor);
+    const TaskbarAnchorSpec saved = settings_.taskbarAnchor();
+    runtime_log::writef(L"[setting] %s mode=%d ratio=%.4f align=%d", logSource, saved.mode,
+                        saved.ratio, saved.edge == TaskbarAnchorEdge::Start ? 0 : 1);
+    forEachHost([&](TaskbarHost* host) {
+        if (host != alreadyAppliedHost)
+            host->setAnchor(saved);
+    });
+    saveSettings();
 }
 
 TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
@@ -530,7 +554,7 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
         host->applyAppearance(
             appearanceForHost(host->isVerticalTaskbar(), effectiveRenderModeForHost(host)));
 
-        host->setPositionMode(settings_.taskbarPosition_);
+        host->setAnchor(settings_.taskbarAnchor());
         host->setAppVolume(appVolumeState_);
     });
     applyFontAppearance();
@@ -598,6 +622,8 @@ void App::destroyTaskbar() {
     additionalTaskbarHosts_.clear();
     auto host = std::move(taskbarHost);
     host.reset();
+    taskbarAnchorOptions_.clear();
+    activeTaskbarAnchorMenuSpecs_.clear();
     activeTaskbarDisplayIds_.clear();
     updateTrayIcon();
 }
