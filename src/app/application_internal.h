@@ -264,6 +264,7 @@ private:
     int renderMode_ = 0;
     int userRenderMode_ = 0;
     bool fullscreenRenderModeActive_ = false;
+    std::pair<HWND, HMONITOR> lastFullscreenDiagnosticCandidate_{};
     bool taskbarVertical_ = false; // 当前任务栏是否为左右侧的竖向布局
     bool taskbarCompact_ = false;
     bool mediaSessionAlive_ = false; // 用于同步依赖播放会话的设置可用态

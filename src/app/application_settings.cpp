@@ -1,5 +1,7 @@
 #include "app/application_internal.h"
 #include "settings/display_rules.h"
+#include <cwchar>
+
 namespace lyrics_app {
 void App::enforceSecondaryLyricConstraint() {
     if (display_rules::resolveLyricConflict(settings_, display_rules::LyricPriority::Secondary))
@@ -608,9 +610,56 @@ void App::applySongToastPosition(int position) {
     saveSettings();
 }
 
+namespace {
+void logFullscreenCandidate(HWND window, const wchar_t* className, const RECT& bounds,
+                            const MONITORINFOEXW& monitor) {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(window, &pid);
+    DWORD shellPid = 0;
+    GetWindowThreadProcessId(GetShellWindow(), &shellPid);
+    const wchar_t* imageName = L"unknown";
+    wchar_t imagePath[MAX_PATH]{};
+    if (HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
+        DWORD length = static_cast<DWORD>(std::size(imagePath));
+        if (QueryFullProcessImageNameW(process, 0, imagePath, &length)) {
+            const wchar_t* separator = std::wcsrchr(imagePath, L'\\');
+            imageName = separator ? separator + 1 : imagePath;
+        }
+        CloseHandle(process);
+    }
+
+    RECT visibleBounds{};
+    const bool hasVisibleBounds = SUCCEEDED(DwmGetWindowAttribute(
+        window, DWMWA_EXTENDED_FRAME_BOUNDS, &visibleBounds, sizeof(visibleBounds)));
+    DWORD cloaked = 0;
+    const bool hasCloaked = SUCCEEDED(
+        DwmGetWindowAttribute(window, DWMWA_CLOAKED, &cloaked, sizeof(cloaked)));
+    const RECT& screen = monitor.rcMonitor;
+    const RECT& work = monitor.rcWork;
+    runtime_log::writef(
+        L"[fullscreen-check] matched hwnd=%p pid=%lu exe=%ls class=%ls shellPid=%lu "
+        L"owner=%p rootOwner=%p style=0x%08lX exStyle=0x%08lX visible=%d minimized=%d "
+        L"maximized=%d cloaked=%ld monitor=%ls rect=(%ld,%ld,%ld,%ld) "
+        L"dwmAvailable=%d dwmRect=(%ld,%ld,%ld,%ld) "
+        L"monitorRect=(%ld,%ld,%ld,%ld) workRect=(%ld,%ld,%ld,%ld)",
+        static_cast<void*>(window), pid, imageName, className, shellPid,
+        static_cast<void*>(GetWindow(window, GW_OWNER)),
+        static_cast<void*>(GetAncestor(window, GA_ROOTOWNER)),
+        static_cast<DWORD>(GetWindowLongPtrW(window, GWL_STYLE)),
+        static_cast<DWORD>(GetWindowLongPtrW(window, GWL_EXSTYLE)),
+        IsWindowVisible(window) != FALSE, IsIconic(window) != FALSE, IsZoomed(window) != FALSE,
+        hasCloaked ? static_cast<LONG>(cloaked) : -1L, monitor.szDevice, bounds.left, bounds.top,
+        bounds.right, bounds.bottom, hasVisibleBounds, visibleBounds.left, visibleBounds.top,
+        visibleBounds.right, visibleBounds.bottom, screen.left, screen.top, screen.right,
+        screen.bottom, work.left, work.top, work.right, work.bottom);
+}
+} // namespace
+
 bool App::foregroundFullscreen(std::wstring* monitorDeviceName) {
     if (monitorDeviceName)
         monitorDeviceName->clear();
+    const auto previousCandidate =
+        std::exchange(lastFullscreenDiagnosticCandidate_, std::pair<HWND, HMONITOR>{});
     HWND foreground = GetForegroundWindow();
     if (!foreground || foreground == GetShellWindow())
         return false;
@@ -627,6 +676,12 @@ bool App::foregroundFullscreen(std::wstring* monitorDeviceName) {
         if (wcscmp(className, shell) == 0)
             return false;
     }
+
+    // 任务栏预览和搜索等工具窗口可能使用覆盖整屏的宿主。
+    const LONG_PTR exStyle = GetWindowLongPtrW(foreground, GWL_EXSTYLE);
+    if ((exStyle & WS_EX_TOOLWINDOW) != 0 && (exStyle & WS_EX_APPWINDOW) == 0)
+        return false;
+
     RECT rc{};
     if (!GetWindowRect(foreground, &rc))
         return false;
@@ -641,6 +696,10 @@ bool App::foregroundFullscreen(std::wstring* monitorDeviceName) {
         return false;
     if (monitorDeviceName)
         *monitorDeviceName = info.szDevice;
+    lastFullscreenDiagnosticCandidate_ = {foreground, monitor};
+    // 连续命中同一窗口和显示器时只记录一次。判定失败时清除记录，以便下次命中重新采集。
+    if (lastFullscreenDiagnosticCandidate_ != previousCandidate)
+        logFullscreenCandidate(foreground, className, rc, info);
     return true;
 }
 
