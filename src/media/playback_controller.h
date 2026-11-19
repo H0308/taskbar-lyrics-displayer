@@ -9,7 +9,8 @@
 enum class CoverSource { None, Smtc, QqApi, NeteaseApi, MusicBrainz };
 
 // 椒盐音乐与 Spotify 同为「只有离散时间线、歌词依赖通用在线多源」的适配器：
-// 切歌即请求、不等待 QQ 的切歌防抖，也不使用 QQ 本地歌词索引。
+// 均不使用 QQ 本地歌词索引，共享多源在线歌词与封面回退路径；
+// 其中椒盐音乐切歌时还会走短防抖以合并拆分投递的时间线与曲目属性。
 constexpr bool usesSampledLyricPath(SmtcPlayerType player) noexcept {
     return player == SmtcPlayerType::Spotify || player == SmtcPlayerType::SaltPlayer;
 }
@@ -41,7 +42,7 @@ struct PlaybackState {
     PlaybackStatus lastStatus = PlaybackStatus::Stopped;
     SmtcPlayerType lastPlayer_ = SmtcPlayerType::Unknown;
     bool lyricLoading_ = false;
-    bool lyricDebounceArmed_ = false;     // QQ 切歌请求防抖定时器已挂起
+    bool lyricDebounceArmed_ = false;     // QQ / 椒盐音乐切歌请求防抖定时器已挂起
     ULONGLONG lyricDebounceDeadline_ = 0; // 等待新时间线的截止时刻（超时则按现有快照请求）
     bool lyricRequestStale_ = false;      // 当前在途/最近一次歌词请求是否发于时间线不可信期间
     std::vector<LyricLine> currentLyrics_;

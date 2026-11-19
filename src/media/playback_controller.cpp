@@ -7,6 +7,7 @@
 namespace {
 constexpr UINT_PTR kTimerLyricDebounce = 3;
 constexpr UINT kLyricDebounceMs = 300;
+constexpr UINT kSaltLyricDebounceMs = 200;
 
 const wchar_t* coverSourceName(CoverSource source) {
     switch (source) {
@@ -148,7 +149,26 @@ TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap,
         // 跟随专辑开启时不回退配置色：沿用上一首的专辑色直到新封面取色完成，
         // 避免歌词加载窗口期配置色闪一下再切回专辑色
         state_.lyricLoading_ = !usesSampledLyricPath(snap.player);
-        if (usesSampledLyricPath(snap.player)) {
+        if (snap.player == SmtcPlayerType::SaltPlayer) {
+            cancelLyricDebounce();
+            if (!snap.title.empty()) {
+                // 椒盐音乐切歌时常先更新时长、几十毫秒后再更新歌名，短防抖合并同一批事件。
+                state_.lyricLoading_ = true;
+                state_.lyricRequestStale_ = false;
+                ++state_.requestGeneration_;
+                if (timerWindow_) {
+                    state_.lyricDebounceDeadline_ = GetTickCount64() + 2000;
+                    state_.lyricDebounceArmed_ =
+                        SetTimer(timerWindow_, kTimerLyricDebounce, kSaltLyricDebounceMs, nullptr) !=
+                        0;
+                }
+                if (!state_.lyricDebounceArmed_)
+                    startLyricRequest(snap);
+            } else {
+                state_.lyricRequestStale_ = false;
+                ++state_.requestGeneration_;
+            }
+        } else if (snap.player == SmtcPlayerType::Spotify) {
             cancelLyricDebounce();
             if (!snap.title.empty()) {
                 startLyricRequest(snap);
@@ -407,13 +427,31 @@ void PlaybackController::cancelLyricDebounce() {
 }
 
 void PlaybackController::onLyricDebounce() {
+    if (!state_.lyricDebounceArmed_)
+        return;
     state_.lyricDebounceArmed_ = false;
     SmtcSnapshot snap = snapshot_();
-    if (!snap.sessionAlive || snap.player != SmtcPlayerType::QQMusic || snap.title.empty())
+    if (!snap.sessionAlive ||
+        (snap.player != SmtcPlayerType::QQMusic && snap.player != SmtcPlayerType::SaltPlayer))
         return;
+    if (snap.title.empty()) {
+        if (snap.player == SmtcPlayerType::SaltPlayer) {
+            if (timerWindow_ && GetTickCount64() < state_.lyricDebounceDeadline_) {
+                state_.lyricDebounceArmed_ =
+                    SetTimer(timerWindow_, kTimerLyricDebounce, kSaltLyricDebounceMs, nullptr) != 0;
+                if (state_.lyricDebounceArmed_)
+                    return;
+            }
+            state_.lyricLoading_ = false;
+            publish_(snap, {});
+            logState_(snap);
+        }
+        return;
+    }
     if (makeTrackKey(snap) != state_.currentKey)
         return;
-    if (snap.timelineStale && GetTickCount64() < state_.lyricDebounceDeadline_) {
+    if (snap.player == SmtcPlayerType::QQMusic && snap.timelineStale &&
+        GetTickCount64() < state_.lyricDebounceDeadline_) {
         // 时间线仍是旧歌残留：durationMs 不可信， lyric 请求的时长过滤会
         // 把正确候选全部淘汰（失败会先闪「暂无歌词」）。继续等新时间线。
         if (timerWindow_)
