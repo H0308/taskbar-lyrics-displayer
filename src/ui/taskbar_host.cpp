@@ -905,7 +905,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                      static_cast<LONG>(std::lround(yDip * scale()))};
     }
 
-    bool updateMediaInfo(const OverlayMediaInfo& info) {
+    bool updateMediaInfo(const OverlayMediaInfo& info, bool resetDisc) {
         bool thumbChanged = info.thumbnail != media.thumbnail;
         bool textChanged = info.title != media.title || info.artist != media.artist;
         const bool canRepeatChanged = info.canRepeat != media.canRepeat;
@@ -941,11 +941,12 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             requestInvalidation(RenderInvalidation::Cover);
         if (platformChanged)
             requestInvalidation(RenderInvalidation::PlatformIcon);
-        if (thumbChanged || textChanged)
+        // 同曲的封面可能随媒体属性刷新重新加载，转盘角度只随曲目切换重置。
+        if (resetDisc)
             vinyl_.resetDisc();
         if (textChanged)
             requestInvalidation(RenderInvalidation::SongInfo);
-        if (thumbChanged || textChanged || playingChanged)
+        if (resetDisc || playingChanged)
             vinyl_.resetClock(monotonicNowMs());
         if (playingChanged)
             updateVinylRotation();
@@ -2589,7 +2590,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             karaoke_.invalidateProgress();
         else
             syncKaraokePlayback(frame.actualPositionMs, frame.media.playing);
-        const bool mediaChanged = updateMediaInfo(frame.media);
+        const bool mediaChanged = updateMediaInfo(frame.media, trackChanged && !durationOnlyMediaUpdate);
         const bool popupAvailable = mediaPopupAvailable(frame.visible);
         mediaPopup.beginPresentationUpdate();
         mediaPopup.setIdleContent(frame.idle, popupAvailable);
