@@ -337,6 +337,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             setControlsOnHover(value.controlsOnHover);
         if (!appearance_ || appearance_->hoverControlStyle != value.hoverControlStyle)
             setHoverControlStyle(value.hoverControlStyle);
+        if (!appearance_ || appearance_->inlineControlDisplayMode != value.inlineControlDisplayMode)
+            setInlineControlDisplayMode(value.inlineControlDisplayMode);
         if (!appearance_ || appearance_->floatingCardTrigger != value.floatingCardTrigger)
             setFloatingCardTrigger(value.floatingCardTrigger);
         if (!appearance_ || appearance_->floatingCardBackground != value.floatingCardBackground)
@@ -508,6 +510,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     bool controlsOnHover_ = true;
     bool contextMenuEnabled_ = true;
     HoverControlStyle hoverControlStyle_ = HoverControlStyle::Inline;
+    InlineControlDisplayMode inlineControlDisplayMode_ = InlineControlDisplayMode::Hover;
     MediaPopupTrigger floatingCardTrigger_ = MediaPopupTrigger::Hover;
     MediaPopup mediaPopup;
     bool mediaPopupEnabled_ = false;
@@ -918,10 +921,13 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             (info.hasDominantColor && info.dominantColor != media.dominantColor);
         bool durationChanged = info.durationMs != media.durationMs;
         media = info;
-        if (canRepeatChanged && isExpandedView()) {
+        if (canRepeatChanged && (isExpandedView() || pinnedInlineControlsConfigured())) {
             requestInvalidation(RenderInvalidation::Layout);
             immersiveControlHover_ = -1;
             immersiveControlPressed_ = -1;
+            inlineControlHover_ = -1;
+            volumeHover_ = false;
+            volumePopup_.hide();
         }
         if (!media.canRepeat) {
             if (hwnd && (repeatHintTarget_ >= 0 || repeatHintUntil_ != 0))
@@ -1288,6 +1294,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         reconcileWindowVisibility();
         volumeHover_ = false;
         immersiveControlHover_ = -1;
+        inlineControlHover_ = -1;
         volumePopup_.hide();
         mediaPopup.hideImmediate();
     }
@@ -1357,6 +1364,15 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             minW += extra;
             compressedMinW += extra;
             maxW += extra;
+        }
+        if (!vertical && pinnedInlineControlsForScene(scene_)) {
+            const float pinnedExtra = taskbar_detail::pinnedInlineControlsIdealWidth(
+                dip(crossPx), media.canRepeat, pinnedInlineLyricFontSize());
+            if (pinnedExtra > 0.0f) {
+                const int extra = (int)std::lround(pinnedExtra * scale());
+                minW += extra;
+                maxW += extra;
+            }
         }
 
         taskbar_detail::PlacementInput input;
@@ -1542,6 +1558,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         trackingLeave_ = false;
         volumeHover_ = false;
         immersiveControlHover_ = -1;
+        inlineControlHover_ = -1;
         volumePopup_.hide();
         mediaPopup.onAnchorLeave();
         mediaPopup.hideImmediate();
@@ -1901,8 +1918,18 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             mediaPopup.endPresentationUpdate();
         }
         mediaPopup.setTriggerOnHover(floatingCardTrigger_ == MediaPopupTrigger::Hover);
-        if (enabled && mouseOver_)
-            mediaPopup.onAnchorEnter();
+        if (enabled && mouseOver_) {
+            POINT cursor{};
+            bool inPinned = false;
+            if (hwnd && GetCursorPos(&cursor) && ScreenToClient(hwnd, &cursor)) {
+                inPinned = pointInPinnedControlsZone(static_cast<float>(cursor.x),
+                                                       static_cast<float>(cursor.y));
+            }
+            if (inPinned)
+                mediaPopup.onAnchorLeave();
+            else
+                mediaPopup.onAnchorEnter();
+        }
     }
 
     void releaseCoverBackgroundResources() { cover_.releaseBackground(); }
@@ -1911,9 +1938,12 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (controlsOnHover_ == on)
             return;
         controlsOnHover_ = on;
+        inlineControlHover_ = -1;
         volumeHover_ = false;
         volumePopup_.hide();
         syncMediaPopupEnabled();
+        requestInvalidation(toMask(RenderInvalidation::Layout) | toMask(RenderInvalidation::Paint));
+        adjustPosition();
         requestFrameAndFlush();
     }
 
@@ -1921,9 +1951,25 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (hoverControlStyle_ == style)
             return;
         hoverControlStyle_ = style;
+        inlineControlHover_ = -1;
         volumeHover_ = false;
         volumePopup_.hide();
         syncMediaPopupEnabled();
+        requestInvalidation(toMask(RenderInvalidation::Layout) | toMask(RenderInvalidation::Paint));
+        adjustPosition();
+        requestFrameAndFlush();
+    }
+
+    void setInlineControlDisplayMode(InlineControlDisplayMode mode) {
+        if (inlineControlDisplayMode_ == mode)
+            return;
+        inlineControlDisplayMode_ = mode;
+        inlineControlHover_ = -1;
+        volumeHover_ = false;
+        volumePopup_.hide();
+        syncMediaPopupEnabled();
+        requestInvalidation(toMask(RenderInvalidation::Layout) | toMask(RenderInvalidation::Paint));
+        adjustPosition();
         requestFrameAndFlush();
     }
 
@@ -2152,6 +2198,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         resourcePanel_.resetPage();
         volumeHover_ = false;
         immersiveControlHover_ = -1;
+        inlineControlHover_ = -1;
         volumePopup_.hide();
         mediaPopup.onAnchorLeave();
         mediaPopup.hideImmediate();
@@ -2497,6 +2544,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const bool sceneChanged = frame.scene != scene_;
         const auto* incomingSource = player_source::find(frame.media.sourceAppUserModelId);
         const bool inlineControlsShown =
+            !pinnedInlineControlsLayoutForScene(scene_, lastLogicalPxW_, lastLogicalPxH_).active() &&
             mouseOver_ && controlsOnHover_ && hoverControlStyle_ == HoverControlStyle::Inline &&
             !isExpandedView();
         const bool loadedLyricsFromPrelude = !trackChanged && lyricsChanged && lines.empty() &&
@@ -2775,6 +2823,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (isVerticalTaskbar() || isExpandedView())
             return false;
         return sceneUsesCompactWidth(from) != sceneUsesCompactWidth(to) ||
+               pinnedInlineControlsForScene(from) != pinnedInlineControlsForScene(to) ||
                spectrumExtraForScene(from) != spectrumExtraForScene(to);
     }
 
@@ -2998,7 +3047,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (idleQuoteBackgroundScope_ == IdleQuoteBackgroundScope::All)
             return taskbar_detail::dynamicBackgroundRegions(w, h, idleQuoteBackgroundScope_, {}, {});
 
-        std::array<D2D1_RECT_F, 4> playback{};
+        std::array<D2D1_RECT_F, 5> playback{};
         std::array<D2D1_RECT_F, 2> idleRegions{};
         const bool idleScene = scene_ == DisplayScene::Idle;
         const bool showQuote = idleScene && idle.showText && idle.showQuote && !statusText.empty();
@@ -3017,7 +3066,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             const auto layout = layoutMetricsForScene(scene_, pxW, pxH);
             const auto lyric = lyricAreaForScene(scene_, pxW, pxH);
             const auto text = D2D1::RectF(lyric.x, 0.0f, lyric.x + lyric.w, h);
-            const bool showControls = mouseOver_ && controlsOnHover_ &&
+            const auto pinned = pinnedInlineControlsLayoutForScene(scene_, pxW, pxH);
+            const bool showControls = !pinned.active() && mouseOver_ && controlsOnHover_ &&
                                       hoverControlStyle_ == HoverControlStyle::Inline &&
                                       !idleScene && !isExpandedView() &&
                                       !(transition_.kind() == LyricTransitionKind::Scene &&
@@ -3028,6 +3078,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 playback[0] = D2D1::RectF(0.0f, 0.0f, infoStartX(), h);
             if (!idleScene && songInfoVisible_)
                 playback[1] = D2D1::RectF(infoStartX(), 0.0f, layout.leftW, h);
+            if (!idleScene && pinned.active())
+                playback[4] = D2D1::RectF(layout.leftW, 0.0f, lyric.x, h);
             if (scene_ == DisplayScene::Lyrics && !showControls)
                 playback[2] = text;
             if (!idleScene && spectrumVisible_) {
@@ -3339,7 +3391,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         fontStyle_ = style;
         recreateFormats();
         requestInvalidation(RenderInvalidation::Layout);
-        if (hwnd && (isAppBarView() || embeddedResourceVisible()))
+        if (hwnd &&
+            (isAppBarView() || embeddedResourceVisible() || pinnedInlineControlsConfigured()))
             adjustPosition();
         requestFrameAndFlush();
     }
@@ -3898,14 +3951,58 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                                                   hoverControlStyle_ == HoverControlStyle::Inline);
     }
 
+    bool pinnedInlineControlsConfigured() const {
+        return !isExpandedView() && !isVerticalTaskbar() && controlsOnHover_ &&
+               hoverControlStyle_ == HoverControlStyle::Inline &&
+               inlineControlDisplayMode_ == InlineControlDisplayMode::Always;
+    }
+
+    bool pinnedInlineControlsForScene(DisplayScene scene) const {
+        return pinnedInlineControlsConfigured() && scene != DisplayScene::Idle &&
+               scene != DisplayScene::NoPlayback && !embeddedResourceOnly();
+    }
+
+    float pinnedInlineLyricFontSize() const {
+        if (auto* fmt = typesetter_.resources().fmtLyric_.Get())
+            return fmt->GetFontSize();
+        return fontSize_ * fluent::font_sizes::taskbar::mainScale;
+    }
+
+    taskbar_detail::PinnedInlineControlsLayout
+    pinnedInlineControlsLayoutForScene(DisplayScene scene, int pxW, int pxH) const {
+        if (!pinnedInlineControlsForScene(scene) || pxW <= 0 || pxH <= 0)
+            return {};
+        const float width = dip(pxW);
+        const float height = dip(pxH);
+        return taskbar_detail::planPinnedInlineControls(
+            {width, height, scene, songInfoVisible_, albumCoverVisible_, media.canRepeat,
+             spectrumExtraForScene(scene, width), coverSlotWidth(height),
+             pinnedInlineLyricFontSize()});
+    }
+
+    taskbar_detail::PinnedInlineControlsLayout pinnedInlineControlsLayout() const {
+        int pxW = 0;
+        int pxH = 0;
+        logicalClientPixelSize(pxW, pxH);
+        return pinnedInlineControlsLayoutForScene(scene_, pxW, pxH);
+    }
+
     LayoutMetrics layoutMetricsForScene(DisplayScene scene, int pxW, int pxH) const {
         const float width = dip(pxW);
         const float height = dip(pxH);
         const bool expandedControls = isExpandedView() && !isVerticalTaskbar();
+        float controlsW = expandedControls ? immersiveControlsWidth(height) : 0.0f;
+        bool hasSlotControls = expandedControls;
+        if (!expandedControls && pinnedInlineControlsForScene(scene)) {
+            const auto pinned = pinnedInlineControlsLayoutForScene(scene, pxW, pxH);
+            if (pinned.active()) {
+                controlsW = pinned.slotWidth;
+                hasSlotControls = true;
+            }
+        }
         return taskbar_detail::horizontalLayout(
-            {width, height, scene, isExpandedView(), expandedControls, songInfoVisible_,
-             albumCoverVisible_, expandedControls ? immersiveControlsWidth(height) : 0.0f,
-             spectrumExtraForScene(scene, width),
+            {width, height, scene, isExpandedView(), hasSlotControls, songInfoVisible_,
+             albumCoverVisible_, controlsW, spectrumExtraForScene(scene, width),
              isExpandedView() && songInfoVisible_ && albumCoverVisible_ ? coverSize() : 0.0f,
              coverSlotWidth(height)});
     }
@@ -4010,13 +4107,16 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     // centers[3] 为播放模式按钮，centers[4] 为音量按钮。返回 false 表示当前不在内嵌控件展示状态。
     // 内嵌悬浮控件：上一首 / 播放 / 下一首 / 播放模式 / 音量。
     bool inlineControlsLayout(float centers[5], float& cy, float& r) const {
-        if (isVerticalTaskbar())
+        if (isExpandedView() || isVerticalTaskbar() || scene_ == DisplayScene::Idle ||
+            scene_ == DisplayScene::NoPlayback)
             return false;
         if (!controlsOnHover_ || !mouseOver_ || hoverControlStyle_ != HoverControlStyle::Inline)
             return false;
         int pxW = 0;
         int pxH = 0;
         logicalClientPixelSize(pxW, pxH);
+        if (pinnedInlineControlsLayoutForScene(scene_, pxW, pxH).active())
+            return false;
         LayoutMetrics layout = layoutMetrics(pxW, pxH);
         if (layout.w <= 0.0f || layout.h <= 0.0f)
             return false;
@@ -4338,6 +4438,78 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         media_control::drawVolume(rt, c, r * 0.8f, brush, level);
     }
 
+    void drawPinnedInlineControls(const taskbar_detail::PinnedInlineControlsLayout& pinned) {
+        if (!pinned.active())
+            return;
+        for (int i = 0; i < 3; ++i) {
+            if (pinned.visible[i])
+                drawButton(i, D2D1::Point2F(pinned.centerX[i], pinned.centerY), pinned.radius);
+        }
+        if (pinned.visible[3] && media.canRepeat)
+            drawRepeatButton(D2D1::Point2F(pinned.centerX[3], pinned.centerY), pinned.radius);
+        if (pinned.visible[4])
+            drawVolumeButton(D2D1::Point2F(pinned.centerX[4], pinned.centerY), pinned.radius);
+    }
+
+    bool pointInPinnedControlsZone(float clientX, float clientY) const {
+        const auto pinned = pinnedInlineControlsLayout();
+        if (!pinned.active())
+            return false;
+        int pxW = 0;
+        int pxH = 0;
+        logicalClientPixelSize(pxW, pxH);
+        if (pxW <= 0 || pxH <= 0)
+            return false;
+        float logicalX = 0.0f;
+        float logicalY = 0.0f;
+        clientPointToLogicalDip(clientX, clientY, logicalX, logicalY);
+        const float h = dip(pxH);
+        return logicalX >= pinned.boundsLeft && logicalX <= pinned.boundsRight &&
+               logicalY >= 0.0f && logicalY <= h;
+    }
+
+    int hitPinnedInlineControl(float clientX, float clientY, bool includeDisabled = false) const {
+        const auto pinned = pinnedInlineControlsLayout();
+        if (!pinned.active())
+            return -1;
+        float logicalX = 0.0f;
+        float logicalY = 0.0f;
+        clientPointToLogicalDip(clientX, clientY, logicalX, logicalY);
+        const float hitRadius = pinned.radius + 3.5f;
+        int bestIndex = -1;
+        float bestDist = hitRadius;
+        for (int i = 0; i < 5; ++i) {
+            if (!pinned.visible[i])
+                continue;
+            bool enabled = true;
+            switch (i) {
+            case 0:
+                enabled = media.canPrev;
+                break;
+            case 1:
+                enabled = media.canPlayPause;
+                break;
+            case 2:
+                enabled = media.canNext;
+                break;
+            case 3:
+                enabled = media.canRepeat;
+                break;
+            default:
+                break;
+            }
+            if (!enabled && !includeDisabled)
+                continue;
+            const float dist =
+                std::hypot(logicalX - pinned.centerX[i], logicalY - pinned.centerY);
+            if (dist <= bestDist) {
+                bestDist = dist;
+                bestIndex = i;
+            }
+        }
+        return bestIndex;
+    }
+
     bool hitVolumeButton(float x, float y) const {
         if (isExpandedView())
             return hitImmersiveControl(x, y) == kImmersiveControlVolume;
@@ -4351,6 +4523,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return std::hypot(logicalX - layout.controlCenters[3].x,
                               logicalY - layout.controlCenters[3].y) <= layout.controlRadius + 4.0f;
         }
+        if (pinnedInlineControlsLayout().active())
+            return hitPinnedInlineControl(x, y) == 4;
         float centers[5]{};
         float cy = 0.0f;
         float r = 0.0f;
@@ -4389,6 +4563,13 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 const int half = static_cast<int>(std::lround((layout.controlRadius + 6.0f) * s));
                 return RECT{pt.x - half, pt.y - half, pt.x + half, pt.y + half};
             }
+        }
+        if (const auto pinned = pinnedInlineControlsLayout(); pinned.active() && pinned.visible[4]) {
+            const float s = scale();
+            POINT pt = logicalDipToClientPoint(pinned.centerX[4], pinned.centerY);
+            ClientToScreen(hwnd, &pt);
+            const int half = static_cast<int>(std::lround((pinned.radius + 5.0f) * s));
+            return RECT{pt.x - half, pt.y - half, pt.x + half, pt.y + half};
         }
         float centers[5]{};
         float cy = 0.0f;
@@ -4677,6 +4858,10 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     }
 
     int hitButton(float x, float y) const {
+        if (!isVerticalTaskbar() && pinnedInlineControlsLayout().active()) {
+            const int hit = hitPinnedInlineControl(x, y);
+            return hit >= 0 && hit <= 3 ? hit : -1;
+        }
         if (!controlsOnHover_ || !mouseOver_ || hoverControlStyle_ != HoverControlStyle::Inline)
             return -1;
         if (isVerticalTaskbar()) {
@@ -4875,10 +5060,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return FAILED(hr) ? nullptr : songInfoDividerBrush_.Get();
     }
 
-    void drawSongInfoDivider(float leftW, float h) {
+    void drawSongInfoDivider(float dividerStartX, float h, float gapWidth = kSongInfoLyricGap) {
         auto* rt = drawTarget();
-        if (!rt || !songInfoVisible_ || scene_ == DisplayScene::Idle || h <= 2.0f ||
-            kSongInfoLyricGap <= kSongInfoDividerWidth)
+        if (!rt || scene_ == DisplayScene::Idle || h <= 2.0f || gapWidth <= kSongInfoDividerWidth)
             return;
 
         const float top = std::min(kSongInfoDividerInset, h * 0.25f);
@@ -4891,7 +5075,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
         brush->SetStartPoint(D2D1::Point2F(0.0f, top));
         brush->SetEndPoint(D2D1::Point2F(0.0f, bottom));
-        const float x = leftW + (kSongInfoLyricGap - kSongInfoDividerWidth) * 0.5f;
+        const float x = dividerStartX + (gapWidth - kSongInfoDividerWidth) * 0.5f;
         const D2D1_RECT_F rect = D2D1::RectF(x, top, x + kSongInfoDividerWidth, bottom);
         rt->FillRoundedRectangle(
             D2D1::RoundedRect(rect, kSongInfoDividerWidth * 0.5f, kSongInfoDividerWidth * 0.5f),
@@ -5194,7 +5378,10 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         // 左缘渐隐宽度分场景：歌曲信息可见时用与分隔间距一致的 8 dip，且渐隐始终
         // 在歌词区域内，文字不会画进信息区；信息区隐藏时用默认宽度
         const float leftFadeDip =
-            songInfoVisible_ && scene_ != DisplayScene::Idle ? kTextPadding : 0.0f;
+            (songInfoVisible_ || pinnedInlineControlsForScene(scene_)) &&
+                    scene_ != DisplayScene::Idle
+                ? kTextPadding
+                : 0.0f;
         const float centerAnchor = immersiveLyricCenterX();
         // 每日一言与歌曲信息同属内容确定的无限循环跑马灯，是否滚动在内容确定时
         // 已知，渐隐恒定保持，避免每轮循环绕回时左缘渐隐消失再出现
@@ -5662,7 +5849,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     void drawHorizontalSongContent(ID2D1DeviceContext* contentRt, float w, float h, float leftW,
                                    float lyricAreaX, float lyricAreaW, float lyricBlockH,
                                    ID2D1Brush* primaryBrush, bool idleScene,
-                                   bool lyricEffectsEnabled, bool showControls, bool showSpectrum) {
+                                   bool lyricEffectsEnabled, bool showControls, bool showSpectrum,
+                                   const taskbar_detail::PinnedInlineControlsLayout& pinnedControls) {
         if (!contentRt)
             return;
 
@@ -5709,7 +5897,15 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                               nullptr, nullptr, 0.0f, 1.0f, LyricAlignment::Center, false,
                               kTextPadding, true, kTextPadding);
             drawSongInfoSubtitle(infoX, infoW, infoY + titleHeight_ + infoGap);
-            drawSongInfoDivider(leftW, h);
+        }
+        if (!idleScene) {
+            drawPinnedInlineControls(pinnedControls);
+            if (songInfoVisible_ || pinnedControls.active()) {
+                const float dividerStartX =
+                    pinnedControls.active() ? pinnedControls.boundsRight : leftW;
+                const float dividerGap = songInfoVisible_ ? kSongInfoLyricGap : kTextPadding;
+                drawSongInfoDivider(dividerStartX, h, dividerGap);
+            }
         }
 
         if (showControls) {
@@ -6238,9 +6434,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                       : static_cast<ID2D1Brush*>(brushLyric_.Get() ? brushLyric_.Get()
                                                                    : brushText_.Get());
         // 只有开启悬浮控件且鼠标位于窗口内时才替换歌词，否则保持歌词/频谱视图。
+        const auto pinnedControls =
+            pinnedInlineControlsLayoutForScene(scene_, logicalPxW, logicalPxH);
         bool showControls =
-            mouseOver_ && controlsOnHover_ && hoverControlStyle_ == HoverControlStyle::Inline &&
-            !idleScene && !isExpandedView() &&
+            !pinnedControls.active() && mouseOver_ && controlsOnHover_ &&
+            hoverControlStyle_ == HoverControlStyle::Inline && !idleScene && !isExpandedView() &&
             !(transition_.kind() == LyricTransitionKind::Scene && isLyricTransitionActive() &&
               isTaskbarSceneTransition(sceneTransition_.outgoingScene(), scene_));
         const bool backgroundSpectrum = !idleScene && spectrumVisible_ && backgroundWaveEnabled();
@@ -6350,7 +6548,15 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                                   brushText_.Get(), nullptr, nullptr, nullptr, 0.0f, 1.0f,
                                   LyricAlignment::Center, false, kTextPadding, true, kTextPadding);
                 drawSongInfoSubtitle(infoX, infoW, infoY + titleHeight_ + infoGap);
-                drawSongInfoDivider(leftW, h);
+            }
+            if (!idleScene) {
+                drawPinnedInlineControls(pinnedControls);
+                if (songInfoVisible_ || pinnedControls.active()) {
+                    const float dividerStartX =
+                        pinnedControls.active() ? pinnedControls.boundsRight : leftW;
+                    const float dividerGap = songInfoVisible_ ? kSongInfoLyricGap : kTextPadding;
+                    drawSongInfoDivider(dividerStartX, h, dividerGap);
+                }
             }
 
             if (showControls) {
@@ -6500,7 +6706,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             if (auto* layerRt = renderer.beginTransitionLayerDraw(0)) {
                 drawHorizontalSongContent(layerRt, w, h, leftW, lyricAreaX, lyricAreaW, lyricBlockH,
                                           primaryBrush, idleScene, lyricEffectsEnabled,
-                                          showControls, showSpectrum);
+                                          showControls, showSpectrum, pinnedControls);
                 if (!renderer.endTransitionLayerDraw(0, layerRt))
                     clearImmersiveSongContentTransition();
             }
@@ -6510,7 +6716,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             if (ID2D1DeviceContext* layerRt = renderer.beginTransitionLayerDraw(0)) {
                 drawHorizontalSongContent(layerRt, w, h, leftW, lyricAreaX, lyricAreaW, lyricBlockH,
                                           primaryBrush, idleScene, lyricEffectsEnabled,
-                                          showControls, showSpectrum);
+                                          showControls, showSpectrum, pinnedControls);
                 layerReady = renderer.endTransitionLayerDraw(0, layerRt);
             }
             if (layerReady) {
@@ -6558,7 +6764,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 // 避免回退路径和正常路径再次产生视觉差异。
                 drawHorizontalSongContent(rt, w, h, leftW, lyricAreaX, lyricAreaW, lyricBlockH,
                                           primaryBrush, idleScene, lyricEffectsEnabled,
-                                          showControls, showSpectrum);
+                                          showControls, showSpectrum, pinnedControls);
                 if (contentTransitionActive)
                     rt->SetTransform(D2D1::Matrix3x2F::Identity());
                 if (clipSongContent)
@@ -6600,15 +6806,16 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         input.idle = scene_ == DisplayScene::Idle;
         input.karaoke = karaokeLine() != nullptr;
         input.karaokeProgress = karaoke_.progressForLine(currentLine);
+        int width = 0, height = 0;
+        logicalClientPixelSize(width, height);
         input.songInfoVisible = songInfoVisible_;
         input.showInlineControls =
-            mouseOver_ && controlsOnHover_ && hoverControlStyle_ == HoverControlStyle::Inline;
+            !pinnedInlineControlsLayoutForScene(scene_, width, height).active() && mouseOver_ &&
+            controlsOnHover_ && hoverControlStyle_ == HoverControlStyle::Inline;
         input.titleWidth = titleWidth_;
         input.artistWidth = artistWidth_;
         input.lyricWidth = lyricWidth_;
         input.secondaryWidth = secondaryWidth_;
-        int width = 0, height = 0;
-        logicalClientPixelSize(width, height);
         if (input.vertical) {
             const auto layout = verticalLayout();
             input.area = layout.lyricBottom - layout.lyricY;
@@ -6777,6 +6984,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         syncMediaPopupEnabled();
         if (isMinimalMode()) {
             // 极简仍保留歌词和方形封面，因此不释放主任务栏渲染器；只清掉附加背景链和媒体卡片。
+            inlineControlHover_ = -1;
             volumeHover_ = false;
             volumePopup_.hide();
             mediaPopupEnabled_ = false;
@@ -6790,6 +6998,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (mode == RenderMode::Stopped) {
             // 完全停止：隐藏窗口、停帧定时器、释放 GPU 设备链。此后 SMTC 事件仍更新
             // 内存中的歌词/媒体数据，但 render() 因窗口隐藏直接早退，不占 GPU/CPU
+            inlineControlHover_ = -1;
             volumeHover_ = false;
             volumePopup_.hide();
             mediaPopupEnabled_ = false;
@@ -7000,6 +7209,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 requestInvalidation(RenderInvalidation::Geometry);
                 requestFrame();
             }
+            if (volumeHover_ && !isExpandedView() && !isVerticalTaskbar() &&
+                pinnedInlineControlsConfigured() && !pinnedInlineControlsLayout().visible[4]) {
+                volumeHover_ = false;
+                volumePopup_.hide();
+            }
             return DefWindowProcW(hwnd, msg, wp, lp);
         case WM_SHOWWINDOW:
             if (!wp)
@@ -7076,15 +7290,20 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                     requestFrameAndFlush();
                 return 0;
             }
+            const float mouseX = static_cast<float>(GET_X_LPARAM(lp));
+            const float mouseY = static_cast<float>(GET_Y_LPARAM(lp));
+            const bool inPinnedControls = pointInPinnedControlsZone(mouseX, mouseY);
             bool wasOver = mouseOver_;
             mouseOver_ = true;
-            if (mediaPopupEnabledForScene())
-                mediaPopup.onAnchorEnter();
+            if (mediaPopupEnabledForScene()) {
+                if (inPinnedControls)
+                    mediaPopup.onAnchorLeave();
+                else
+                    mediaPopup.onAnchorEnter();
+            }
             if (!wasOver)
                 requestFrameAndFlush();
             trackMouseLeave();
-            const float mouseX = static_cast<float>(GET_X_LPARAM(lp));
-            const float mouseY = static_cast<float>(GET_Y_LPARAM(lp));
             const int immersiveHover = isExpandedView() ? hitImmersiveControl(mouseX, mouseY) : -1;
             if (immersiveHover != immersiveControlHover_) {
                 immersiveControlHover_ = immersiveHover;
@@ -7110,6 +7329,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                     volumePopup_.onAnchorLeave();
             }
             if (volHover && appVolume_.available && immersiveYieldAllowedState()) {
+                if (inPinnedControls)
+                    mediaPopup.hideImmediate();
                 volumePopup_.onAnchorEnter();
                 volumePopup_.showNear(volumeButtonScreenRect(), isVerticalTaskbar(),
                                       taskbarEdge_ == ABE_LEFT);
@@ -7243,7 +7464,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 onControl(static_cast<MediaControl>(btn));
             // 卡片的当前页面自己判断是否为点击展开；这样无播放时的每日一言卡片
             // 可以独立于媒体控件样式使用点击展开。
-            else if (!isMinimalMode() && !isExpandedView())
+            else if (!pointInPinnedControlsZone(mx, my) && !hitVolumeButton(mx, my) &&
+                     !isMinimalMode() && !isExpandedView())
                 mediaPopup.onAnchorClick();
             return 0;
         }

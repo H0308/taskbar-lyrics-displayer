@@ -25,6 +25,7 @@ public:
     void updateProgressBackgroundRowsEnabled();
     void updateBackgroundAdjustmentPresentation();
     void updateImmersiveRowsEnabled();
+    void updateMediaControlRowsEnabled();
     void updateIdleAppsRowHeight();
     void updateTickTickRows();
     void updateIdleQuoteSourceRow();

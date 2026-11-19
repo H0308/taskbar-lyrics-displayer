@@ -63,6 +63,7 @@ struct AppSettings {
     bool taskbarContextMenuEnabled_ = true;
     bool hoverPlaybackControls_ = true;
     HoverControlStyle hoverControlStyle_ = HoverControlStyle::Inline;
+    InlineControlDisplayMode inlineControlDisplayMode_ = InlineControlDisplayMode::Hover;
     MediaPopupTrigger floatingCardTrigger_ = MediaPopupTrigger::Hover;
     MediaPopupBackground floatingCardBackground_ = MediaPopupBackground::Solid;
     bool floatingCardBackgroundColorCustomized_ = false;

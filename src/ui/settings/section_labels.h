@@ -110,6 +110,7 @@ inline settings_icon::Kind iconForRow(int id) {
         return settings_icon::Kind::Hover;
     case kIdHoverControlStyle:
         return settings_icon::Kind::Control;
+    case kIdInlineControlDisplayMode:
     case kIdFloatingCardTrigger:
         return settings_icon::Kind::Trigger;
     case kIdFloatingCardBackground:

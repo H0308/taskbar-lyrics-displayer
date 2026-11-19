@@ -525,6 +525,15 @@ void App::applyHoverControlStyle(int style) {
     commitAppearanceSettings();
 }
 
+void App::applyInlineControlDisplayMode(int mode) {
+    if (taskbarVertical_ || taskbarExpandedConfigured())
+        return;
+    settings_.inlineControlDisplayMode_ =
+        mode == 1 ? InlineControlDisplayMode::Always : InlineControlDisplayMode::Hover;
+    logSettingInt(L"inline-control-display-mode", mode == 1 ? 1 : 0);
+    commitAppearanceSettings();
+}
+
 void App::applyFloatingCardTrigger(int mode) {
     settings_.floatingCardTrigger_ =
         mode == 1 ? MediaPopupTrigger::Click : MediaPopupTrigger::Hover;
@@ -1194,6 +1203,8 @@ SettingsState App::currentSettingsState() const {
     st.taskbarContextMenu = settings_.taskbarContextMenuEnabled_;
     st.hoverControls = settings_.hoverPlaybackControls_;
     st.hoverControlStyle = settings_.hoverControlStyle_ == HoverControlStyle::Popup ? 1 : 0;
+    st.inlineControlDisplayMode =
+        settings_.inlineControlDisplayMode_ == InlineControlDisplayMode::Always ? 1 : 0;
     st.floatingCardTrigger = settings_.floatingCardTrigger_ == MediaPopupTrigger::Click ? 1 : 0;
     st.floatingCardBackground =
         settings_.floatingCardBackground_ == MediaPopupBackground::Frosted ? 1 : 0;
@@ -1320,6 +1331,7 @@ SettingsActions App::buildSettingsActions() {
     act.onTaskbarContextMenu = [this](bool on) { applyTaskbarContextMenu(on); };
     act.onHoverControls = [this](bool on) { applyHoverControls(on); };
     act.onHoverControlStyle = [this](int style) { applyHoverControlStyle(style); };
+    act.onInlineControlDisplayMode = [this](int mode) { applyInlineControlDisplayMode(mode); };
     act.onFloatingCardTrigger = [this](int mode) { applyFloatingCardTrigger(mode); };
     act.onFloatingCardBackground = [this](int mode) { applyFloatingCardBackground(mode); };
     act.onFloatingCardBackgroundColor = [this](COLORREF color) {

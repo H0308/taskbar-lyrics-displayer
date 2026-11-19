@@ -331,6 +331,9 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
     hoverPlaybackControls_ = j.value("hoverPlaybackControls", true);
     hoverControlStyle_ =
         j.value("hoverControlStyle", 0) == 1 ? HoverControlStyle::Popup : HoverControlStyle::Inline;
+    inlineControlDisplayMode_ = j.value("inlineControlDisplayMode", 0) == 1
+                                    ? InlineControlDisplayMode::Always
+                                    : InlineControlDisplayMode::Hover;
     const int floatingCardTrigger = j.value("floatingCardTrigger", j.value("mediaPopupTrigger", 0));
     floatingCardTrigger_ =
         floatingCardTrigger == 1 ? MediaPopupTrigger::Click : MediaPopupTrigger::Hover;
@@ -573,6 +576,8 @@ nlohmann::json AppSettings::toJson() const {
     // 性能模式不写入配置，重启后由 loadSettings() 恢复正常模式。
     j["hoverPlaybackControls"] = hoverPlaybackControls_;
     j["hoverControlStyle"] = hoverControlStyle_ == HoverControlStyle::Popup ? 1 : 0;
+    j["inlineControlDisplayMode"] =
+        inlineControlDisplayMode_ == InlineControlDisplayMode::Always ? 1 : 0;
     j["floatingCardTrigger"] = floatingCardTrigger_ == MediaPopupTrigger::Click ? 1 : 0;
     j["floatingCardBackground"] =
         floatingCardBackground_ == MediaPopupBackground::Frosted ? "frosted" : "solid";

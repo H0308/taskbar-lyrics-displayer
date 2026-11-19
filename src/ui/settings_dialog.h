@@ -71,6 +71,7 @@ struct SettingsState {
     bool taskbarContextMenu = true;
     bool hoverControls = true;
     int hoverControlStyle = 0; // 0 内嵌控件 1 媒体卡片
+    int inlineControlDisplayMode = 0; // 0 悬浮显示 1 常驻显示
     int floatingCardTrigger = 0; // 0 悬浮展开 1 点击展开
     int floatingCardBackground = 0; // 0 纯色 1 磨砂玻璃
     COLORREF floatingCardBackgroundColor = RGB(255, 255, 255);
@@ -163,6 +164,7 @@ struct SettingsActions {
     std::function<void(bool)> onTaskbarContextMenu;
     std::function<void(bool)> onHoverControls;
     std::function<void(int)> onHoverControlStyle;
+    std::function<void(int)> onInlineControlDisplayMode;
     std::function<void(int)> onFloatingCardTrigger;
     std::function<void(int)> onFloatingCardBackground;
     std::function<void(COLORREF)> onFloatingCardBackgroundColor;

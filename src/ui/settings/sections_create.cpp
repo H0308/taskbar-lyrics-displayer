@@ -250,13 +250,23 @@ void SettingsSections::createBackgroundRows() {
 
 void SettingsSections::createMediaControlRows() {
     const bool minimal = minimalModeActive();
+    const bool forcedHoverByMinimal = minimal && state.hoverControlStyle == 1;
     addHeader(kMediaPopupPage, L"播放控件");
     addToggle(kMediaPopupPage, kIdHoverControls, L"显示播放控件", state.hoverControls);
     addRadio(
         kMediaPopupPage, kIdHoverControlStyle, L"控件样式",
-        L"内嵌控件在鼠标悬浮时显示，仅提供播放操作；媒体卡片还显示歌词进度，其打开方式由“悬浮卡片”中的“悬浮卡片展开方式”决定，点击应用图标或名称可打开播放器。只有支持的播放器才会显示播放模式控制按钮。",
+        L"内嵌控件直接嵌入任务栏，仅提供播放操作，可在下方切换悬浮显示或常驻显示；媒体卡片还显示歌词进度，其打开方式由“悬浮卡片”中的“悬浮卡片展开方式”决定，点击应用图标或名称可打开播放器。只有支持的播放器才会显示播放模式控制按钮。",
         {L"内嵌控件", L"媒体卡片"}, minimal ? 0 : state.hoverControlStyle,
         state.hoverControls && !minimal, kHoverControlStyleRowH);
+    addRadio(
+        kMediaPopupPage, kIdInlineControlDisplayMode, L"内嵌显示方式", nullptr,
+        {L"悬浮显示", L"常驻显示"},
+        (state.verticalTaskbar || forcedHoverByMinimal)
+            ? 0
+            : std::clamp(state.inlineControlDisplayMode, 0, 1),
+        state.hoverControls && !state.verticalTaskbar && state.hoverControlStyle == 0 &&
+            !forcedHoverByMinimal,
+        kRowTallH);
 }
 
 void SettingsSections::createFloatingCardRows() {

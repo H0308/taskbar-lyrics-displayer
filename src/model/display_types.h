@@ -37,6 +37,12 @@ enum class HoverControlStyle {
     Popup,
 };
 
+// 内嵌播放控件的显示方式：鼠标悬浮时替换歌词，或常驻在歌曲信息与歌词之间。
+enum class InlineControlDisplayMode {
+    Hover,
+    Always,
+};
+
 // 媒体卡片展开方式：悬浮停留片刻后展开，或点击歌词区域任意位置立即展开
 enum class MediaPopupTrigger {
     Hover,

@@ -135,13 +135,35 @@ void SettingsSections::updateImmersiveRowsEnabled() {
         row->enabled = resourceExtrasEnabled;
     if (auto* row = findRow(kIdDockResourceCpuFrequency))
         row->enabled = resourceExtrasEnabled;
+    updateMediaControlRowsEnabled();
+    if (auto* row = findRow(kIdAlignment))
+        row->enabled = !expandedEnabled && !state.verticalTaskbar;
+}
+
+void SettingsSections::updateMediaControlRowsEnabled() {
+    const auto* mode = findRow(kIdTaskbarViewMode);
+    const int selectedMode =
+        mode ? std::clamp(mode->selected, 0, 2) : std::clamp(state.taskbarViewMode, 0, 2);
+    const bool immersiveEnabled = state.mediaSessionAlive && !state.verticalTaskbar;
+    const bool appBarEnabled = selectedMode == 2;
+    const bool expandedEnabled = appBarEnabled || (selectedMode == 1 && immersiveEnabled);
+    const bool minimal = minimalModeActive();
     auto* controls = findRow(kIdHoverControls);
     if (controls)
         controls->enabled = !expandedEnabled;
-    if (auto* row = findRow(kIdHoverControlStyle))
-        row->enabled = !expandedEnabled && controls && controls->checked && !minimalModeActive();
-    if (auto* row = findRow(kIdAlignment))
-        row->enabled = !expandedEnabled && !state.verticalTaskbar;
+    auto* style = findRow(kIdHoverControlStyle);
+    if (style)
+        style->enabled = !expandedEnabled && controls && controls->checked && !minimal;
+    if (auto* inlineMode = findRow(kIdInlineControlDisplayMode)) {
+        const bool forcedHoverByMinimal = minimal && state.hoverControlStyle == 1;
+        const bool inlineSelected = style && style->selected == 0 && !forcedHoverByMinimal;
+        inlineMode->selected = (state.verticalTaskbar || forcedHoverByMinimal)
+                                   ? 0
+                                   : std::clamp(state.inlineControlDisplayMode, 0, 1);
+        inlineMode->enabled =
+            !expandedEnabled && !state.verticalTaskbar && controls && controls->checked &&
+            inlineSelected;
+    }
 }
 
 void SettingsSections::updateIdleAppsRowHeight() {
@@ -369,10 +391,11 @@ void SettingsSections::syncMediaControlRows(const SettingsState& s) {
     const bool minimal = s.renderMode == kRenderModeMinimal;
     if (auto* row = findRow(kIdHoverControls))
         row->checked = s.hoverControls;
-    if (auto* row = findRow(kIdHoverControlStyle)) {
+    if (auto* row = findRow(kIdHoverControlStyle))
         row->selected = minimal ? 0 : s.hoverControlStyle;
-        row->enabled = s.hoverControls && !minimal;
-    }
+    if (auto* row = findRow(kIdInlineControlDisplayMode))
+        row->selected = std::clamp(s.inlineControlDisplayMode, 0, 1);
+    updateMediaControlRowsEnabled();
 }
 
 void SettingsSections::syncFloatingCardRows(const SettingsState& s) {

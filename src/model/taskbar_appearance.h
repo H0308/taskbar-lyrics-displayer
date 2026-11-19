@@ -18,6 +18,7 @@ struct TaskbarAppearance {
     bool songInfoVisible{};
     bool controlsOnHover{};
     HoverControlStyle hoverControlStyle{};
+    InlineControlDisplayMode inlineControlDisplayMode{};
     MediaPopupTrigger floatingCardTrigger{};
     MediaPopupBackground floatingCardBackground{};
     struct FloatingCardBackgroundColor {

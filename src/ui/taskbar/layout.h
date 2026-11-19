@@ -20,6 +20,38 @@ struct LayoutMetrics {
     float rightW = 0.0f;
     float immersiveControlsW = 0.0f;
 };
+enum class PinnedInlineTier {
+    FallbackHover,
+    CompactCore3,
+    CompactFull,
+    Full,
+};
+
+struct PinnedInlineControlsInput {
+    float width = 0.0f;
+    float height = 0.0f;
+    DisplayScene scene = DisplayScene::NoPlayback;
+    bool songInfoVisible = true;
+    bool albumCoverVisible = true;
+    bool canRepeat = false;
+    float spectrumWidth = 0.0f;
+    float coverSlotWidth = 0.0f;
+    float lyricFontSize = 0.0f;
+};
+
+struct PinnedInlineControlsLayout {
+    PinnedInlineTier tier = PinnedInlineTier::FallbackHover;
+    float slotWidth = 0.0f;
+    float radius = 0.0f;
+    float centerY = 0.0f;
+    float boundsLeft = 0.0f;
+    float boundsRight = 0.0f;
+    bool visible[5]{};
+    float centerX[5]{};
+
+    bool active() const { return tier != PinnedInlineTier::FallbackHover && slotWidth > 0.0f; }
+};
+
 struct VerticalLayout {
     float w = 0.0f;
     float h = 0.0f;
@@ -68,6 +100,8 @@ DynamicBackgroundRegions dynamicBackgroundRegions(
 float expandedSpectrumWidth(float hostWidth);
 float expandedClockWidth(float hostWidth);
 ExpandedSideLayout expandedSideLayout(float hostWidth, bool dock, float resourceWidth);
+float pinnedInlineControlsIdealWidth(float heightDip, bool canRepeat, float lyricFontSize = 0.0f);
+PinnedInlineControlsLayout planPinnedInlineControls(const PinnedInlineControlsInput& input);
 
 // 纯几何计算。渲染与命中检测读取同一份布局，窗口句柄和设备资源不进入计算。
 LayoutMetrics horizontalLayout(const HorizontalLayoutInput& input);

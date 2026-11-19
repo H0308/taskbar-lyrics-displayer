@@ -425,17 +425,24 @@ void SettingsSections::onCommand(int id, int option) {
         break;
     case kIdHoverControls:
         row->checked = !row->checked;
+        state.hoverControls = row->checked;
         if (actions.onHoverControls)
             actions.onHoverControls(row->checked);
-        if (auto* style = findRow(kIdHoverControlStyle))
-            style->enabled = row->checked && !minimalModeActive();
+        updateMediaControlRowsEnabled();
         updateFloatingCardRowsEnabled();
         break;
     case kIdHoverControlStyle:
+        state.hoverControlStyle = std::clamp(row->selected, 0, 1);
         if (actions.onHoverControlStyle)
             actions.onHoverControlStyle(row->selected);
+        updateMediaControlRowsEnabled();
         updateFloatingCardRowsEnabled();
         updateIdleRowsEnabled();
+        break;
+    case kIdInlineControlDisplayMode:
+        state.inlineControlDisplayMode = std::clamp(row->selected, 0, 1);
+        if (actions.onInlineControlDisplayMode)
+            actions.onInlineControlDisplayMode(state.inlineControlDisplayMode);
         break;
     case kIdTaskbarTheme:
         if (actions.onTaskbarTheme)

@@ -21,6 +21,10 @@ TaskbarAppearance resolveTaskbarAppearance(const AppSettings& settings,
     result.songInfoVisible = vertical ? false : settings.songInfoVisible_;
     result.controlsOnHover = settings.hoverPlaybackControls_;
     result.hoverControlStyle = minimal ? HoverControlStyle::Inline : settings.hoverControlStyle_;
+    result.inlineControlDisplayMode =
+        vertical || (minimal && settings.hoverControlStyle_ != HoverControlStyle::Inline)
+            ? InlineControlDisplayMode::Hover
+            : settings.inlineControlDisplayMode_;
     result.floatingCardTrigger = settings.floatingCardTrigger_;
     result.floatingCardBackground = settings.floatingCardBackground_;
     result.floatingCardBackgroundColor = {context.floatingCardBackground,

@@ -455,6 +455,8 @@ private:
 
     void applyHoverControlStyle(int style);
 
+    void applyInlineControlDisplayMode(int mode);
+
     void applyFloatingCardTrigger(int mode);
 
     void applyFloatingCardBackground(int mode);

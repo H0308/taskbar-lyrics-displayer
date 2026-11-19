@@ -2,6 +2,76 @@
 #include <algorithm>
 
 namespace taskbar_detail {
+namespace {
+struct PinnedTierSpec {
+    PinnedInlineTier tier;
+    float radius = 0.0f;
+    float spacing = 0.0f;
+    float repeatGap = 0.0f;
+    float volumeGap = 0.0f;
+    float span = 0.0f;
+    float slotWidth = 0.0f;
+    bool includeRepeat = false;
+    bool includeVolume = false;
+};
+
+PinnedTierSpec buildPinnedTierSpec(PinnedInlineTier tier, float heightDip, bool canRepeat,
+                                   float lyricFontSize) {
+    PinnedTierSpec spec{};
+    spec.tier = tier;
+    if (heightDip <= 0.0f || tier == PinnedInlineTier::FallbackHover)
+        return spec;
+
+    const float maxFullR = std::min(14.0f, heightDip * 0.32f);
+    const float minFullR = std::min(maxFullR, std::max(7.5f, heightDip * 0.23f));
+    const float targetFullR =
+        lyricFontSize > 0.0f ? lyricFontSize * 0.74f : heightDip * 0.29f;
+    const float fullR = std::clamp(targetFullR, minFullR, maxFullR);
+
+    if (tier == PinnedInlineTier::Full) {
+        spec.radius = fullR;
+        spec.spacing = spec.radius * 2.20f;
+        constexpr float sidePad = 6.0f;
+        spec.includeVolume = true;
+        spec.includeRepeat = canRepeat;
+        if (canRepeat) {
+            spec.repeatGap = spec.spacing + spec.radius * 0.12f;
+            spec.volumeGap = spec.spacing + spec.radius * 0.22f;
+            spec.span = 2.0f * spec.spacing + spec.repeatGap + spec.volumeGap;
+        } else {
+            spec.volumeGap = spec.spacing + spec.radius * 0.26f;
+            spec.span = 2.0f * spec.spacing + spec.volumeGap;
+        }
+        spec.slotWidth = spec.span + spec.radius * 2.0f + sidePad * 2.0f;
+        return spec;
+    }
+
+    const float compactMaxR = std::min(11.2f, maxFullR);
+    const float compactMinR = std::min(compactMaxR, 6.8f);
+    spec.radius = std::clamp(fullR * 0.82f, compactMinR, compactMaxR);
+    constexpr float sidePad = 5.0f;
+    if (tier == PinnedInlineTier::CompactFull) {
+        spec.spacing = spec.radius * 2.05f;
+        spec.includeVolume = true;
+        spec.includeRepeat = canRepeat;
+        if (canRepeat) {
+            spec.repeatGap = spec.spacing + spec.radius * 0.10f;
+            spec.volumeGap = spec.spacing + spec.radius * 0.20f;
+            spec.span = 2.0f * spec.spacing + spec.repeatGap + spec.volumeGap;
+        } else {
+            spec.volumeGap = spec.spacing + spec.radius * 0.24f;
+            spec.span = 2.0f * spec.spacing + spec.volumeGap;
+        }
+        spec.slotWidth = spec.span + spec.radius * 2.0f + sidePad * 2.0f;
+        return spec;
+    }
+
+    spec.spacing = spec.radius * 2.15f;
+    spec.span = 2.0f * spec.spacing;
+    spec.slotWidth = spec.span + spec.radius * 2.0f + sidePad * 2.0f;
+    return spec;
+}
+} // namespace
 DynamicBackgroundRegions dynamicBackgroundRegions(
     float width, float height, IdleQuoteBackgroundScope scope,
     std::span<const D2D1_RECT_F> playback, std::span<const D2D1_RECT_F> idle) {
@@ -150,6 +220,79 @@ ExpandedSideLayout expandedSideLayout(float w, bool dock, float resourceWidth) {
     result.clockX = w - result.clockWidth - kTextPadding;
     result.spectrumRight = dock ? result.resourceX - 10.0f : result.clockX - 10.0f;
     result.spectrumWidth = std::max(0.0f, result.spectrumRight - result.zoneX);
+    return result;
+}
+
+float pinnedInlineControlsIdealWidth(float heightDip, bool canRepeat, float lyricFontSize) {
+    if (heightDip <= 0.0f)
+        return 0.0f;
+    return buildPinnedTierSpec(PinnedInlineTier::Full, heightDip, canRepeat, lyricFontSize)
+        .slotWidth;
+}
+
+PinnedInlineControlsLayout planPinnedInlineControls(const PinnedInlineControlsInput& input) {
+    PinnedInlineControlsLayout result;
+    if (input.width <= 0.0f || input.height <= 0.0f || input.scene == DisplayScene::Idle ||
+        input.scene == DisplayScene::NoPlayback)
+        return result;
+
+    const float effW = input.width - input.spectrumWidth;
+    const float start = input.songInfoVisible ? kSongInfoLyricGap : kTextPadding;
+    const float minKeepFull = input.songInfoVisible ? 152.0f : input.coverSlotWidth + 91.2f;
+    const float minKeepCompactFull =
+        input.songInfoVisible ? 136.0f : input.coverSlotWidth + 78.0f;
+    const float minKeepCore3 = input.songInfoVisible ? 120.0f : input.coverSlotWidth + 68.0f;
+
+    struct TierCandidate {
+        PinnedInlineTier tier;
+        float minKeep;
+    };
+    const TierCandidate candidates[] = {
+        {PinnedInlineTier::Full, minKeepFull},
+        {PinnedInlineTier::CompactFull, minKeepCompactFull},
+        {PinnedInlineTier::CompactCore3, minKeepCore3},
+    };
+
+    PinnedTierSpec chosen{};
+    for (const auto& candidate : candidates) {
+        const PinnedTierSpec spec = buildPinnedTierSpec(candidate.tier, input.height, input.canRepeat,
+                                                        input.lyricFontSize);
+        // 预留 1 DIP 浮点与像素取整容差，避免最小安全宽度下误降级。
+        if (effW - start - spec.slotWidth + 1.0f >= candidate.minKeep) {
+            chosen = spec;
+            break;
+        }
+    }
+    if (chosen.tier == PinnedInlineTier::FallbackHover || chosen.slotWidth <= 0.0f)
+        return result;
+
+    const LayoutMetrics metrics = horizontalLayout(
+        {input.width, input.height, input.scene, false, true, input.songInfoVisible,
+         input.albumCoverVisible, chosen.slotWidth, input.spectrumWidth, 0.0f,
+         input.coverSlotWidth});
+    result.tier = chosen.tier;
+    result.slotWidth = chosen.slotWidth;
+    result.radius = chosen.radius;
+    result.centerY = input.height * 0.5f;
+    result.boundsLeft = metrics.leftW;
+    result.boundsRight = result.boundsLeft + chosen.slotWidth;
+
+    const float firstX = result.boundsLeft + (chosen.slotWidth - chosen.span) * 0.5f;
+    for (int i = 0; i < 3; ++i) {
+        result.visible[i] = true;
+        result.centerX[i] = firstX + static_cast<float>(i) * chosen.spacing;
+    }
+    if (chosen.includeVolume) {
+        if (chosen.includeRepeat) {
+            result.visible[3] = true;
+            result.centerX[3] = result.centerX[2] + chosen.repeatGap;
+            result.visible[4] = true;
+            result.centerX[4] = result.centerX[3] + chosen.volumeGap;
+        } else {
+            result.visible[4] = true;
+            result.centerX[4] = result.centerX[2] + chosen.volumeGap;
+        }
+    }
     return result;
 }
 } // namespace taskbar_detail
