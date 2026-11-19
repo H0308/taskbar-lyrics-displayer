@@ -9,43 +9,24 @@
 
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
 namespace {
 
+using platform_icon::AppLaunchResult;
 
-std::wstring findProcessImagePath(const std::wstring& processName) {
-    if (processName.empty())
+std::wstring processImagePath(DWORD processId) {
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+    if (!process)
         return {};
 
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snapshot == INVALID_HANDLE_VALUE)
-        return {};
-
-    PROCESSENTRY32W entry{};
-    entry.dwSize = sizeof(entry);
-    std::wstring result;
-    if (Process32FirstW(snapshot, &entry)) {
-        do {
-            if (_wcsicmp(entry.szExeFile, processName.c_str()) != 0)
-                continue;
-
-            HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
-                                         entry.th32ProcessID);
-            if (!process)
-                continue;
-            wchar_t path[32768]{};
-            DWORD length = static_cast<DWORD>(sizeof(path) / sizeof(path[0]));
-            if (QueryFullProcessImageNameW(process, 0, path, &length))
-                result.assign(path, length);
-            CloseHandle(process);
-            if (!result.empty())
-                break;
-        } while (Process32NextW(snapshot, &entry));
-    }
-    CloseHandle(snapshot);
-    return result;
+    wchar_t path[32768]{};
+    DWORD length = static_cast<DWORD>(_countof(path));
+    const bool queried = QueryFullProcessImageNameW(process, 0, path, &length) != FALSE;
+    CloseHandle(process);
+    return queried ? std::wstring(path, length) : std::wstring{};
 }
 
 std::wstring fileNameFromPath(const std::wstring& path) {
@@ -97,6 +78,17 @@ std::vector<DWORD> findProcessIds(const std::wstring& processName) {
     return result;
 }
 
+std::wstring uniqueProcessImagePath(const std::vector<DWORD>& processIds) {
+    std::wstring path;
+    for (DWORD pid : processIds) {
+        auto candidate = processImagePath(pid);
+        if (candidate.empty() || (!path.empty() && _wcsicmp(path.c_str(), candidate.c_str()) != 0))
+            return {};
+        path = std::move(candidate);
+    }
+    return path;
+}
+
 std::wstring fullPath(const std::wstring& path) {
     if (path.empty())
         return {};
@@ -105,33 +97,12 @@ std::wstring fullPath(const std::wstring& path) {
     return length > 0 && length < _countof(buffer) ? std::wstring(buffer, length) : path;
 }
 
-std::vector<DWORD> findProcessIdsByImagePath(const std::wstring& targetPath) {
+std::vector<DWORD> findProcessIdsByImagePath(const std::wstring& target) {
     std::vector<DWORD> result;
-    const std::wstring target = fullPath(targetPath);
-    if (target.empty())
-        return result;
-
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snapshot == INVALID_HANDLE_VALUE)
-        return result;
-
-    PROCESSENTRY32W entry{};
-    entry.dwSize = sizeof(entry);
-    if (Process32FirstW(snapshot, &entry)) {
-        do {
-            HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
-                                         entry.th32ProcessID);
-            if (!process)
-                continue;
-            wchar_t path[32768]{};
-            DWORD length = static_cast<DWORD>(_countof(path));
-            const bool queried = QueryFullProcessImageNameW(process, 0, path, &length) != FALSE;
-            CloseHandle(process);
-            if (queried && _wcsicmp(path, target.c_str()) == 0)
-                result.push_back(entry.th32ProcessID);
-        } while (Process32NextW(snapshot, &entry));
+    for (DWORD pid : findProcessIds(fileNameFromPath(target))) {
+        if (_wcsicmp(processImagePath(pid).c_str(), target.c_str()) == 0)
+            result.push_back(pid);
     }
-    CloseHandle(snapshot);
     return result;
 }
 
@@ -170,6 +141,12 @@ bool hasNonTrivialWindowArea(HWND window) {
     return false;
 }
 
+bool isActivationWindow(HWND window) {
+    const LONG_PTR style = GetWindowLongPtrW(window, GWL_EXSTYLE);
+    const bool toolWindow = (style & WS_EX_TOOLWINDOW) != 0 && (style & WS_EX_APPWINDOW) == 0;
+    return !toolWindow && (style & WS_EX_NOACTIVATE) == 0 && hasNonTrivialWindowArea(window);
+}
+
 struct WindowSearchContext {
     const std::vector<DWORD>* processIds = nullptr;
     const wchar_t* preferredClassName = nullptr;
@@ -189,24 +166,18 @@ BOOL CALLBACK findBestProcessWindow(HWND window, LPARAM parameter) {
         GetWindow(window, GW_OWNER) != nullptr)
         return TRUE;
 
+    if (!isActivationWindow(window))
+        return TRUE;
+
     const bool visible = IsWindowVisible(window) != FALSE;
-    const LONG_PTR exStyle = GetWindowLongPtrW(window, GWL_EXSTYLE);
-    const bool toolWindow =
-        (exStyle & WS_EX_TOOLWINDOW) != 0 && (exStyle & WS_EX_APPWINDOW) == 0;
-    const bool noActivate = (exStyle & WS_EX_NOACTIVATE) != 0;
     const bool matchesPreferred = hasWindowClassName(window, context->preferredClassName);
 
     int rank = 0;
-    if (matchesPreferred && visible && !toolWindow && !noActivate)
-        rank = 5;
-    else if (matchesPreferred && visible)
-        rank = 4;
-    else if (context->allowHiddenPreferredClass && matchesPreferred && !visible &&
-             !toolWindow && !noActivate && hasNonTrivialWindowArea(window))
+    if (matchesPreferred && visible)
         rank = 3;
-    else if (context->allowHiddenPreferredClass && matchesPreferred && !visible)
+    else if (context->allowHiddenPreferredClass && matchesPreferred)
         rank = 2;
-    else if (visible && !toolWindow && !noActivate && hasNonTrivialWindowArea(window))
+    else if (visible)
         rank = 1;
 
     if (rank > context->bestRank) {
@@ -214,7 +185,7 @@ BOOL CALLBACK findBestProcessWindow(HWND window, LPARAM parameter) {
         context->bestRank = rank;
     }
 
-    const int maxPossibleRank = context->preferredClassName ? 5 : 1;
+    const int maxPossibleRank = context->preferredClassName ? 3 : 1;
     return context->bestRank >= maxPossibleRank ? FALSE : TRUE;
 }
 
@@ -228,44 +199,50 @@ HWND findProcessWindow(const std::vector<DWORD>& processIds, const wchar_t* pref
     return context.bestWindow;
 }
 
-bool activateWindow(HWND window) {
-    if (!window || !IsWindow(window))
-        return false;
+AppLaunchResult activateWindow(HWND window, const std::vector<DWORD>& processIds,
+                              const std::wstring& expectedImagePath) {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(window, &pid);
+    if (!containsProcessId(processIds, pid) ||
+        _wcsicmp(processImagePath(pid).c_str(), expectedImagePath.c_str()) != 0)
+        return AppLaunchResult::Failed;
 
-    DWORD targetProcessId = 0;
-    GetWindowThreadProcessId(window, &targetProcessId);
-    if (targetProcessId != 0)
-        AllowSetForegroundWindow(targetProcessId);
+    // 只有主窗口被禁用时才尝试它所属的活动对话框。
+    if (!IsWindowEnabled(window)) {
+        HWND dialog = GetLastActivePopup(window);
+        DWORD dialogPid = 0;
+        GetWindowThreadProcessId(dialog, &dialogPid);
+        if (dialog == window || dialogPid != pid || !IsWindowVisible(dialog) ||
+            !IsWindowEnabled(dialog) || !isActivationWindow(dialog))
+            return AppLaunchResult::ForegroundDenied;
+        window = dialog;
+    }
 
-    const bool wasVisible = IsWindowVisible(window) != FALSE;
+    int showCommand = SW_SHOW;
     if (IsIconic(window)) {
-        ShowWindow(window, SW_RESTORE);
-    } else if (!wasVisible) {
+        showCommand = SW_RESTORE;
+    } else if (!IsWindowVisible(window)) {
         WINDOWPLACEMENT placement{};
         placement.length = sizeof(placement);
         const bool wasMaximized =
             IsZoomed(window) != FALSE ||
             (GetWindowPlacement(window, &placement) && placement.showCmd == SW_SHOWMAXIMIZED);
-        ShowWindow(window, wasMaximized ? SW_SHOWMAXIMIZED : SW_SHOW);
+        showCommand = wasMaximized ? SW_SHOWMAXIMIZED : SW_SHOW;
     } else {
-        ShowWindow(window, SW_SHOW);
+        return SetForegroundWindow(window) ? AppLaunchResult::ForegroundRequested
+                                            : AppLaunchResult::ForegroundDenied;
     }
-
-    HWND focusTarget = window;
-    HWND popup = GetLastActivePopup(window);
-    if (popup && popup != window && IsWindowVisible(popup))
-        focusTarget = popup;
-
-    BringWindowToTop(focusTarget);
-    SetForegroundWindow(focusTarget);
-    return true;
+    return ShowWindowAsync(window, showCommand) ? AppLaunchResult::ShowRequested
+                                                 : AppLaunchResult::Failed;
 }
 
-bool activateExistingWindow(const std::vector<DWORD>& processIds,
-                            const wchar_t* preferredClassName = nullptr,
-                            bool allowHiddenPreferredClass = false) {
-    HWND window = findProcessWindow(processIds, preferredClassName, allowHiddenPreferredClass);
-    return activateWindow(window);
+std::optional<AppLaunchResult> activateExistingWindow(const std::vector<DWORD>& processIds,
+                                                      const std::wstring& imagePath) {
+    const auto* preferredClass = preferredWindowClassForProcess(fileNameFromPath(imagePath));
+    const HWND window = findProcessWindow(processIds, preferredClass, preferredClass != nullptr);
+    if (!window)
+        return std::nullopt;
+    return activateWindow(window, processIds, imagePath);
 }
 
 bool executePath(const std::wstring& path) {
@@ -305,9 +282,11 @@ std::wstring resolveSourceIconPath(const std::wstring& sourceAppUserModelId) {
         return {};
 
     for (const auto& candidate : sourceProcessCandidates(sourceAppUserModelId)) {
-        const std::wstring path = findProcessImagePath(candidate);
-        if (!path.empty())
-            return path;
+        for (DWORD pid : findProcessIds(candidate)) {
+            auto path = processImagePath(pid);
+            if (!path.empty())
+                return path;
+        }
     }
 
     DWORD attributes = GetFileAttributesW(sourceAppUserModelId.c_str());
@@ -632,42 +611,54 @@ bool readExeDisplayName(const std::wstring& path, std::wstring& name) {
     return !name.empty();
 }
 
-bool launchSourceApp(const std::wstring& sourceAppUserModelId) {
-    const auto candidates = sourceProcessCandidates(sourceAppUserModelId);
-    for (const auto& candidate : candidates) {
+const wchar_t* appLaunchResultName(AppLaunchResult result) {
+    switch (result) {
+    case AppLaunchResult::ShowRequested: return L"show-requested";
+    case AppLaunchResult::ForegroundRequested: return L"foreground-requested";
+    case AppLaunchResult::ForegroundDenied: return L"foreground-denied";
+    case AppLaunchResult::LaunchRequested: return L"launch-requested";
+    case AppLaunchResult::Failed: return L"failed";
+    }
+    return L"failed";
+}
+
+AppLaunchResult launchSourceApp(const std::wstring& sourceAppUserModelId) {
+    if (sourceAppUserModelId.find_first_of(L"\\/") != std::wstring::npos)
+        return launchConfiguredExe(sourceAppUserModelId);
+
+    std::vector<std::wstring> imagePaths;
+    for (const auto& candidate : sourceProcessCandidates(sourceAppUserModelId)) {
         const auto processIds = findProcessIds(candidate);
-        const wchar_t* preferredClass = preferredWindowClassForProcess(candidate);
-        if (!processIds.empty() &&
-            activateExistingWindow(processIds, preferredClass, preferredClass != nullptr))
-            return true;
+        auto imagePath = uniqueProcessImagePath(processIds);
+        if (imagePath.empty())
+            continue;
+        if (const auto result = activateExistingWindow(processIds, imagePath))
+            return *result;
+        imagePaths.push_back(std::move(imagePath));
     }
 
     // 当前桌面播放器的 SMTC 来源通常是 *.exe；如果找不到可激活的已有窗口，
     // 再使用已运行进程的真实路径启动/唤醒单实例程序。
-    for (const auto& candidate : candidates) {
-        if (executePath(findProcessImagePath(candidate)))
-            return true;
+    for (const auto& path : imagePaths) {
+        if (executePath(path))
+            return AppLaunchResult::LaunchRequested;
     }
 
     // 对真正的 AUMID 保留系统激活路径，兼容以后接入的打包播放器。
-    if (activateAppUserModelId(sourceAppUserModelId))
-        return true;
-
-    return executePath(resolveSourceIconPath(sourceAppUserModelId));
+    return activateAppUserModelId(sourceAppUserModelId) ? AppLaunchResult::LaunchRequested
+                                                       : AppLaunchResult::Failed;
 }
 
-bool launchConfiguredExe(const std::wstring& path) {
+AppLaunchResult launchConfiguredExe(const std::wstring& path) {
     const DWORD attributes = GetFileAttributesW(path.c_str());
     if (attributes == INVALID_FILE_ATTRIBUTES ||
         (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
-        return false;
+        return AppLaunchResult::Failed;
 
-    const auto processIds = findProcessIdsByImagePath(path);
-    const wchar_t* preferredClass = preferredWindowClassForProcess(fileNameFromPath(path));
-    if (!processIds.empty() &&
-        activateExistingWindow(processIds, preferredClass, preferredClass != nullptr))
-        return true;
-    return executePath(path);
+    const auto target = fullPath(path);
+    if (const auto result = activateExistingWindow(findProcessIdsByImagePath(target), target))
+        return *result;
+    return executePath(target) ? AppLaunchResult::LaunchRequested : AppLaunchResult::Failed;
 }
 
 bool launchUri(const std::wstring& uri) {

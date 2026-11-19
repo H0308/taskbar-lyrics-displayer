@@ -526,8 +526,14 @@ void App::applyHoverControlStyle(int style) {
 }
 
 void App::applyInlineControlDisplayMode(int mode) {
-    if (taskbarVertical_ || taskbarExpandedConfigured())
+    const auto effectiveMode = display_rules::effectiveTaskbarViewMode(
+        settings_.taskbarViewMode_, monitor.snapshot().sessionAlive, taskbarVertical_);
+    if (!display_rules::canEditInlineControlDisplayMode(
+            effectiveMode, taskbarVertical_, settings_.hoverPlaybackControls_,
+            settings_.hoverControlStyle_)) {
+        refreshSettingsDialog(true);
         return;
+    }
     settings_.inlineControlDisplayMode_ =
         mode == 1 ? InlineControlDisplayMode::Always : InlineControlDisplayMode::Hover;
     logSettingInt(L"inline-control-display-mode", mode == 1 ? 1 : 0);

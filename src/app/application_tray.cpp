@@ -302,10 +302,10 @@ void App::onDockQuickAppCommand(int command) {
 }
 
 void App::launchIdleApp(const std::wstring& path) {
-    const bool ok = platform_icon::launchConfiguredExe(path);
+    const auto result = platform_icon::launchConfiguredExe(path);
     runtime_log::writef(L"[action][idle-entry] app-open path=%s result=%s", path.c_str(),
-                        ok ? L"ok" : L"failed");
-    if (!ok) {
+                        platform_icon::appLaunchResultName(result));
+    if (result == platform_icon::AppLaunchResult::Failed) {
         for (auto& app : settings_.idleApps_) {
             if (_wcsicmp(app.path.c_str(), path.c_str()) == 0) {
                 app.pathValid = validExePath(app.path);

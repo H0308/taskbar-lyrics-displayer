@@ -1,4 +1,5 @@
 #include "ui/settings/sections.h"
+#include "settings/display_rules.h"
 #include "ui/settings/section_labels.h"
 #include "ui/settings/section_metrics.h"
 #include "ui/settings/lyric_section.h"
@@ -141,9 +142,9 @@ void SettingsSections::updateMediaControlRowsEnabled() {
     const auto* mode = findRow(kIdTaskbarViewMode);
     const int selectedMode =
         mode ? std::clamp(mode->selected, 0, 2) : std::clamp(state.taskbarViewMode, 0, 2);
-    const bool immersiveEnabled = state.mediaSessionAlive && !state.verticalTaskbar;
-    const bool appBarEnabled = selectedMode == 2;
-    const bool expandedEnabled = appBarEnabled || (selectedMode == 1 && immersiveEnabled);
+    const auto effectiveMode = display_rules::effectiveTaskbarViewMode(
+        static_cast<TaskbarViewMode>(selectedMode), state.mediaSessionAlive, state.verticalTaskbar);
+    const bool expandedEnabled = effectiveMode != TaskbarViewMode::Embedded;
     const bool minimal = minimalModeActive();
     auto* controls = findRow(kIdHoverControls);
     if (controls)
@@ -153,13 +154,12 @@ void SettingsSections::updateMediaControlRowsEnabled() {
         style->enabled = !expandedEnabled && controls && controls->checked && !minimal;
     if (auto* inlineMode = findRow(kIdInlineControlDisplayMode)) {
         const bool forcedHoverByMinimal = minimal && state.hoverControlStyle == 1;
-        const bool inlineSelected = style && style->selected == 0 && !forcedHoverByMinimal;
         inlineMode->selected = (state.verticalTaskbar || forcedHoverByMinimal)
                                    ? 0
                                    : std::clamp(state.inlineControlDisplayMode, 0, 1);
-        inlineMode->enabled =
-            !expandedEnabled && !state.verticalTaskbar && controls && controls->checked &&
-            inlineSelected;
+        inlineMode->enabled = display_rules::canEditInlineControlDisplayMode(
+            effectiveMode, state.verticalTaskbar, controls && controls->checked,
+            state.hoverControlStyle == 0 ? HoverControlStyle::Inline : HoverControlStyle::Popup);
     }
 }
 

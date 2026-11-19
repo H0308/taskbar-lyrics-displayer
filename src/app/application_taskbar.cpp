@@ -257,10 +257,11 @@ void App::syncTaskbarView(const SmtcSnapshot& snap) {
 
     forEachHost([&](TaskbarHost* host) {
         host->setAppBarEdge(settings_.appBarEdge_);
-        TaskbarViewMode mode = settings_.taskbarViewMode_;
-        if (mode == TaskbarViewMode::Immersive && (!snap.sessionAlive || host->isVerticalTaskbar()))
-            mode = TaskbarViewMode::Embedded;
-        host->setViewMode(mode);
+        const auto configuredMode = settings_.taskbarViewMode_;
+        const bool vertical = configuredMode == TaskbarViewMode::Immersive &&
+                              snap.sessionAlive && host->isVerticalTaskbar();
+        host->setViewMode(display_rules::effectiveTaskbarViewMode(
+            configuredMode, snap.sessionAlive, vertical));
     });
     syncTaskbarOrientation();
 }
@@ -419,11 +420,9 @@ void App::configureTaskbarHostCallbacks(TaskbarHost* host, bool primary) {
         pushAppVolume();
     });
     host->setSourceOpenCallback([](const std::wstring& source) {
-        const bool ok = platform_icon::launchSourceApp(source);
+        const auto result = platform_icon::launchSourceApp(source);
         runtime_log::writef(L"[action][player] open-source source=%s result=%s", source.c_str(),
-                            ok ? L"ok" : L"failed");
-        if (!ok)
-            runtime_log::writef(L"[player] failed to activate source: %s", source.c_str());
+                             platform_icon::appLaunchResultName(result));
     });
     host->setIdleAppOpenCallback([this](const std::wstring& path) { launchIdleApp(path); });
     host->setIdleTaskOpenCallback(
@@ -514,10 +513,9 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
     auto createHost = [&](const TaskbarDisplayInfo& display, bool primary) {
         auto host = std::make_unique<TaskbarHost>();
         host->setVisibilitySuppressed(true);
-        TaskbarViewMode initialMode = settings_.taskbarViewMode_;
-        if (initialMode == TaskbarViewMode::Immersive &&
-            (!snap.sessionAlive || !display.horizontalTaskbar || !display.taskbarWindow))
-            initialMode = TaskbarViewMode::Embedded;
+        const auto initialMode = display_rules::effectiveTaskbarViewMode(
+            settings_.taskbarViewMode_, snap.sessionAlive && display.taskbarWindow,
+            !display.horizontalTaskbar);
         if (!host->create(inst, display.deviceName, initialMode)) {
             runtime_log::writef(L"failed to create taskbar host for %s",
                                 display.deviceName.c_str());

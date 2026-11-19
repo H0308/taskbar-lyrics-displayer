@@ -15,6 +15,7 @@ namespace {
 constexpr char kDefaultUserAgent[] =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/126.0.0.0 Safari/537.36";
+constexpr size_t kMaxLyricResponseBytes = 8 * 1024 * 1024;
 
 std::atomic<bool> g_shutdown{false};
 thread_local std::vector<LyricRequestDiagnostic>* g_requestDiagnostics = nullptr;
@@ -29,8 +30,12 @@ int curlRequestXferAbort(void* context, curl_off_t, curl_off_t, curl_off_t, curl
 
 size_t curlWrite(char* ptr, size_t size, size_t nmemb, void* userdata) {
     auto* out = static_cast<std::string*>(userdata);
-    out->append(ptr, size * nmemb);
-    return size * nmemb;
+    if (size == 0 || out->size() > kMaxLyricResponseBytes ||
+        nmemb > (kMaxLyricResponseBytes - out->size()) / size)
+        return 0;
+    const size_t bytes = size * nmemb;
+    out->append(ptr, bytes);
+    return bytes;
 }
 
 } // namespace

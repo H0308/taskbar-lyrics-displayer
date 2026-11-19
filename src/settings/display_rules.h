@@ -3,6 +3,19 @@
 struct AppSettings;
 
 namespace display_rules {
+constexpr TaskbarViewMode effectiveTaskbarViewMode(TaskbarViewMode configured,
+                                                   bool mediaSessionAlive, bool vertical) {
+    if (configured == TaskbarViewMode::Immersive && (!mediaSessionAlive || vertical))
+        return TaskbarViewMode::Embedded;
+    return configured;
+}
+
+constexpr bool canEditInlineControlDisplayMode(TaskbarViewMode effectiveMode, bool vertical,
+                                               bool controlsEnabled, HoverControlStyle style) {
+    return effectiveMode == TaskbarViewMode::Embedded && !vertical && controlsEnabled &&
+           style == HoverControlStyle::Inline;
+}
+
 // 运行环境只产生显示限制，不能据此改写持久化配置。
 struct DisplayConstraints {
     bool vertical;

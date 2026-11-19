@@ -15,6 +15,9 @@
 namespace lyric_detail {
 namespace {
 
+constexpr size_t kMaxArtistLength = 1024;
+constexpr size_t kMaxArtistEntries = 64;
+
 size_t matchTrailingOpen(const std::wstring& s, wchar_t open, wchar_t close) {
     int depth = 0;
     for (size_t i = s.size(); i-- > 0;) {
@@ -199,19 +202,19 @@ std::vector<std::wstring> splitSingers(const std::wstring& s) {
     return parts;
 }
 
-size_t findMatchingBracket(const std::wstring& s, size_t openPos) {
-    wchar_t close = 0;
-    if (openPos >= s.size() || !isBracketOpen(s[openPos], close))
-        return std::wstring::npos;
-    const wchar_t open = s[openPos];
-    int depth = 1;
-    for (size_t i = openPos + 1; i < s.size(); ++i) {
-        if (s[i] == open)
-            ++depth;
-        else if (s[i] == close && --depth == 0)
-            return i;
+std::vector<size_t> matchArtistBrackets(const std::wstring& s) {
+    std::vector<size_t> closingPositions(s.size(), std::wstring::npos);
+    std::vector<std::pair<size_t, wchar_t>> openings;
+    for (size_t i = 0; i < s.size(); ++i) {
+        wchar_t expectedClose = 0;
+        if (isBracketOpen(s[i], expectedClose)) {
+            openings.emplace_back(i, expectedClose);
+        } else if (!openings.empty() && s[i] == openings.back().second) {
+            closingPositions[openings.back().first] = i;
+            openings.pop_back();
+        }
     }
-    return std::wstring::npos;
+    return closingPositions;
 }
 
 std::wstring normalizeArtistToken(const std::wstring& s) {
@@ -286,38 +289,28 @@ size_t matchCollabKeywordAt(const std::wstring& lower, size_t pos, bool requireL
     return 0;
 }
 
-std::vector<std::wstring> splitTopLevelArtistSegments(const std::wstring& s) {
+std::vector<std::pair<size_t, size_t>> splitTopLevelArtistSegments(
+    const std::wstring& s, const std::vector<size_t>& closingPositions) {
     const std::wstring lower = lowerW(s);
-    std::vector<std::wstring> parts;
+    std::vector<std::pair<size_t, size_t>> parts;
     size_t start = 0;
     for (size_t i = 0; i < s.size();) {
-        const size_t close = findMatchingBracket(s, i);
+        const size_t close = closingPositions[i];
         if (close != std::wstring::npos) {
             i = close + 1;
             continue;
         }
-        if (isArtistDelimiter(s[i])) {
-            const std::wstring part = trimW(s.substr(start, i - start));
-            if (!part.empty())
-                parts.push_back(part);
+        const size_t delimiterLen =
+            isArtistDelimiter(s[i]) ? 1 : matchCollabKeywordAt(lower, i, true);
+        if (delimiterLen > 0) {
+            parts.emplace_back(start, i);
+            i += delimiterLen;
+            start = i;
+        } else {
             ++i;
-            start = i;
-            continue;
         }
-        const size_t kwLen = matchCollabKeywordAt(lower, i, true);
-        if (kwLen > 0) {
-            const std::wstring part = trimW(s.substr(start, i - start));
-            if (!part.empty())
-                parts.push_back(part);
-            i += kwLen;
-            start = i;
-            continue;
-        }
-        ++i;
     }
-    const std::wstring tail = trimW(s.substr(start));
-    if (!tail.empty())
-        parts.push_back(tail);
+    parts.emplace_back(start, s.size());
     return parts;
 }
 
@@ -331,20 +324,21 @@ void addUniqueAlias(ArtistAliases& aliases, std::wstring token) {
 }
 
 void parseArtistEntries(const std::wstring& s, std::vector<ArtistAliases>& out, int depth = 0) {
-    if (depth > 4)
+    if (depth > 4 || out.size() > kMaxArtistEntries)
         return;
-    for (const auto& segment : splitTopLevelArtistSegments(s)) {
+    const auto closingPositions = matchArtistBrackets(s);
+    for (const auto& [start, end] : splitTopLevelArtistSegments(s, closingPositions)) {
         std::wstring outer;
         std::vector<std::wstring> inners;
-        for (size_t i = 0; i < segment.size();) {
-            const size_t close = findMatchingBracket(segment, i);
+        for (size_t i = start; i < end;) {
+            const size_t close = closingPositions[i];
             if (close != std::wstring::npos) {
                 if (!outer.empty() && outer.back() != L' ')
                     outer.push_back(L' ');
-                inners.push_back(segment.substr(i + 1, close - i - 1));
+                inners.push_back(s.substr(i + 1, close - i - 1));
                 i = close + 1;
             } else {
-                outer.push_back(segment[i]);
+                outer.push_back(s[i]);
                 ++i;
             }
         }
@@ -373,6 +367,8 @@ void parseArtistEntries(const std::wstring& s, std::vector<ArtistAliases>& out, 
             out.push_back(std::move(aliases));
         for (const auto& collaborator : nestedCollaborators)
             parseArtistEntries(collaborator, out, depth + 1);
+        if (out.size() > kMaxArtistEntries)
+            return;
     }
 }
 
@@ -385,6 +381,65 @@ int artistAliasMatchScore(const ArtistAliases& left, const ArtistAliases& right)
     if (shared == 0)
         return 0;
     return shared == left.size() && shared == right.size() ? 100 : 95;
+}
+
+int bestArtistAssignmentScore(const std::vector<ArtistAliases>& left,
+                              const std::vector<ArtistAliases>& right) {
+    // 匈牙利算法。补齐零分行列，允许任意一侧的歌手不参与匹配。
+    const size_t size = std::max(left.size(), right.size());
+    std::vector<std::vector<int>> scores(size + 1, std::vector<int>(size + 1));
+    for (size_t row = 1; row <= left.size(); ++row)
+        for (size_t column = 1; column <= right.size(); ++column)
+            scores[row][column] = artistAliasMatchScore(left[row - 1], right[column - 1]);
+
+    std::vector<int> rowPotential(size + 1), columnPotential(size + 1);
+    std::vector<size_t> assignedRow(size + 1), previousColumn(size + 1);
+    for (size_t row = 1; row <= size; ++row) {
+        assignedRow[0] = row;
+        size_t column = 0;
+        std::vector<int> minCost(size + 1, (std::numeric_limits<int>::max)());
+        std::vector<bool> visited(size + 1);
+        do {
+            visited[column] = true;
+            const size_t assigned = assignedRow[column];
+            int delta = (std::numeric_limits<int>::max)();
+            size_t nextColumn = 0;
+            for (size_t candidate = 1; candidate <= size; ++candidate) {
+                if (visited[candidate])
+                    continue;
+                const int cost =
+                    100 - scores[assigned][candidate] - rowPotential[assigned] -
+                    columnPotential[candidate];
+                if (cost < minCost[candidate]) {
+                    minCost[candidate] = cost;
+                    previousColumn[candidate] = column;
+                }
+                if (minCost[candidate] < delta) {
+                    delta = minCost[candidate];
+                    nextColumn = candidate;
+                }
+            }
+            for (size_t candidate = 0; candidate <= size; ++candidate) {
+                if (visited[candidate]) {
+                    rowPotential[assignedRow[candidate]] += delta;
+                    columnPotential[candidate] -= delta;
+                } else {
+                    minCost[candidate] -= delta;
+                }
+            }
+            column = nextColumn;
+        } while (assignedRow[column] != 0);
+
+        while (column != 0) {
+            const size_t previous = previousColumn[column];
+            assignedRow[column] = assignedRow[previous];
+            column = previous;
+        }
+    }
+    int total = 0;
+    for (size_t column = 1; column <= size; ++column)
+        total += scores[assignedRow[column]][column];
+    return total;
 }
 
 bool sameVersionTags(std::vector<std::wstring> left, std::vector<std::wstring> right) {
@@ -477,10 +532,11 @@ std::wstring normalizeTitle(const std::wstring& s) {
     const std::wstring source = stripFeatureSuffix(simplifiedChinese(s));
     std::wstring out;
     out.reserve(source.size());
+    std::wstring absentClosers;
     bool prevSpace = true;
     for (size_t i = 0; i < source.size(); ++i) {
         wchar_t close = 0;
-        if (isBracketOpen(source[i], close)) {
+        if (isBracketOpen(source[i], close) && absentClosers.find(close) == std::wstring::npos) {
             const size_t end = source.find(close, i + 1);
             if (end != std::wstring::npos) {
                 const std::wstring content = source.substr(i + 1, end - i - 1);
@@ -511,6 +567,8 @@ std::wstring normalizeTitle(const std::wstring& s) {
                 i = end;
                 continue;
             }
+            // 此位置之后再无同类闭括号，后续开括号无需重扫剩余文本。
+            absentClosers.push_back(close);
         }
         const wchar_t ch = source[i];
         if (isMatchSeparator(ch)) {
@@ -683,8 +741,22 @@ int titleSimilarity(const std::wstring& a, const std::wstring& b) {
 }
 
 int singerSimilarity(const std::wstring& a, const std::wstring& b) {
-    if (a.empty() || b.empty())
+    if (a.empty() || b.empty() || a.size() > kMaxArtistLength || b.size() > kMaxArtistLength)
         return 0;
+    if (a == b)
+        return 100;
+
+    std::vector<ArtistAliases> pa;
+    std::vector<ArtistAliases> pb;
+    parseArtistEntries(a, pa);
+    parseArtistEntries(b, pb);
+    if (pa.size() > kMaxArtistEntries || pb.size() > kMaxArtistEntries)
+        return 0;
+    const int artistCount = static_cast<int>(std::max(pa.size(), pb.size()));
+    // 双方都有多位歌手时，用一对一配对评分，避免文本拼接顺序改变结果。
+    if (pa.size() > 1 && pb.size() > 1)
+        return bestArtistAssignmentScore(pa, pb) / artistCount;
+
     std::wstring na = normalizeTitle(a);
     std::wstring nb = normalizeTitle(b);
     if (na == nb)
@@ -700,39 +772,13 @@ int singerSimilarity(const std::wstring& a, const std::wstring& b) {
         return 100;
     if (na.find(nb) != std::wstring::npos || nb.find(na) != std::wstring::npos)
         return 90;
-    std::vector<ArtistAliases> pa;
-    std::vector<ArtistAliases> pb;
-    parseArtistEntries(a, pa);
-    parseArtistEntries(b, pb);
     if (pa.empty() || pb.empty())
         return 0;
 
-    // 优先锁定别名集合完全一致的歌手，再配对仅部分别名重合的歌手，避免误占最优配对。
-    std::vector<bool> usedA(pa.size(), false);
-    std::vector<bool> usedB(pb.size(), false);
-    int matches = 0;
-    int scoreSum = 0;
-    for (int targetScore : {100, 95}) {
-        for (size_t i = 0; i < pa.size(); ++i) {
-            if (usedA[i])
-                continue;
-            for (size_t j = 0; j < pb.size(); ++j) {
-                if (usedB[j])
-                    continue;
-                if (artistAliasMatchScore(pa[i], pb[j]) == targetScore) {
-                    usedA[i] = true;
-                    usedB[j] = true;
-                    ++matches;
-                    scoreSum += targetScore;
-                    break;
-                }
-            }
-        }
-    }
-    if (matches == 0)
+    const int scoreSum = bestArtistAssignmentScore(pa, pb);
+    if (scoreSum == 0)
         return 0;
-    const int tokenScore =
-        std::min(100, scoreSum / static_cast<int>(std::max(pa.size(), pb.size())));
+    const int tokenScore = scoreSum / artistCount;
     const int textScore = static_cast<int>(std::lround(jaroWinkler(na, nb) * 100.0));
     return std::max(tokenScore, textScore);
 }
@@ -803,7 +849,8 @@ std::wstring makeSearchQuery(const SearchVariant& variant) {
 
 int scoreCandidate(const MatchQuery& q, const std::wstring& name, const std::wstring& singer,
                    int64_t candDurationMs) {
-    if (isUnknownTitle(q.title) || isUnknownTitle(name))
+    if (isUnknownTitle(q.title) || isUnknownTitle(name) ||
+        q.artist.size() > kMaxArtistLength || singer.size() > kMaxArtistLength)
         return 0;
 
     const int t = titleSimilarity(q.title, name);

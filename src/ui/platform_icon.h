@@ -20,11 +20,20 @@ bool readExeIconPixels(const std::wstring& path, std::vector<BYTE>& pixels, UINT
                        UINT& height);
 bool readExeDisplayName(const std::wstring& path, std::wstring& name);
 
-// 激活媒体来源对应的已有播放器主窗口（含网易云托盘隐藏主窗口）；找不到可激活窗口时再按来源标识启动。
-bool launchSourceApp(const std::wstring& sourceAppUserModelId);
+enum class AppLaunchResult {
+    Failed,
+    ShowRequested,
+    ForegroundRequested,
+    ForegroundDenied,
+    LaunchRequested,
+};
+const wchar_t* appLaunchResultName(AppLaunchResult result);
 
-// 按配置的 EXE 路径激活已运行实例，未运行时启动该路径。
-bool launchConfiguredExe(const std::wstring& path);
+// 激活媒体来源对应的已有播放器主窗口（含网易云托盘隐藏主窗口）。
+AppLaunchResult launchSourceApp(const std::wstring& sourceAppUserModelId);
+
+// 按配置的 EXE 路径查找已有窗口，必要时由系统打开该路径。
+AppLaunchResult launchConfiguredExe(const std::wstring& path);
 
 // 使用 Windows Shell 打开 URL 或已注册的自定义 URI 协议。
 bool launchUri(const std::wstring& uri);

@@ -523,6 +523,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     TaskbarPresence presence_;
     TaskbarDragGesture drag_;
     std::vector<taskbar_detail::TaskbarAnchorSlot> dragAnchors_;
+    bool dragVertical_ = false;
     bool immersiveYieldArmed_ = false;
     bool immersivePresenceTimerRunning_ = false;
 
@@ -926,6 +927,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         media = info;
         if (canRepeatChanged && (isExpandedView() || pinnedInlineControlsConfigured())) {
             requestInvalidation(RenderInvalidation::Layout);
+            if (drag_.dragging())
+                adjustPosition();
             immersiveControlHover_ = -1;
             immersiveControlPressed_ = -1;
             inlineControlHover_ = -1;
@@ -1516,8 +1519,15 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             positionPending_ = true;
             return;
         }
-        if (drag_.dragging())
+        if (drag_.dragging()) {
+            if (refreshDragAnchors()) {
+                if (updateDragPreviewPlacement())
+                    requestFrameAndFlush();
+            } else {
+                finishLyricDrag(false);
+            }
             return;
+        }
         if (isAppBarView()) {
             cancelSceneWindowResize();
             if (appBar_.registered())
@@ -1556,21 +1566,40 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return true;
     }
 
-    bool updateDragPreviewPlacement() {
-        if (!drag_.dragging() || dragAnchors_.empty())
+    bool refreshDragAnchors() {
+        taskbar_detail::PlacementInput input;
+        if (!buildEmbeddedPlacementInput(input, anchor_) || input.vertical != dragVertical_)
             return false;
-        const bool vertical = isVerticalTaskbar();
-        const POINT cursor = drag_.cursor();
-        const int effectiveMajor = (vertical ? cursor.y : cursor.x) - drag_.grabOffset();
+        const int previous = drag_.candidate();
+        const auto preferred = previous >= 0 && previous < static_cast<int>(dragAnchors_.size())
+                                   ? dragAnchors_[static_cast<size_t>(previous)].spec
+                                   : anchor_;
+        auto anchors = taskbar_detail::collectAvailableAnchors(input, drag_.previewMajor());
+        if (anchors.empty())
+            return false;
+        WindowPlacement current;
+        currentWindowPlacement(current);
+        drag_.setCandidate(
+            taskbar_detail::findActiveAnchorIndex(anchors, preferred, current, dragVertical_));
+        dragAnchors_ = std::move(anchors);
+        return true;
+    }
+
+    int dragAnchorIndexAt(POINT cursor) const {
+        const int effectiveMajor = (dragVertical_ ? cursor.y : cursor.x) - drag_.grabOffset();
         const int hysteresisPx = std::max(6, (int)std::lround(10.0f * scale()));
+        return taskbar_detail::selectDragAnchorIndex(dragAnchors_, effectiveMajor, dragVertical_,
+                                                     drag_.candidate(), hysteresisPx);
+    }
+
+    bool updateDragPreviewPlacement() {
         const int currentIdx = drag_.candidate();
-        const int nextIdx = taskbar_detail::selectDragAnchorIndex(dragAnchors_, effectiveMajor,
-                                                                  vertical, currentIdx, hysteresisPx);
-        if (nextIdx < 0 || nextIdx >= static_cast<int>(dragAnchors_.size()))
+        const int nextIdx = dragAnchorIndexAt(drag_.cursor());
+        if (nextIdx < 0)
             return false;
 
         drag_.setCandidate(nextIdx);
-        const WindowPlacement& placement =
+        const WindowPlacement placement =
             dragAnchors_[static_cast<size_t>(nextIdx)].previewPlacement;
         WindowPlacement current;
         const bool sameBox = currentWindowPlacement(current) && current.x == placement.x &&
@@ -1620,6 +1649,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             grabOffset = std::clamp(cursorStartMajor - currentCenter, -limit, limit);
         }
 
+        dragVertical_ = vertical;
         drag_.begin(preview, initialIdx, grabOffset);
         SetCursor(LoadCursorW(nullptr, IDC_SIZEALL));
         cancelSceneWindowResize();
@@ -1642,9 +1672,18 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
     void finishLyricDrag(bool commit) {
         const bool wasDragging = drag_.dragging();
-        const int committedIdx = drag_.candidate();
-        const bool hasCommitted = commit && wasDragging && committedIdx >= 0 &&
-                                  committedIdx < static_cast<int>(dragAnchors_.size());
+        int committedIdx = -1;
+        if (commit && wasDragging) {
+            detectChanges();
+            if (probeReady_)
+                pickProbeResult();
+            if (refreshDragAnchors()) {
+                POINT cursor = drag_.cursor();
+                GetCursorPos(&cursor);
+                committedIdx = dragAnchorIndexAt(cursor);
+            }
+        }
+        const bool hasCommitted = committedIdx >= 0;
         const TaskbarAnchorSpec committedSpec =
             hasCommitted ? dragAnchors_[static_cast<size_t>(committedIdx)].spec : anchor_;
         dragAnchors_.clear();
@@ -2734,6 +2773,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         }
         if (resourceOnlyChanged)
             requestInvalidation(RenderInvalidation::Layout);
+        if (drag_.dragging() && (sceneWidthChanged || resourceOnlyChanged))
+            adjustPosition();
 
         // 只对已有曲目之间的切换做入场动画；首次显示、同曲刷新和会话关闭保持即时提交。
         setSongTransitionPending(songChanged && frame.visible && !isMinimalMode() &&
@@ -2909,7 +2950,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     void cancelSceneWindowResize() { sceneTransition_.cancelResize(); }
 
     bool beginSceneWindowResize() {
-        if (isExpandedView())
+        if (isExpandedView() || drag_.dragging())
             return false;
         WindowPlacement from;
         WindowPlacement to;
