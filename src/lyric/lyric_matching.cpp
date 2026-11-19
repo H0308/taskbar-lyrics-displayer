@@ -175,12 +175,16 @@ bool isMatchSeparator(wchar_t ch) {
     }
 }
 
+bool isArtistDelimiter(wchar_t ch) {
+    return ch == L'/' || ch == L'、' || ch == L'&' || ch == L';' || ch == L'；' ||
+           ch == L',' || ch == L'，' || ch == L'×';
+}
+
 std::vector<std::wstring> splitSingers(const std::wstring& s) {
     std::vector<std::wstring> parts;
     std::wstring current;
     for (wchar_t ch : s) {
-        if (ch == L'/' || ch == L'、' || ch == L'&' || ch == L';' || ch == L'；' ||
-            ch == L',' || ch == L'，' || ch == L'×') {
+        if (isArtistDelimiter(ch)) {
             auto t = trimW(current);
             if (!t.empty())
                 parts.push_back(t);
@@ -195,20 +199,192 @@ std::vector<std::wstring> splitSingers(const std::wstring& s) {
     return parts;
 }
 
-std::vector<std::wstring> splitArtists(const std::wstring& s) {
-    std::vector<std::wstring> out;
-    for (const auto& part : splitSingers(s)) {
-        std::wstring n = L' ' + normalizeTitle(part) + L' ';
-        for (const wchar_t* kw : {L" feat. ", L" feat ", L" ft. ", L" ft ", L" featuring ",
-                                  L" with ", L" vs ", L" vs. "})
-            replaceAllW(n, kw, L" / ");
-        for (const auto& p : splitSingers(n)) {
-            auto t = trimW(p);
-            if (!t.empty())
-                out.push_back(t);
+size_t findMatchingBracket(const std::wstring& s, size_t openPos) {
+    wchar_t close = 0;
+    if (openPos >= s.size() || !isBracketOpen(s[openPos], close))
+        return std::wstring::npos;
+    const wchar_t open = s[openPos];
+    int depth = 1;
+    for (size_t i = openPos + 1; i < s.size(); ++i) {
+        if (s[i] == open)
+            ++depth;
+        else if (s[i] == close && --depth == 0)
+            return i;
+    }
+    return std::wstring::npos;
+}
+
+std::wstring normalizeArtistToken(const std::wstring& s) {
+    const std::wstring source = simplifiedChinese(s);
+    std::wstring out;
+    out.reserve(source.size());
+    bool prevSpace = true;
+    for (wchar_t ch : source) {
+        if (isMatchSeparator(ch)) {
+            if (!prevSpace) {
+                out.push_back(L' ');
+                prevSpace = true;
+            }
+        } else {
+            out.push_back(static_cast<wchar_t>(std::towlower(ch)));
+            prevSpace = false;
         }
     }
+    while (!out.empty() && out.back() == L' ')
+        out.pop_back();
     return out;
+}
+
+// 仅用于过滤括号内的角色、版本或泛称，避免不同歌手因相同附注词误匹配。
+bool isNonAliasBracketToken(const std::wstring& normalized) {
+    if (normalized.empty() || isNoiseBracketContent(normalized))
+        return true;
+    static constexpr const wchar_t* kNonAliasTokens[] = {
+        L"翻唱", L"翻唱版", L"原唱", L"原版", L"合唱", L"合唱版", L"伴唱", L"和声",
+        L"伴奏", L"伴奏版", L"纯音乐", L"现场", L"现场版", L"演唱会", L"男声", L"男声版",
+        L"女声", L"女声版", L"童声", L"群星", L"华语群星", L"未知歌手", L"乐队", L"组合",
+        L"声优", L"配音", L"dj版", L"live版", L"加速版", L"剧情版", L"cover", L"original",
+        L"chorus", L"choir", L"backing vocals", L"vocals", L"vocal", L"instrumental",
+        L"karaoke", L"live", L"concert", L"remix", L"acoustic", L"unplugged", L"demo",
+        L"ver", L"cv", L"va", L"various", L"various artists", L"unknown",
+        L"unknown artist", L"band", L"male", L"female", L"ost", L"cast",
+    };
+    for (const wchar_t* token : kNonAliasTokens) {
+        if (normalized == token)
+            return true;
+    }
+    return false;
+}
+
+size_t matchCollabKeywordAt(const std::wstring& lower, size_t pos, bool requireLeadingSpace) {
+    if (requireLeadingSpace && (pos == 0 || !std::iswspace(lower[pos - 1])))
+        return 0;
+    struct CollabKeyword {
+        const wchar_t* text;
+        size_t length;
+        bool hasDot;
+    };
+    static constexpr CollabKeyword kKeywords[] = {
+        {L"featuring", 9, false},
+        {L"feat.", 5, true},
+        {L"feat", 4, false},
+        {L"ft.", 3, true},
+        {L"ft", 2, false},
+        {L"with", 4, false},
+        {L"vs.", 3, true},
+        {L"vs", 2, false},
+    };
+    for (const auto& kw : kKeywords) {
+        if (pos + kw.length >= lower.size())
+            continue;
+        if (lower.compare(pos, kw.length, kw.text) != 0)
+            continue;
+        const wchar_t next = lower[pos + kw.length];
+        if (kw.hasDot ? (std::iswspace(next) || next >= 0x80) : std::iswspace(next))
+            return kw.length;
+    }
+    return 0;
+}
+
+std::vector<std::wstring> splitTopLevelArtistSegments(const std::wstring& s) {
+    const std::wstring lower = lowerW(s);
+    std::vector<std::wstring> parts;
+    size_t start = 0;
+    for (size_t i = 0; i < s.size();) {
+        const size_t close = findMatchingBracket(s, i);
+        if (close != std::wstring::npos) {
+            i = close + 1;
+            continue;
+        }
+        if (isArtistDelimiter(s[i])) {
+            const std::wstring part = trimW(s.substr(start, i - start));
+            if (!part.empty())
+                parts.push_back(part);
+            ++i;
+            start = i;
+            continue;
+        }
+        const size_t kwLen = matchCollabKeywordAt(lower, i, true);
+        if (kwLen > 0) {
+            const std::wstring part = trimW(s.substr(start, i - start));
+            if (!part.empty())
+                parts.push_back(part);
+            i += kwLen;
+            start = i;
+            continue;
+        }
+        ++i;
+    }
+    const std::wstring tail = trimW(s.substr(start));
+    if (!tail.empty())
+        parts.push_back(tail);
+    return parts;
+}
+
+using ArtistAliases = std::vector<std::wstring>;
+
+void addUniqueAlias(ArtistAliases& aliases, std::wstring token) {
+    if (token.empty())
+        return;
+    if (std::find(aliases.begin(), aliases.end(), token) == aliases.end())
+        aliases.push_back(std::move(token));
+}
+
+void parseArtistEntries(const std::wstring& s, std::vector<ArtistAliases>& out, int depth = 0) {
+    if (depth > 4)
+        return;
+    for (const auto& segment : splitTopLevelArtistSegments(s)) {
+        std::wstring outer;
+        std::vector<std::wstring> inners;
+        for (size_t i = 0; i < segment.size();) {
+            const size_t close = findMatchingBracket(segment, i);
+            if (close != std::wstring::npos) {
+                if (!outer.empty() && outer.back() != L' ')
+                    outer.push_back(L' ');
+                inners.push_back(segment.substr(i + 1, close - i - 1));
+                i = close + 1;
+            } else {
+                outer.push_back(segment[i]);
+                ++i;
+            }
+        }
+
+        ArtistAliases aliases;
+        addUniqueAlias(aliases, normalizeArtistToken(outer));
+        std::vector<std::wstring> nestedCollaborators;
+        for (const auto& rawInner : inners) {
+            const std::wstring inner = trimW(rawInner);
+            if (inner.empty())
+                continue;
+            const size_t kwLen = matchCollabKeywordAt(lowerW(inner), 0, false);
+            if (kwLen > 0) {
+                const std::wstring rest = trimW(inner.substr(kwLen));
+                if (!rest.empty())
+                    nestedCollaborators.push_back(rest);
+                continue;
+            }
+            for (const auto& part : splitSingers(inner)) {
+                std::wstring norm = normalizeArtistToken(part);
+                if (!isNonAliasBracketToken(norm))
+                    addUniqueAlias(aliases, std::move(norm));
+            }
+        }
+        if (!aliases.empty())
+            out.push_back(std::move(aliases));
+        for (const auto& collaborator : nestedCollaborators)
+            parseArtistEntries(collaborator, out, depth + 1);
+    }
+}
+
+int artistAliasMatchScore(const ArtistAliases& left, const ArtistAliases& right) {
+    size_t shared = 0;
+    for (const auto& alias : left) {
+        if (std::find(right.begin(), right.end(), alias) != right.end())
+            ++shared;
+    }
+    if (shared == 0)
+        return 0;
+    return shared == left.size() && shared == right.size() ? 100 : 95;
 }
 
 bool sameVersionTags(std::vector<std::wstring> left, std::vector<std::wstring> right) {
@@ -524,23 +700,39 @@ int singerSimilarity(const std::wstring& a, const std::wstring& b) {
         return 100;
     if (na.find(nb) != std::wstring::npos || nb.find(na) != std::wstring::npos)
         return 90;
-    const auto pa = splitArtists(a);
-    const auto pb = splitArtists(b);
+    std::vector<ArtistAliases> pa;
+    std::vector<ArtistAliases> pb;
+    parseArtistEntries(a, pa);
+    parseArtistEntries(b, pb);
     if (pa.empty() || pb.empty())
         return 0;
+
+    // 优先锁定别名集合完全一致的歌手，再配对仅部分别名重合的歌手，避免误占最优配对。
+    std::vector<bool> usedA(pa.size(), false);
+    std::vector<bool> usedB(pb.size(), false);
     int matches = 0;
-    for (const auto& x : pa) {
-        for (const auto& y : pb) {
-            if (x == y) {
-                ++matches;
-                break;
+    int scoreSum = 0;
+    for (int targetScore : {100, 95}) {
+        for (size_t i = 0; i < pa.size(); ++i) {
+            if (usedA[i])
+                continue;
+            for (size_t j = 0; j < pb.size(); ++j) {
+                if (usedB[j])
+                    continue;
+                if (artistAliasMatchScore(pa[i], pb[j]) == targetScore) {
+                    usedA[i] = true;
+                    usedB[j] = true;
+                    ++matches;
+                    scoreSum += targetScore;
+                    break;
+                }
             }
         }
     }
     if (matches == 0)
         return 0;
     const int tokenScore =
-        std::min(100, matches * 100 / static_cast<int>(std::max(pa.size(), pb.size())));
+        std::min(100, scoreSum / static_cast<int>(std::max(pa.size(), pb.size())));
     const int textScore = static_cast<int>(std::lround(jaroWinkler(na, nb) * 100.0));
     return std::max(tokenScore, textScore);
 }

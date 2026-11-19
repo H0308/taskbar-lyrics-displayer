@@ -49,6 +49,46 @@ TEST_CASE("lyric_matching.normalization_version_tags_and_scoring") {
     EXPECT_TRUE(lyric_detail::titleEndsWithArtist(L"晴天 - 周杰伦", L"周杰伦"));
 }
 
+TEST_CASE("lyric_matching.artist_parenthetical_aliases_and_collaborators") {
+    EXPECT_EQ(lyric_detail::singerSimilarity(L"陆绮菲（菲菲公主）", L"菲菲公主（陆绮菲）"), 100);
+    EXPECT_EQ(lyric_detail::singerSimilarity(L"邓寓君(等什么君)", L"等什么君（邓寓君）"), 100);
+    EXPECT_EQ(lyric_detail::singerSimilarity(L"陸綺菲（菲菲公主）", L"菲菲公主(陆绮菲)"), 100);
+
+    const lyric_detail::MatchQuery q{
+        L"第57次取消发送", L"陆绮菲（菲菲公主）", 180560, {}};
+    EXPECT_TRUE(lyric_detail::scoreCandidate(q, L"第57次取消发送", L"菲菲公主（陆绮菲）", 180000) >=
+                lyric_detail::kScoreThreshold);
+
+    EXPECT_EQ(lyric_detail::singerSimilarity(L"仓木麻衣 (くらき まい)", L"仓木麻衣 (Mai Kuraki)"), 95);
+    const lyric_detail::MatchQuery kurakiQuery{
+        L"渡月橋 ～君 想ふ～", L"仓木麻衣 (くらき まい)", 247893, {}};
+    EXPECT_TRUE(lyric_detail::scoreCandidate(
+                    kurakiQuery, L"渡月橋 ～君 想ふ～", L"仓木麻衣 (Mai Kuraki)", 247000) >=
+                lyric_detail::kScoreThreshold);
+
+    EXPECT_EQ(lyric_detail::singerSimilarity(L"周深 (Charlie Zhou, 卡布叻)", L"卡布叻 (周深)"), 95);
+
+    EXPECT_TRUE(
+        lyric_detail::singerSimilarity(L"陆绮菲（菲菲公主）/DJ阿智", L"DJ阿智/菲菲公主") >= 90);
+    EXPECT_EQ(lyric_detail::singerSimilarity(
+                  L"周杰伦 (Jay Chou) feat. 费玉清", L"Jay Chou / 费玉清 (Fei Yu-Ching)"),
+              95);
+    EXPECT_EQ(lyric_detail::singerSimilarity(L"周杰伦 (feat. 费玉清)", L"费玉清/周杰伦"), 100);
+
+    const int singleVsCollab =
+        lyric_detail::singerSimilarity(L"陆绮菲（菲菲公主）", L"菲菲公主（陆绮菲）/DJ阿智");
+    EXPECT_TRUE(singleVsCollab < 100);
+    EXPECT_TRUE(singleVsCollab < 80);
+
+    EXPECT_EQ(lyric_detail::singerSimilarity(L"张三（翻唱）", L"李四（翻唱）"), 0);
+    EXPECT_EQ(lyric_detail::singerSimilarity(L"张三 (Live)", L"李四 (Live)"), 0);
+    EXPECT_EQ(lyric_detail::singerSimilarity(L"张三 (原唱)", L"李四 (原唱)"), 0);
+    EXPECT_EQ(lyric_detail::singerSimilarity(L"张三 (CV)", L"李四 (CV)"), 0);
+    EXPECT_EQ(lyric_detail::singerSimilarity(L"张三 (合唱)", L"李四 (合唱)"), 0);
+    const lyric_detail::MatchQuery coverQuery{L"晴天", L"张三（翻唱）", 220000, {}};
+    EXPECT_EQ(lyric_detail::scoreCandidate(coverQuery, L"晴天", L"李四（翻唱）", 220000), 0);
+}
+
 TEST_CASE("lyric_sources.yrc_and_krc_parsing") {
     const std::string yrc =
         "\xEF\xBB\xBF"
