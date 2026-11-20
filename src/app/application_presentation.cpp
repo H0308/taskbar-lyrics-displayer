@@ -24,7 +24,6 @@ const wchar_t* onlineLyricSourceName(LyricOrigin origin) {
 
 void App::updateRuntimeLogState(const SmtcSnapshot& snap) {
     const auto& state = playback_.state();
-    const auto* source = player_source::find(snap.player);
     const auto timeText = [](int64_t value) {
         const auto seconds = std::max<int64_t>(0, value) / 1000;
         return std::to_wstring(seconds / 60) + L":" + (seconds % 60 < 10 ? L"0" : L"") +
@@ -34,7 +33,16 @@ void App::updateRuntimeLogState(const SmtcSnapshot& snap) {
         : snap.status == PlaybackStatus::Playing ? L"播放中"
         : snap.status == PlaybackStatus::Paused ? L"已暂停"
         : snap.status == PlaybackStatus::Stopped ? L"已停止" : L"状态切换中";
-    std::wstring player = source ? source->displayName : L"无播放器";
+    std::wstring player = L"无播放器";
+    if (snap.sessionAlive) {
+        if (const auto* source = player_source::find(snap.player)) {
+            player = source->displayName;
+        } else {
+            player = platform_icon::resolveSourceDisplayName(snap.sourceAppUserModelId);
+            if (player == L"未知应用" && !snap.sourceAppUserModelId.empty())
+                player = snap.sourceAppUserModelId;
+        }
+    }
     player += L" · ";
     player += status;
     const int line = LyricProvider::findLine(state.currentLyrics_, snap.positionMs);
