@@ -475,7 +475,7 @@ void App::showManualSearch(HINSTANCE inst) {
         SmtcSnapshot snap = monitor.snapshot();
         if (manualSearchTrackKey.empty() || !snap.sessionAlive || snap.title.empty() ||
             playback_.state().currentKey != manualSearchTrackKey ||
-            makeTrackKey(snap) != manualSearchTrackKey)
+            !playback_.matchesCurrentTrack(snap))
             return;
 
         playback_.lyricProvider().setManualOverride(

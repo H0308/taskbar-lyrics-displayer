@@ -1,4 +1,6 @@
 #include "app/application_internal.h"
+#include "media/player_source.h"
+#include "settings/display_rules.h"
 #include "ui/taskbar/placement.h"
 namespace lyrics_app {
 bool App::createTrayWindow(HINSTANCE inst) {
@@ -64,8 +66,10 @@ void App::updateTrayIcon() {
 }
 
 std::vector<fluent::FluentMenuItem> App::buildMenuItems(bool fullTrayMenu,
-                                                        const TaskbarHost* menuHost) {
+                                                        const TaskbarHost* menuHost,
+                                                        bool includePlaybackSources) {
     activeTaskbarAnchorMenuSpecs_.clear();
+    playbackSourceMenuIds_.clear();
     std::vector<fluent::FluentMenuItem> items;
     auto addItem = [&items](int id, const wchar_t* text, settings_icon::Kind icon,
                             bool checked = false, bool enabled = true) {
@@ -181,6 +185,43 @@ std::vector<fluent::FluentMenuItem> App::buildMenuItems(bool fullTrayMenu,
             items.push_back(std::move(edge));
         }
     }
+    const auto sourceSelection =
+        includePlaybackSources ? monitor.sourceSelection() : SmtcSourceSelection{};
+    if (!sourceSelection.available.empty()) {
+        fluent::FluentMenuItem sources;
+        sources.text = L"播放来源";
+        sources.icon = settings_icon::Kind::Media;
+        fluent::FluentMenuItem automatic;
+        automatic.id = kCmdPlaybackSourceAuto;
+        automatic.text = L"自动选择";
+        automatic.checked = sourceSelection.preferredAppUserModelId.empty();
+        sources.submenu.push_back(std::move(automatic));
+        for (const auto& source : sourceSelection.available) {
+            fluent::FluentMenuItem option;
+            option.id = kCmdPlaybackSourceBase + static_cast<int>(playbackSourceMenuIds_.size());
+            if (const auto* known = player_source::find(source.player))
+                option.text = known->displayName;
+            else
+                option.text = platform_icon::resolveSourceDisplayName(source.appUserModelId);
+            if (option.text.empty() || option.text == L"未知应用")
+                option.text = source.appUserModelId;
+            option.checked = _wcsicmp(source.appUserModelId.c_str(),
+                                      sourceSelection.preferredAppUserModelId.c_str()) == 0;
+            sources.submenu.push_back(std::move(option));
+            playbackSourceMenuIds_.push_back(source.appUserModelId);
+        }
+        for (size_t i = 0; i < playbackSourceMenuIds_.size(); ++i) {
+            auto& option = sources.submenu[i + 1];
+            for (size_t j = i + 1; j < playbackSourceMenuIds_.size(); ++j) {
+                auto& other = sources.submenu[j + 1];
+                if (option.text == other.text) {
+                    option.rightText = playbackSourceMenuIds_[i];
+                    other.rightText = playbackSourceMenuIds_[j];
+                }
+            }
+        }
+        items.push_back(std::move(sources));
+    }
     const bool canSwitchLyricSource =
         snap.sessionAlive && snap.player == SmtcPlayerType::QQMusic &&
         !playback_.state().lyricLoading_ && !playback_.state().currentLyrics_.empty() &&
@@ -243,13 +284,20 @@ void App::showTrayMenu() {
     showTrayMenu(pt);
 }
 
-void App::showTrayMenu(POINT screenPt) {
-    fluent::FluentMenu::show(trayHwnd, screenPt, buildMenuItems(true),
+void App::showTrayMenu(POINT screenPt, bool includePlaybackSources) {
+    fluent::FluentMenu::show(trayHwnd, screenPt,
+                             buildMenuItems(true, nullptr, includePlaybackSources),
                              [this](int cmd) { onMenuCommand(cmd, L"tray"); });
 }
 
 void App::showTaskbarMenu(POINT screenPt, const TaskbarHost* menuHost) {
-    fluent::FluentMenu::show(trayHwnd, screenPt, buildMenuItems(false, menuHost),
+    const auto configuredMode = settings_.taskbarViewMode_;
+    const bool vertical = configuredMode == TaskbarViewMode::Immersive &&
+                          (menuHost ? menuHost->isVerticalTaskbar() : taskbarVertical_);
+    const auto effectiveMode = display_rules::effectiveTaskbarViewMode(
+        configuredMode, monitor.snapshot().sessionAlive, vertical);
+    auto items = buildMenuItems(false, menuHost, effectiveMode == TaskbarViewMode::Embedded);
+    fluent::FluentMenu::show(trayHwnd, screenPt, std::move(items),
                              [this](int cmd) { onMenuCommand(cmd, L"taskbar-menu"); });
 }
 
@@ -320,6 +368,18 @@ void App::launchIdleApp(const std::wstring& path) {
 }
 
 void App::onMenuCommand(int cmd, const wchar_t* source) {
+    if (cmd == kCmdPlaybackSourceAuto) {
+        runtime_log::writef(L"[action][%s] playback-source=auto", source);
+        monitor.selectSource({});
+        return;
+    }
+    if (cmd >= kCmdPlaybackSourceBase &&
+        cmd < kCmdPlaybackSourceBase + static_cast<int>(playbackSourceMenuIds_.size())) {
+        const auto& id = playbackSourceMenuIds_[cmd - kCmdPlaybackSourceBase];
+        runtime_log::writef(L"[action][%s] playback-source=%s", source, id.c_str());
+        monitor.selectSource(id);
+        return;
+    }
     runtime_log::writef(L"[action][%s] command=%s id=%d", source, trayCommandName(cmd), cmd);
     if (cmd >= kCmdTaskbarAnchorBase &&
         cmd < kCmdTaskbarAnchorBase + static_cast<int>(activeTaskbarAnchorMenuSpecs_.size())) {

@@ -31,6 +31,7 @@ OverlayMediaInfo makeMediaInfo(const SmtcSnapshot& snap, const PlaybackState& pl
     OverlayMediaInfo mi;
     const bool retainPrevious = snap.sessionAlive && snap.title.empty() && snap.artist.empty() &&
                                 previous.frameRevision != 0 &&
+                                previous.media.sourceAppUserModelId == snap.sourceAppUserModelId &&
                                 previous.trackKey == playback.currentKey;
     if (retainPrevious) {
         // SMTC 的过渡事件可能暂时没有完整文案，保留当前曲目的媒体字段，
@@ -59,6 +60,7 @@ OverlayMediaInfo makeMediaInfo(const SmtcSnapshot& snap, const PlaybackState& pl
     mi.canPlayPause = snap.canPlayPause;
     mi.canNext = snap.canNext;
     mi.canRepeat = snap.canRepeat;
+    mi.canSwitchSource = snap.canSwitchSource;
     mi.repeatMode = snap.playMode();
     mi.playing = snap.status == PlaybackStatus::Playing;
     return mi;

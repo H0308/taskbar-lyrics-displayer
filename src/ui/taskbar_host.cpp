@@ -149,11 +149,13 @@ constexpr int kImmersiveControlPlayPause = 1;
 constexpr int kImmersiveControlNext = 2;
 constexpr int kImmersiveControlRepeat = 3;
 constexpr int kImmersiveControlVolume = 4;
-constexpr int kImmersiveControlExit = 5;
+using taskbar_detail::kInlineControlCount;
+using taskbar_detail::kInlineSourceControl;
+constexpr int kImmersiveControlExit = 6;
 // Dock 的快捷应用入口使用独立图标和命中项，沉浸模式不显示。
-constexpr int kDockControlQuickApps = 6;
-constexpr int kImmersiveControlMenu = 7;
-constexpr int kExpandedControlCount = 8;
+constexpr int kDockControlQuickApps = 7;
+constexpr int kImmersiveControlMenu = 8;
+constexpr int kExpandedControlCount = 9;
 constexpr float kAppBarHeightDip = 48.0f;
 constexpr float kImmersiveControlRadiusFactor = 0.24f;
 constexpr float kImmersiveControlMinRadius = 8.0f;
@@ -306,7 +308,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const auto lifetime = shared_from_this();
         if (appearance_ && *appearance_ == value)
             return;
-        coverTip_.hide();
+        hoverTip_.hide();
+        sourceWheelRemainder_ = 0;
         const UpdateScope update(*this);
         applyTextAppearance(value);
         applyPopupAppearance(value);
@@ -501,7 +504,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     std::function<void()> tick;
     std::function<void(MediaControl)> onControl;
     std::function<void(const std::wstring&)> onSourceOpen;
-    TaskbarCoverTip coverTip_;
+    TaskbarTooltip hoverTip_;
     std::wstring pressedCoverSource_;
     std::function<void()> onImmersiveExit;
     std::function<void(POINT)> onContextMenu;
@@ -514,6 +517,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     bool trackingLeave_ = false;
     int immersiveControlHover_ = -1;
     int inlineControlHover_ = -1;
+    bool inlineSourcePressed_ = false;
+    int sourceWheelRemainder_ = 0;
     int immersiveControlPressed_ = -1;
     bool controlsOnHover_ = true;
     bool contextMenuEnabled_ = true;
@@ -820,6 +825,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return false;
         if (index == kImmersiveControlRepeat)
             return media.canRepeat;
+        if (index == kInlineSourceControl)
+            return media.canSwitchSource;
         if (index == kDockControlQuickApps)
             return isAppBarView();
         return true;
@@ -921,10 +928,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         bool thumbChanged = info.thumbnail != media.thumbnail;
         bool textChanged = info.title != media.title || info.artist != media.artist;
         const bool canRepeatChanged = info.canRepeat != media.canRepeat;
+        const bool canSwitchSourceChanged = info.canSwitchSource != media.canSwitchSource;
         bool controlsChanged = info.canPrev != media.canPrev ||
                                info.canPlayPause != media.canPlayPause ||
                                info.canNext != media.canNext ||
-                               canRepeatChanged ||
+                               canRepeatChanged || canSwitchSourceChanged ||
                                info.repeatMode != media.repeatMode;
         bool playingChanged = info.playing != media.playing;
         bool platformChanged = info.sourceAppUserModelId != media.sourceAppUserModelId;
@@ -933,7 +941,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             (info.hasDominantColor && info.dominantColor != media.dominantColor);
         bool durationChanged = info.durationMs != media.durationMs;
         media = info;
-        if (canRepeatChanged && (isExpandedView() || pinnedInlineControlsConfigured())) {
+        if ((canRepeatChanged || canSwitchSourceChanged) &&
+            (isExpandedView() || pinnedInlineControlsConfigured())) {
             requestInvalidation(RenderInvalidation::Layout);
             if (drag_.dragging())
                 adjustPosition();
@@ -942,6 +951,13 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             inlineControlHover_ = -1;
             volumeHover_ = false;
             volumePopup_.hide();
+        }
+        if (canSwitchSourceChanged) {
+            hoverTip_.hide();
+            sourceWheelRemainder_ = 0;
+            inlineSourcePressed_ = false;
+            if (inlineControlHover_ == kInlineSourceControl)
+                inlineControlHover_ = -1;
         }
         if (!media.canRepeat) {
             if (hwnd && (repeatHintTarget_ >= 0 || repeatHintUntil_ != 0))
@@ -1394,7 +1410,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         }
         if (!vertical && pinnedInlineControlsForScene(scene_)) {
             const float pinnedExtra = taskbar_detail::pinnedInlineControlsIdealWidth(
-                dip(crossPx), media.canRepeat, pinnedInlineLyricFontSize());
+                dip(crossPx), media.canRepeat, pinnedInlineLyricFontSize(), media.canSwitchSource);
             if (pinnedExtra > 0.0f) {
                 const int extra = (int)std::lround(pinnedExtra * scale());
                 minW += extra;
@@ -2755,7 +2771,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return;
 
         if (frame.scene != scene_ || frame.media.sourceAppUserModelId != media.sourceAppUserModelId)
-            coverTip_.hide();
+            hoverTip_.hide();
         const UpdateScope update(*this);
         const bool trackChanged = frame.trackKey != trackKey_;
         playbackAnchor_ = {frame.frameRevision, frame.requestGeneration, frame.actualPositionMs,
@@ -3490,7 +3506,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         dockBackdrop_.reset();
         runtime_log::removeTaskbarFrameRate(reinterpret_cast<uintptr_t>(hwnd));
         hwnd = nullptr;
-        coverTip_.reset();
+        hoverTip_.reset();
         pressedCoverSource_.clear();
         resetImmersivePresence();
         attachment_.reset();
@@ -4234,7 +4250,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         clientPixelSize(width, height);
         return taskbar_detail::verticalLayout(dip(width), dip(height), scene_, albumCoverVisible_,
                                               mouseOver_ && controlsOnHover_ &&
-                                                  hoverControlStyle_ == HoverControlStyle::Inline);
+                                                  hoverControlStyle_ == HoverControlStyle::Inline,
+                                              media.canSwitchSource);
     }
 
     bool pinnedInlineControlsConfigured() const {
@@ -4263,7 +4280,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return taskbar_detail::planPinnedInlineControls(
             {width, height, scene, songInfoVisible_, albumCoverVisible_, media.canRepeat,
              spectrumExtraForScene(scene, width), coverSlotWidth(height),
-             pinnedInlineLyricFontSize()});
+             pinnedInlineLyricFontSize(), media.canSwitchSource});
     }
 
     taskbar_detail::PinnedInlineControlsLayout pinnedInlineControlsLayout() const {
@@ -4389,10 +4406,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
     // ---------- 内嵌悬浮控件布局 ----------
 
-    // 上一首/播放/下一首 + 音量按钮整体居中：centers[0..2] 为播放控制，
-    // centers[3] 为播放模式按钮，centers[4] 为音量按钮。返回 false 表示当前不在内嵌控件展示状态。
-    // 内嵌悬浮控件：上一首 / 播放 / 下一首 / 播放模式 / 音量。
-    bool inlineControlsLayout(float centers[5], float& cy, float& r) const {
+    bool inlineControlsLayout(float (&centers)[kInlineControlCount], float& cy, float& r) const {
         if (isExpandedView() || isVerticalTaskbar() || scene_ == DisplayScene::Idle ||
             scene_ == DisplayScene::NoPlayback)
             return false;
@@ -4406,45 +4420,10 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         LayoutMetrics layout = layoutMetrics(pxW, pxH);
         if (layout.w <= 0.0f || layout.h <= 0.0f)
             return false;
-        cy = layout.h * 0.5f;
-        r = layout.h * 0.26f;
         const float controlsW = std::max(1.0f, layout.rightW - embeddedResourceExtra());
-        if (!media.canRepeat) {
-            const float spacing = r * 2.8f;
-            // 音量按钮与下一首之间多留 0.9r：音量字形比三角形宽，等间距会显得挤
-            const float volumeGap = spacing + r * 0.9f;
-            const float cx = layout.leftW + controlsW * 0.5f - volumeGap * 0.5f;
-            for (int i = 0; i < 3; ++i)
-                centers[i] = cx + (i - 1) * spacing;
-            centers[3] = 0.0f;
-            centers[4] = cx + spacing + volumeGap;
-            return true;
-        }
-        // 五个控件：上一首/播放/下一首/播放模式/音量。
-        constexpr float kIdealPitch = 2.8f;
-        constexpr float kRepeatExtraGap = 0.3f;
-        constexpr float kVolumeExtraGap = 0.4f;
-        constexpr float kInlineControlMargin = 6.0f;
-        // 组宽 = (4*kIdealPitch + kRepeatExtraGap + kVolumeExtraGap + 2) * r = 13.9r
-        constexpr float kInlineGroupUnit =
-            4.0f * kIdealPitch + kRepeatExtraGap + kVolumeExtraGap + 2.0f;
-        const float fitR = (controlsW - kInlineControlMargin * 2.0f) / kInlineGroupUnit;
-        r = std::max(5.0f, std::min(r, fitR));
-        const float maxSpacing =
-            (controlsW - kInlineControlMargin * 2.0f -
-             (2.0f + kRepeatExtraGap + kVolumeExtraGap) * r) /
-            4.0f;
-        const float spacing = std::max(r * 1.3f, std::min(r * kIdealPitch, maxSpacing));
-        // 播放模式与音量字形比播放三角形更宽，按各自半宽补偿中心距，保证视觉净空隙一致。
-        const float repeatGap = spacing + r * kRepeatExtraGap;
-        const float volumeGap = spacing + r * kVolumeExtraGap;
-        const float totalSpan = 2.0f * spacing + repeatGap + volumeGap;
-        const float startX = layout.leftW + controlsW * 0.5f - totalSpan * 0.5f;
-        for (int i = 0; i < 3; ++i)
-            centers[i] = startX + i * spacing;
-        centers[3] = centers[2] + repeatGap;
-        centers[4] = centers[3] + volumeGap;
-        return true;
+        taskbar_detail::layoutInlineHoverControls(layout.leftW, controlsW, layout.h, media.canRepeat,
+                                                  media.canSwitchSource, centers, cy, r);
+        return r > 0.0f;
     }
 
     // 沉浸模式专属控件：始终显示在歌曲信息分隔线右侧，不受普通任务栏歌词
@@ -4595,6 +4574,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (expandedControlVisible(kImmersiveControlRepeat))
             drawRepeatButton(centers[kImmersiveControlRepeat], r);
         drawVolumeButton(centers[kImmersiveControlVolume], r);
+        if (media.canSwitchSource)
+            drawSwitchSourceButton(centers[kInlineSourceControl], r);
         drawExitImmersiveButton(centers[kImmersiveControlExit], r);
         if (expandedControlVisible(kDockControlQuickApps)) {
             settings_icon::draw(rt, settings_icon::Kind::QuickLaunch,
@@ -4735,6 +4716,32 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             drawRepeatButton(D2D1::Point2F(pinned.centerX[3], pinned.centerY), pinned.radius);
         if (pinned.visible[4])
             drawVolumeButton(D2D1::Point2F(pinned.centerX[4], pinned.centerY), pinned.radius);
+        if (pinned.visible[kInlineSourceControl])
+            drawSwitchSourceButton(
+                D2D1::Point2F(pinned.centerX[kInlineSourceControl], pinned.centerY), pinned.radius);
+    }
+
+    void drawSwitchSourceButton(const D2D1_POINT_2F& center, float radius) {
+        drawInlineControlBackground(kInlineSourceControl, center, radius, true);
+        settings_icon::draw(drawTarget(), settings_icon::Kind::Sync,
+                            D2D1::RectF(center.x - radius, center.y - radius,
+                                        center.x + radius, center.y + radius),
+                            brushBtn_.Get(), 1.6f);
+    }
+
+    void drawInlineHoverControls() {
+        float centers[kInlineControlCount]{};
+        float cy = 0.0f;
+        float radius = 0.0f;
+        if (!inlineControlsLayout(centers, cy, radius))
+            return;
+        for (int i = 0; i < 3; ++i)
+            drawButton(i, D2D1::Point2F(centers[i], cy), radius);
+        if (media.canRepeat)
+            drawRepeatButton(D2D1::Point2F(centers[3], cy), radius);
+        drawVolumeButton(D2D1::Point2F(centers[4], cy), radius);
+        if (media.canSwitchSource)
+            drawSwitchSourceButton(D2D1::Point2F(centers[kInlineSourceControl], cy), radius);
     }
 
     bool pointInPinnedControlsZone(float clientX, float clientY) const {
@@ -4764,7 +4771,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const float hitRadius = pinned.radius + 3.5f;
         int bestIndex = -1;
         float bestDist = hitRadius;
-        for (int i = 0; i < 5; ++i) {
+        for (int i = 0; i < kInlineControlCount; ++i) {
             if (!pinned.visible[i])
                 continue;
             bool enabled = true;
@@ -4799,29 +4806,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     bool hitVolumeButton(float x, float y) const {
         if (isExpandedView())
             return hitImmersiveControl(x, y) == kImmersiveControlVolume;
-        if (isVerticalTaskbar()) {
-            const VerticalLayout layout = verticalLayout();
-            if (!layout.showControls)
-                return false;
-            float logicalX = 0.0f;
-            float logicalY = 0.0f;
-            clientPointToLogicalDip(x, y, logicalX, logicalY);
-            return std::hypot(logicalX - layout.controlCenters[3].x,
-                              logicalY - layout.controlCenters[3].y) <= layout.controlRadius + 4.0f;
-        }
-        if (pinnedInlineControlsLayout().active())
-            return hitPinnedInlineControl(x, y) == 4;
-        float centers[5]{};
-        float cy = 0.0f;
-        float r = 0.0f;
-        if (!inlineControlsLayout(centers, cy, r))
-            return false;
-        float logicalX = 0.0f;
-        float logicalY = 0.0f;
-        clientPointToLogicalDip(x, y, logicalX, logicalY);
-        x = logicalX;
-        y = logicalY;
-        return std::hypot(x - centers[4], y - cy) <= r + 4.0f;
+        return hitInlineControl(x, y) == kImmersiveControlVolume;
     }
 
     // 音量按钮的屏幕坐标矩形（音量滑块浮窗的锚点）
@@ -4857,7 +4842,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             const int half = static_cast<int>(std::lround((pinned.radius + 5.0f) * s));
             return RECT{pt.x - half, pt.y - half, pt.x + half, pt.y + half};
         }
-        float centers[5]{};
+        float centers[kInlineControlCount]{};
         float cy = 0.0f;
         float r = 0.0f;
         if (!inlineControlsLayout(centers, cy, r)) {
@@ -5090,6 +5075,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         case kImmersiveControlPlayPause:
         case kImmersiveControlNext:
         case kImmersiveControlRepeat:
+        case kInlineSourceControl:
             if (index == kImmersiveControlRepeat)
                 armRepeatHint(SmtcSnapshot::nextPlayMode(media.repeatMode));
             if (onControl)
@@ -5143,63 +5129,91 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         media_control::draw(rt, controlGeometry, idx, media.playing, c, r, brush);
     }
 
-    int hitButton(float x, float y) const {
-        if (!isVerticalTaskbar() && pinnedInlineControlsLayout().active()) {
-            const int hit = hitPinnedInlineControl(x, y);
-            return hit >= 0 && hit <= 3 ? hit : -1;
-        }
+    int hitInlineControl(float x, float y) const {
+        if (isExpandedView())
+            return -1;
+        if (!isVerticalTaskbar() && pinnedInlineControlsLayout().active())
+            return hitPinnedInlineControl(x, y);
         if (!controlsOnHover_ || !mouseOver_ || hoverControlStyle_ != HoverControlStyle::Inline)
             return -1;
+        float logicalX = 0.0f;
+        float logicalY = 0.0f;
+        clientPointToLogicalDip(x, y, logicalX, logicalY);
+        const bool enabled[kInlineControlCount] = {
+            media.canPrev, media.canPlayPause, media.canNext, media.canRepeat, true,
+            media.canSwitchSource};
+        int hit = -1;
         if (isVerticalTaskbar()) {
             const VerticalLayout layout = verticalLayout();
             if (!layout.showControls)
                 return -1;
-            float logicalX = 0.0f;
-            float logicalY = 0.0f;
-            clientPointToLogicalDip(x, y, logicalX, logicalY);
-            for (int i = 0; i < 3; ++i) {
-                const bool enabled = i == 0   ? media.canPrev
-                                     : i == 1 ? media.canPlayPause
-                                              : media.canNext;
-                if (enabled && std::hypot(logicalX - layout.controlCenters[i].x,
-                                          logicalY - layout.controlCenters[i].y) <=
-                                   layout.controlRadius + 4.0f)
-                    return i;
+            constexpr int slots[] = {0, 1, 2, kImmersiveControlVolume, kInlineSourceControl};
+            float nearest = layout.controlRadius + 4.0f;
+            for (size_t i = 0; i < std::size(slots); ++i) {
+                const auto& center = layout.controlCenters[i];
+                const float distance = std::hypot(logicalX - center.x, logicalY - center.y);
+                if (enabled[slots[i]] && distance <= nearest) {
+                    nearest = distance;
+                    hit = slots[i];
+                }
             }
-            return -1;
+            return hit;
         }
-        // 鼠标消息使用像素坐标，而 render 使用 DIP；先统一到 DIP，
-        // 并与 render 使用完全相同的左侧分区计算。
-        int pxW = 0;
-        int pxH = 0;
-        logicalClientPixelSize(pxW, pxH);
-        LayoutMetrics layout = layoutMetrics(pxW, pxH);
-        float w = layout.w;
-        float logicalX = 0.0f;
-        float logicalY = 0.0f;
-        clientPointToLogicalDip(x, y, logicalX, logicalY);
-        x = logicalX;
-        y = logicalY;
-        float leftW = layout.leftW;
-        if (x < leftW || x > w)
-            return -1;
-
-        float centers[5]{};
+        float centers[kInlineControlCount]{};
         float cy = 0.0f;
         float r = 0.0f;
         if (!inlineControlsLayout(centers, cy, r))
             return -1;
-        for (int i = 0; i < 3; ++i) {
-            bool en = i == 0 ? media.canPrev : i == 1 ? media.canPlayPause : media.canNext;
-            if (!en)
-                continue;
-            if (std::hypot(x - centers[i], y - cy) <= r + 4.0f)
-                return i;
+        float nearest = r + 4.0f;
+        for (int i = 0; i < kInlineControlCount; ++i) {
+            const float distance = std::hypot(logicalX - centers[i], logicalY - cy);
+            if (enabled[i] && distance <= nearest) {
+                nearest = distance;
+                hit = i;
+            }
         }
-        // 索引与 MediaControl 枚举同值（3=播放模式）。
-        if (media.canRepeat && std::hypot(x - centers[3], y - cy) <= r + 4.0f)
-            return 3;
-        return -1;
+        return hit;
+    }
+
+    bool hitSourceWheelArea(float x, float y) const {
+        if (!media.canSwitchSource || !onControl || isExpandedView() || drag_.pressed() ||
+            scene_ == DisplayScene::Idle || scene_ == DisplayScene::NoPlayback)
+            return false;
+        const bool cardStyle = hoverControlStyle_ == HoverControlStyle::Popup &&
+                               mediaPopupEnabledForScene();
+        const auto pinned = pinnedInlineControlsLayout();
+        if (!cardStyle && !pinned.active())
+            return false;
+
+        float logicalX = 0.0f;
+        float logicalY = 0.0f;
+        clientPointToLogicalDip(x, y, logicalX, logicalY);
+        if (isVerticalTaskbar()) {
+            const auto layout = verticalLayout();
+            return logicalX >= 0.0f && logicalX < layout.w &&
+                   logicalY >= layout.lyricY && logicalY < layout.lyricBottom;
+        }
+
+        int width = 0;
+        int height = 0;
+        logicalClientPixelSize(width, height);
+        if (logicalY < 0.0f || logicalY >= dip(height))
+            return false;
+        const auto area = lyricAreaForScene(scene_, width, height);
+        if (logicalX >= area.x && logicalX < area.x + area.w)
+            return true;
+
+        const float hostWidth = dip(width);
+        if (spectrumVisible_ && backgroundWaveEnabled()) {
+            const bool overPinnedControls = pinned.active() &&
+                logicalX >= pinned.boundsLeft && logicalX < pinned.boundsRight;
+            return !overPinnedControls && logicalX >= infoStartX() &&
+                   logicalX < backgroundWaveRight(hostWidth);
+        }
+        const float spectrumWidth = spectrumContentWForScene(scene_, hostWidth);
+        const float spectrumRight = hostWidth - embeddedResourceExtra() - kTextPadding;
+        return spectrumWidth > 0.0f && logicalX >= spectrumRight - spectrumWidth &&
+               logicalX < spectrumRight;
     }
 
     struct LyricTransitionSample {
@@ -6194,16 +6208,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         }
 
         if (showControls) {
-            float centers[5]{};
-            float cy = 0.0f;
-            float r = 0.0f;
-            if (inlineControlsLayout(centers, cy, r)) {
-                for (int i = 0; i < 3; ++i)
-                    drawButton(i, D2D1::Point2F(centers[i], cy), r);
-                if (media.canRepeat)
-                    drawRepeatButton(D2D1::Point2F(centers[3], cy), r);
-                drawVolumeButton(D2D1::Point2F(centers[4], cy), r);
-            }
+            drawInlineHoverControls();
         } else {
             if (showSpectrum && !isExpandedView()) {
                 const float spectrumW = spectrumContentWForScene(scene_, w);
@@ -6522,6 +6527,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             for (int i = 0; i < 3; ++i)
                 drawButton(i, layout.controlCenters[i], layout.controlRadius);
             drawVolumeButton(layout.controlCenters[3], layout.controlRadius);
+            if (media.canSwitchSource)
+                drawSwitchSourceButton(layout.controlCenters[4], layout.controlRadius);
         } else {
             drawVerticalLyrics(layout);
         }
@@ -6842,16 +6849,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             }
 
             if (showControls) {
-                float centers[5]{};
-                float cy = 0.0f;
-                float r = 0.0f;
-                if (inlineControlsLayout(centers, cy, r)) {
-                    for (int i = 0; i < 3; ++i)
-                        drawButton(i, D2D1::Point2F(centers[i], cy), r);
-                    if (media.canRepeat)
-                        drawRepeatButton(D2D1::Point2F(centers[3], cy), r);
-                    drawVolumeButton(D2D1::Point2F(centers[4], cy), r);
-                }
+                drawInlineHoverControls();
             } else {
                 if (showSpectrum && !isExpandedView()) {
                     const float spectrumW = spectrumContentWForScene(scene_, w);
@@ -7499,7 +7497,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return 0;
         }
         case WM_SIZE:
-            coverTip_.hide();
+            hoverTip_.hide();
             if (wp != SIZE_MINIMIZED) {
                 // SetWindowPos/Explorer/AppBar 都可能直接改变客户区；显式唤醒一帧，
                 // 避免 DXGI_SCALING_STRETCH 暂时拉伸旧帧直到下一句歌词出现。
@@ -7514,10 +7512,10 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return DefWindowProcW(hwnd, msg, wp, lp);
         case WM_SHOWWINDOW:
             if (!wp)
-                coverTip_.hide();
+                hoverTip_.hide();
             return DefWindowProcW(hwnd, msg, wp, lp);
         case WM_DPICHANGED:
-            coverTip_.hide();
+            hoverTip_.hide();
             if (isAppBarView() && appBar_.registered()) {
                 dpi_ = HIWORD(wp) ? HIWORD(wp) : LOWORD(wp);
                 renderer.setDpi(dpi_);
@@ -7560,7 +7558,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 POINT point{};
                 GetCursorPos(&point);
                 ScreenToClient(hwnd, &point);
-                if (hitAlbumCover(static_cast<float>(point.x), static_cast<float>(point.y))) {
+                const float x = static_cast<float>(point.x);
+                const float y = static_cast<float>(point.y);
+                const int control = isExpandedView() ? hitImmersiveControl(x, y)
+                                                     : hitInlineControl(x, y);
+                if (hitAlbumCover(x, y) || control == kInlineSourceControl) {
                     SetCursor(LoadCursorW(nullptr, IDC_HAND));
                     return TRUE;
                 }
@@ -7568,12 +7570,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return DefWindowProcW(hwnd, msg, wp, lp);
         case WM_MOUSEMOVE: {
             RECT coverBounds{};
-            if (!drag_.pressed() && pressedCoverSource_.empty() &&
+            const bool coverHovered = !drag_.pressed() && pressedCoverSource_.empty() &&
                 hitAlbumCover(static_cast<float>(GET_X_LPARAM(lp)),
-                              static_cast<float>(GET_Y_LPARAM(lp)), &coverBounds))
-                coverTip_.mouseMove(hwnd, coverBounds, wp, lp);
-            else
-                coverTip_.hide();
+                              static_cast<float>(GET_Y_LPARAM(lp)), &coverBounds);
+            if (coverHovered)
+                hoverTip_.mouseMove(hwnd, coverBounds, wp, lp, L"点击打开当前音乐播放器");
             POINT cursor{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
             ClientToScreen(hwnd, &cursor);
             if (drag_.pressed()) {
@@ -7609,13 +7610,18 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             if (viewMode_ == TaskbarViewMode::Immersive)
                 updateImmersiveYield(hitImmersiveControl(mouseX, mouseY, true));
             // 内嵌控件的音量按钮：悬停弹出音量滑块浮窗
-            const bool volHover = isExpandedView() ? immersiveHover == kImmersiveControlVolume
-                                                   : hitVolumeButton(mouseX, mouseY);
-            // 播放模式是 3、音量是 4，不能像以前那样让音量也返回 3，
-            // 否则鼠标停在播放模式上会同时被判成音量按钮，反复弹出音量浮窗造成闪烁。
-            int inlineHover = isExpandedView() ? -1 : hitButton(mouseX, mouseY);
-            if (inlineHover < 0 && volHover)
-                inlineHover = 4;
+            const int inlineHover = hitInlineControl(mouseX, mouseY);
+            if (!coverHovered) {
+                if ((isExpandedView() ? immersiveHover : inlineHover) == kInlineSourceControl) {
+                    RECT bounds{};
+                    GetClientRect(hwnd, &bounds);
+                    hoverTip_.mouseMove(hwnd, bounds, wp, lp, L"切换到下一个播放来源");
+                } else {
+                    hoverTip_.hide();
+                }
+            }
+            const bool volHover = (isExpandedView() ? immersiveHover : inlineHover) ==
+                                  kImmersiveControlVolume;
             if (inlineHover != inlineControlHover_) {
                 inlineControlHover_ = inlineHover;
                 requestFrameAndFlush();
@@ -7635,7 +7641,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return 0;
         }
         case WM_MOUSELEAVE:
-            coverTip_.hide();
+            hoverTip_.hide();
+            sourceWheelRemainder_ = 0;
             if (drag_.pressed() || drag_.dragging())
                 return 0;
             cancelImmersiveYield();
@@ -7652,13 +7659,12 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             // 滚轮消息使用屏幕坐标；音量图标上滚动直接调整应用音量（每格 ±2）
             POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
             ScreenToClient(hwnd, &pt);
-            const bool volumeHit =
-                isExpandedView()
-                    ? hitImmersiveControl(static_cast<float>(pt.x), static_cast<float>(pt.y)) ==
-                          kImmersiveControlVolume
-                    : hitVolumeButton(static_cast<float>(pt.x), static_cast<float>(pt.y));
+            const int delta = GET_WHEEL_DELTA_WPARAM(wp);
+            const bool volumeHit = hitVolumeButton(static_cast<float>(pt.x),
+                                                    static_cast<float>(pt.y));
             if (appVolume_.available && onAppVolume && volumeHit) {
-                const int steps = GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA;
+                sourceWheelRemainder_ = 0;
+                const int steps = delta / WHEEL_DELTA;
                 if (steps != 0) {
                     const auto request = AppVolumeRequest::create(
                         std::clamp(appVolume_.percent + steps * 2, 0, 100));
@@ -7674,15 +7680,26 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             }
             if (dockResourceExtrasVisible() &&
                 hitDockResourceArea(static_cast<float>(pt.x), static_cast<float>(pt.y))) {
-                const int steps = GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA;
+                const int steps = delta / WHEEL_DELTA;
                 if (steps != 0)
                     advanceDockResourcePage(steps);
                 return 0;
             }
+            if (hitSourceWheelArea(static_cast<float>(pt.x), static_cast<float>(pt.y))) {
+                const int total = sourceWheelRemainder_ + delta;
+                sourceWheelRemainder_ = total % WHEEL_DELTA;
+                const int steps = total / WHEEL_DELTA;
+                const auto action =
+                    steps > 0 ? MediaControl::PreviousSource : MediaControl::NextSource;
+                for (int i = 0; i < std::abs(steps); ++i)
+                    onControl(action);
+            } else {
+                sourceWheelRemainder_ = 0;
+            }
             return 0;
         }
         case WM_LBUTTONDOWN: {
-            coverTip_.hide();
+            hoverTip_.hide();
             pressedCoverSource_ =
                 hitAlbumCover(static_cast<float>(GET_X_LPARAM(lp)),
                               static_cast<float>(GET_Y_LPARAM(lp)))
@@ -7702,6 +7719,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             }
             POINT pressPoint{};
             GetCursorPos(&pressPoint);
+            inlineSourcePressed_ =
+                hitInlineControl(static_cast<float>(GET_X_LPARAM(lp)),
+                                 static_cast<float>(GET_Y_LPARAM(lp))) == kInlineSourceControl;
             drag_.press(pressPoint, -1);
             SetCapture(hwnd);
             if (inlineControlHover_ >= 0)
@@ -7709,6 +7729,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return 0;
         }
         case WM_LBUTTONUP: {
+            const bool sourceControlPressed = std::exchange(inlineSourcePressed_, false);
             const auto pressedSource = std::exchange(pressedCoverSource_, std::wstring{});
             if (isExpandedView()) {
                 const int pressed = immersiveControlPressed_;
@@ -7753,11 +7774,16 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             // 从封面外按下再移入，不把松开误认为封面点击或卡片点击。
             if (hitAlbumCover(mx, my))
                 return 0;
-            int btn = hitButton(mx, my);
+            const int btn = hitInlineControl(mx, my);
+            if (sourceControlPressed || btn == kInlineSourceControl) {
+                if (sourceControlPressed && hadPress && btn == kInlineSourceControl && onControl)
+                    onControl(MediaControl::NextSource);
+                return 0;
+            }
             // 循环按钮点击后先记下期望模式，等回读结果出来再显示提示词。
             if (btn == static_cast<int>(MediaControl::Repeat))
                 armRepeatHint(SmtcSnapshot::nextPlayMode(media.repeatMode));
-            if (btn >= 0 && onControl)
+            if (btn >= 0 && btn != kImmersiveControlVolume && onControl)
                 onControl(static_cast<MediaControl>(btn));
             // 卡片的当前页面自己判断是否为点击展开；这样无播放时的每日一言卡片
             // 可以独立于媒体控件样式使用点击展开。
@@ -7768,12 +7794,14 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         }
         case WM_CAPTURECHANGED:
             pressedCoverSource_.clear();
+            inlineSourcePressed_ = false;
             immersiveControlPressed_ = -1;
             if (drag_.pressed() || drag_.dragging())
                 finishLyricDrag(false);
             return 0;
         case WM_CANCELMODE: {
-            coverTip_.hide();
+            hoverTip_.hide();
+            inlineSourcePressed_ = false;
             const bool hadCoverPress = !pressedCoverSource_.empty();
             pressedCoverSource_.clear();
             const bool hadImmersivePress = immersiveControlPressed_ >= 0;
@@ -7838,7 +7866,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 onClose_();
             return 0;
         case WM_DESTROY:
-            coverTip_.reset();
+            hoverTip_.reset();
             pressedCoverSource_.clear();
             runtime_log::writef(L"[taskbar] WM_DESTROY (visible=%d)", isWindowVisible() ? 1 : 0);
             resetImmersivePresence();

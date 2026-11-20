@@ -226,6 +226,14 @@ void App::onControl(MediaControl c) {
         name = L"repeat";
         monitor.cycleRepeatMode();
         break;
+    case MediaControl::NextSource:
+        name = L"next-source";
+        monitor.cycleSource(1);
+        break;
+    case MediaControl::PreviousSource:
+        name = L"previous-source";
+        monitor.cycleSource(-1);
+        break;
     }
     runtime_log::writef(L"[action][media-control] command=%s", name);
 }
@@ -297,8 +305,7 @@ void App::onSmtcChanged() {
             snap.album);
         manualSearchTrackKey = key;
     }
-    const TrackChange change =
-        playback_.updateTrack(snap, presentation_.frame().media.sourceAppUserModelId);
+    const TrackChange change = playback_.updateTrack(snap);
     const bool trackChanged = change.trackChanged;
     const bool durationOnlyTrackUpdate = change.durationOnly;
     const bool songIdentityChanged = change.songIdentityChanged;
@@ -339,7 +346,7 @@ void App::onFrame() {
     }
     if (!snap.sessionAlive)
         return;
-    if (!snapshotMatchesTrackKey(snap, playback_.state().currentKey))
+    if (!playback_.matchesCurrentTrack(snap))
         return;
     const PlaybackPatch playback = presentation_.updatePlayback(snap);
     forEachHost([&](ILyricHost* host) {

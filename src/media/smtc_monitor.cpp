@@ -19,6 +19,7 @@
 #include <cwchar>
 #include <deque>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <thread>
 #include <utility>
@@ -162,6 +163,8 @@ struct SmtcMonitor::Impl {
         bool requested = false;
         bool rebuildWatchers = false;
         bool mediaPropertiesChanged = false;
+        std::optional<std::wstring> pendingSourceSelection;
+        int pendingSourceSteps = 0;
         std::deque<ControlAction> pendingControls;
     };
 
@@ -186,6 +189,7 @@ struct SmtcMonitor::Impl {
     mutable std::mutex mtx;
     // 会话选择、属性和进度适配只由刷新线程执行；封面线程仅提交图片字节。
     SmtcSnapshot snap;
+    SmtcSourceSelection sourceSelection;
     SmtcMonitor::ChangeCallback onChange;
 
     GlobalSystemMediaTransportControlsSessionManager::SessionsChanged_revoker sessionsRevoker;
@@ -229,6 +233,8 @@ struct SmtcMonitor::Impl {
     // 已暂停的音乐会话。只要该会话所属的音乐播放器仍在运行，就保留暂停快照；
     // 播放器退出后再等待一个稳定窗口，避免生命周期边界的瞬时空列表。
     std::chrono::steady_clock::time_point sessionLossCandidateSince;
+    std::chrono::steady_clock::time_point preferredSourceLossSince;
+    std::chrono::steady_clock::time_point nextSourceListRefresh;
     static constexpr auto kSessionLossStabilityWindow = std::chrono::milliseconds(1500);
 
     Impl() {
@@ -542,6 +548,31 @@ struct SmtcMonitor::Impl {
     void notify() {
         if (onChange)
             onChange();
+    }
+
+    bool canSwitchSource() const {
+        std::lock_guard<std::mutex> lk(mtx);
+        return sourceSelection.available.size() > 1;
+    }
+
+    void advanceSourceRequest(std::optional<std::wstring>& request, int steps) const {
+        if (steps == 0)
+            return;
+        std::lock_guard<std::mutex> lk(mtx);
+        const auto& sources = sourceSelection.available;
+        const int count = static_cast<int>(sources.size());
+        if (count < 2)
+            return;
+
+        const auto& preferredId = request ? *request : sourceSelection.preferredAppUserModelId;
+        const auto& sourceId = preferredId.empty() ? snap.sourceAppUserModelId : preferredId;
+        const auto current = std::find_if(sources.begin(), sources.end(), [&](const auto& source) {
+            return _wcsicmp(source.appUserModelId.c_str(), sourceId.c_str()) == 0;
+        });
+        const int index = current != sources.end() ? static_cast<int>(current - sources.begin())
+                                                   : (steps > 0 ? -1 : 0);
+        const int next = (index + steps % count + count) % count;
+        request = sources[next].appUserModelId;
     }
 
     // 控制请求投递到后台 MTA 轮询线程执行，避免跨套间操作 WinRT 会话，
@@ -936,17 +967,6 @@ struct SmtcMonitor::Impl {
                status == Status::Stopped;
     }
 
-    bool isResponsiveSession(const Session& candidate) const {
-        if (!candidate)
-            return false;
-        try {
-            auto info = candidate.GetPlaybackInfo();
-            return info && isResponsivePlaybackStatus(info.PlaybackStatus());
-        } catch (...) {
-            return false;
-        }
-    }
-
     void attach(const Session& selected) {
         try {
             timelineRevoker.revoke();
@@ -1019,21 +1039,32 @@ struct SmtcMonitor::Impl {
         }
     }
 
-    void updateSession(bool rebuildWatchers = false) {
+    void updateSession(bool rebuildWatchers, const std::optional<std::wstring>& sourceRequest) {
         Session found{ nullptr };
+        Session preferred{ nullptr };
         Session selectedSession{ nullptr };
         bool selectedSessionAlive = false;
         SmtcPlayerType selectedPlayer = SmtcPlayerType::Unknown;
         std::wstring selectedSourceId;
+        std::wstring preferredSourceId;
         {
             std::lock_guard<std::mutex> lk(mtx);
             selectedSession = session;
             selectedSessionAlive = snap.sessionAlive;
             selectedPlayer = snap.player;
             selectedSourceId = snap.sourceAppUserModelId;
+            if (sourceRequest)
+                sourceSelection.preferredAppUserModelId = *sourceRequest;
+            preferredSourceId = sourceSelection.preferredAppUserModelId;
         }
         const bool selectedGenericDisallowed =
             selectedPlayer == SmtcPlayerType::Generic && !isGenericSourceAllowed(selectedSourceId);
+        const bool selectedMatchesPreference =
+            selectedSessionAlive && !selectedGenericDisallowed && !preferredSourceId.empty() &&
+            _wcsicmp(selectedSourceId.c_str(), preferredSourceId.c_str()) == 0;
+        bool selectedPreferenceEnded = false;
+        if (sourceRequest)
+            preferredSourceLossSince = {};
         if (manager) {
             try {
                 // Windows 已经维护了“用户当前最可能想控制”的媒体会话。
@@ -1053,109 +1084,178 @@ struct SmtcMonitor::Impl {
                 }
 
                 smtc::SmtcSessionIdentity currentIdentity;
-                bool currentSessionResponsive = false;
+                using Status = GlobalSystemMediaTransportControlsSessionPlaybackStatus;
+                Status currentStatus = Status::Closed;
                 if (current && currentListed) {
                     currentIdentity = identifySession(current);
-                    if (currentIdentity.player != SmtcPlayerType::Unknown) {
-                        try {
-                            auto info = current.GetPlaybackInfo();
-                            if (info) {
-                                const auto status = info.PlaybackStatus();
-                                currentSessionResponsive = isResponsivePlaybackStatus(status);
-                                if (smtc::mapStatus(status) == PlaybackStatus::Playing)
-                                    found = current;
-                            }
-                        } catch (...) {
-                        }
+                    try {
+                        if (auto info = current.GetPlaybackInfo())
+                            currentStatus = info.PlaybackStatus();
+                    } catch (...) {
                     }
+                    if (currentIdentity.player != SmtcPlayerType::Unknown &&
+                        currentStatus == Status::Playing)
+                        found = current;
                 }
 
+                Session firstIdentified{ nullptr };
+                bool selectedResponsive = false;
                 if (sessions) {
+                    const auto now = std::chrono::steady_clock::now();
+                    const bool refreshSourceList = rebuildWatchers || sourceRequest ||
+                                                   now >= nextSourceListRefresh;
+                    std::vector<SmtcPlaybackSource> available;
+                    bool preferredPlaying = false;
+                    bool preferredIsSelected = false;
                     for (auto const& candidate : sessions)
                         recordObservedGenericSession(candidate);
                     if (rebuildWatchers)
                         watchSessions(sessions);
-                    if (!found) {
-                        // 当前会话可能暂停，而另一个受支持会话正在播放。
-                        for (auto const& candidate : sessions) {
-                            const auto identity = identifySession(candidate);
-                            if (identity.player == SmtcPlayerType::Unknown)
+                    for (auto const& candidate : sessions) {
+                        if (!candidate)
+                            continue;
+                        const bool isCurrent = currentListed && smtc::sameSession(candidate, current);
+                        const bool isSelected = smtc::sameSession(candidate, selectedSession);
+                        const bool isSelectedPreference = isSelected && selectedMatchesPreference;
+                        if (!refreshSourceList && found) {
+                            if (preferredSourceId.empty() || preferredIsSelected)
+                                break;
+                            // 自动候选已找到，此轮只需继续查找手动指定的来源。
+                            if (!isSelectedPreference &&
+                                _wcsicmp(sessionSourceAppUserModelId(candidate).c_str(),
+                                         preferredSourceId.c_str()) != 0)
                                 continue;
+                        }
+                        auto identity = isCurrent ? currentIdentity : identifySession(candidate);
+                        if (identity.player == SmtcPlayerType::Unknown &&
+                            (!isSelected || !selectedSessionAlive || selectedGenericDisallowed))
+                            continue;
+
+                        Status status = currentStatus;
+                        if (!isCurrent) {
+                            status = Status::Closed;
                             try {
-                                auto info = candidate.GetPlaybackInfo();
-                                if (info &&
-                                    smtc::mapStatus(info.PlaybackStatus()) == PlaybackStatus::Playing) {
-                                    found = candidate;
-                                    break;
-                                }
+                                if (auto info = candidate.GetPlaybackInfo())
+                                    status = info.PlaybackStatus();
                             } catch (...) {
                             }
                         }
+                        if (!isResponsivePlaybackStatus(status))
+                            continue;
+                        if (isSelected)
+                            selectedResponsive = true;
+
+                        const bool playing = status == Status::Playing;
+                        if (identity.player != SmtcPlayerType::Unknown) {
+                            if (!firstIdentified)
+                                firstIdentified = candidate;
+                            // 当前会话可能暂停，而另一个受支持会话正在播放。
+                            if (!found && playing)
+                                found = candidate;
+                        } else if (isSelectedPreference ||
+                                   status == Status::Opened || status == Status::Changing) {
+                            // 切歌时同一会话的播放状态可读，但媒体属性可能暂时缺失。
+                            identity.player = selectedPlayer;
+                            identity.sourceAppUserModelId = selectedSourceId;
+                        }
+                        if (identity.player == SmtcPlayerType::Unknown ||
+                            identity.sourceAppUserModelId.empty())
+                            continue;
+
+                        const auto sameSource = [&](const std::wstring& id) {
+                            return _wcsicmp(id.c_str(), identity.sourceAppUserModelId.c_str()) == 0;
+                        };
+                        if (!preferredSourceId.empty() && sameSource(preferredSourceId) &&
+                            (!preferred || isSelected ||
+                             (!preferredIsSelected && playing && !preferredPlaying))) {
+                            preferred = candidate;
+                            preferredPlaying = playing;
+                            preferredIsSelected = isSelected;
+                        }
+                        if (refreshSourceList &&
+                            std::none_of(available.begin(), available.end(), [&](const auto& source) {
+                                return sameSource(source.appUserModelId);
+                            }))
+                            available.push_back({std::move(identity.sourceAppUserModelId),
+                                                 identity.player});
+                    }
+                    bool waitingForPreferred = false;
+                    if (preferred) {
+                        found = preferred;
+                        preferredSourceLossSince = {};
+                    } else if (!preferredSourceId.empty()) {
+                        const auto preferredPlayer = player_source::resolvePlayerType(preferredSourceId);
+                        const bool allowed = preferredPlayer != SmtcPlayerType::Generic ||
+                                             isGenericSourceAllowed(preferredSourceId);
+                        if (allowed) {
+                            const auto checkedAt = std::chrono::steady_clock::now();
+                            if (preferredSourceLossSince == std::chrono::steady_clock::time_point{})
+                                preferredSourceLossSince = checkedAt;
+                            waitingForPreferred =
+                                checkedAt - preferredSourceLossSince < kSessionLossStabilityWindow;
+                            // 部分播放器运行中会把暂停或切歌的会话暂时移出列表。
+                            if (!waitingForPreferred && selectedMatchesPreference &&
+                                playerProcessAlive(selectedPlayer)) {
+                                waitingForPreferred = true;
+                                preferredSourceLossSince = checkedAt;
+                            }
+                        }
+                        if (waitingForPreferred) {
+                            if (refreshSourceList)
+                                available.push_back({preferredSourceId, preferredPlayer});
+                        } else {
+                            selectedPreferenceEnded = selectedMatchesPreference;
+                            preferredSourceId.clear();
+                            preferredSourceLossSince = {};
+                            nextSourceListRefresh = {};
+                        }
+                    }
+                    if (refreshSourceList) {
+                        std::sort(available.begin(), available.end(), [](const auto& a, const auto& b) {
+                            return _wcsicmp(a.appUserModelId.c_str(), b.appUserModelId.c_str()) < 0;
+                        });
+                    }
+                    {
+                        std::lock_guard<std::mutex> lk(mtx);
+                        sourceSelection.preferredAppUserModelId = preferredSourceId;
+                        if (refreshSourceList)
+                            sourceSelection.available = std::move(available);
+                    }
+                    // 会话增减和手动切换立即刷新菜单；健康检查补足无事件的状态变化。
+                    if (refreshSourceList)
+                        nextSourceListRefresh = std::chrono::steady_clock::now() +
+                                                std::chrono::seconds(1);
+                    if (waitingForPreferred) {
+                        sessionLossCandidateSince = {};
+                        return;
                     }
                 }
-
                 // 暂停或停止不是切换理由：已选中的会话仍存在时保持选中。否则网易云暂停后，
                 // Windows 当前会话若指向另一个暂停的播放器（如 QQ 音乐），显示会跳走，
                 // 后续控制按钮也会作用到错误的会话上。当通用 SMTC 开关关闭或当前应用被规则排除时不再保留。
-                if (!found && selectedSessionAlive && !selectedGenericDisallowed && sessions) {
-                    for (auto const& candidate : sessions) {
-                        if (smtc::sameSession(selectedSession, candidate) &&
-                            isResponsiveSession(candidate)) {
-                            found = candidate;
-                            break;
-                        }
-                    }
-                }
+                if (!found && selectedSessionAlive && !selectedGenericDisallowed &&
+                    selectedResponsive)
+                    found = selectedSession;
 
-                if (!found && currentListed && currentSessionResponsive &&
+                if (!found && currentListed && isResponsivePlaybackStatus(currentStatus) &&
                     currentIdentity.player != SmtcPlayerType::Unknown)
                     found = current;
 
-                // 网易云暂停/恢复时可能短暂上报 Changing/Opened 状态。适配器会把这类
-                // 非稳定状态映射为 Other，识别结果暂时变成 Unknown；但只要仍是此前
-                // 已选中的同一会话，就不能在这个过渡窗口把会话解绑，否则主程序会先
-                // 收到空快照并隐藏任务栏窗口，下一条 Playing 事件到达时再整体显示。
-                // 保留条件必须仅限 Opened/Changing 这种真正的过渡态：Playing/Paused
-                // 是稳定态，此时识别失败只可能是属性 RPC 已随播放器退出而失败
-                // （RPC_E_SERVERUNAVAILABLE）。若把这类已失效会话保留下来，
-                // sameSession 判等会让下面跳过 attach/refreshAll，且死会话不会再
-                // 产生任何事件，歌词就永久停在网易云退出的前一刻。
-                if (!found && selectedSessionAlive && currentListed &&
-                    smtc::sameSession(selectedSession, current) && current) {
-                    bool transient = false;
-                    try {
-                        auto info = current.GetPlaybackInfo();
-                        if (info) {
-                            const auto status = info.PlaybackStatus();
-                            transient =
-                                status == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Opened ||
-                                status == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Changing;
-                        }
-                    } catch (...) {
-                        // 会话已经无法读取时不能继续保留旧会话；否则网易云退出后
-                        // 会一直显示退出前的最后一帧歌词。
-                    }
-                    if (transient)
-                        found = current;
-                }
-
-                // 已经有选中会话时，如果它在退出/切换边界上失效，不能再从
-                // 会话列表中随便挑一个同播放器的暂停会话把旧状态续回来；否则
-                // 网易云退出后会重新选中旧会话，歌词就会停在最后一刻。只有在
-                // 尚未选中过任何会话时，才用已识别的会话作为初始候选。
-                if (!found && !selectedSessionAlive && sessions) {
-                    for (auto const& candidate : sessions) {
-                        if (identifySession(candidate).player != SmtcPlayerType::Unknown) {
-                            found = candidate;
-                            break;
-                        }
-                    }
-                }
+                // 初次绑定或手动来源已结束时，最后才用列表中第一个可用会话。
+                if (!found && (!selectedSessionAlive || selectedPreferenceEnded))
+                    found = firstIdentified;
             } catch (...) {
             }
         }
 
-        if (!found && selectedSessionAlive && selectedSession && !selectedGenericDisallowed) {
+        // 枚举失败时无法确认手动来源已经消失。
+        if (!preferredSourceId.empty() && !preferred) {
+            preferredSourceLossSince = {};
+            return;
+        }
+
+        if (!found && selectedSessionAlive && selectedSession && !selectedGenericDisallowed &&
+            !selectedPreferenceEnded) {
             // 汽水、Spotify 和椒盐音乐的展示以 SMTC 会话为准，会话消失后不能仅凭进程维持展示。
             // 仍经过下面的稳定窗口，短暂的会话重建不会立即清空展示。
             if (selectedPlayer != SmtcPlayerType::Soda &&
@@ -1235,6 +1335,10 @@ struct SmtcMonitor::Impl {
         SmtcSnapshot snapshotCopy;
         {
             std::lock_guard<std::mutex> lk(mtx);
+            if (!sourceSelection.preferredAppUserModelId.empty() &&
+                _wcsicmp(sourceSelection.preferredAppUserModelId.c_str(),
+                         snap.sourceAppUserModelId.c_str()) != 0)
+                return;
             current = session;
             snapshotCopy = snap;
         }
@@ -1368,6 +1472,8 @@ struct SmtcMonitor::Impl {
                 bool rebuildWatchers = false;
                 bool mediaPropertiesChanged = false;
                 std::deque<ControlAction> controls;
+                std::optional<std::wstring> sourceRequest;
+                int sourceSteps = 0;
                 {
                     std::unique_lock<std::mutex> lk(refreshSignal->mtx);
                     refreshSignal->cv.wait_for(lk, std::chrono::milliseconds(100), [this] {
@@ -1382,14 +1488,32 @@ struct SmtcMonitor::Impl {
                     refreshSignal->rebuildWatchers = false;
                     refreshSignal->mediaPropertiesChanged = false;
                     controls.swap(refreshSignal->pendingControls);
+                    sourceRequest.swap(refreshSignal->pendingSourceSelection);
+                    sourceSteps = std::exchange(refreshSignal->pendingSourceSteps, 0);
                 }
-                while (!controls.empty()) {
-                    executeControl(controls.front());
-                    controls.pop_front();
-                }
+                advanceSourceRequest(sourceRequest, sourceSteps);
+                const auto dispatchControls = [&] {
+                    for (const auto action : controls)
+                        executeControl(action);
+                };
+                if (!sourceRequest)
+                    dispatchControls();
                 try {
-                    updateSession(rebuildWatchers);
+                    const bool couldSwitchSource = canSwitchSource();
+                    updateSession(rebuildWatchers, sourceRequest);
                     refreshAll(mediaPropertiesChanged);
+                    if (canSwitchSource() != couldSwitchSource)
+                        notify();
+                    if (sourceRequest) {
+                        std::wstring activeSourceId;
+                        {
+                            std::lock_guard<std::mutex> lk(mtx);
+                            activeSourceId = snap.sourceAppUserModelId;
+                        }
+                        if (sourceRequest->empty() ||
+                            _wcsicmp(sourceRequest->c_str(), activeSourceId.c_str()) == 0)
+                            dispatchControls();
+                    }
                 } catch (...) {
                 }
             }
@@ -1438,9 +1562,42 @@ std::vector<std::wstring> SmtcMonitor::observedGenericSources() const {
     return impl_->observedGenericSourceIds;
 }
 
+SmtcSourceSelection SmtcMonitor::sourceSelection() const {
+    std::lock_guard<std::mutex> lk(impl_->mtx);
+    return impl_->sourceSelection;
+}
+
+void SmtcMonitor::selectSource(std::wstring appUserModelId) {
+    auto& signal = *impl_->refreshSignal;
+    {
+        std::lock_guard<std::mutex> lk(signal.mtx);
+        if (signal.stopping)
+            return;
+        signal.pendingSourceSelection = std::move(appUserModelId);
+        signal.pendingSourceSteps = 0;
+        signal.pendingControls.clear();
+        signal.requested = true;
+    }
+    signal.cv.notify_one();
+}
+
+void SmtcMonitor::cycleSource(int steps) {
+    auto& signal = *impl_->refreshSignal;
+    {
+        std::lock_guard<std::mutex> lk(signal.mtx);
+        if (signal.stopping)
+            return;
+        signal.pendingSourceSteps += steps;
+        signal.pendingControls.clear();
+        signal.requested = true;
+    }
+    signal.cv.notify_one();
+}
+
 SmtcSnapshot SmtcMonitor::snapshot() const {
     std::lock_guard<std::mutex> lk(impl_->mtx);
     SmtcSnapshot source = impl_->snap;
+    source.canSwitchSource = impl_->sourceSelection.available.size() > 1;
     if (!source.sessionAlive)
         return source;
     if (auto* adapter = impl_->adapterFor(source.player))

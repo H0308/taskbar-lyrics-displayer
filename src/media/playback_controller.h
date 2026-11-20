@@ -73,7 +73,8 @@ public:
     const PlaybackState& state() const { return state_; }
     LyricProvider& lyricProvider() { return provider; }
     void setTimerWindow(HWND window) { timerWindow_ = window; }
-    TrackChange updateTrack(const SmtcSnapshot& snap, const std::wstring& previousSourceAppId);
+    TrackChange updateTrack(const SmtcSnapshot& snap);
+    bool matchesCurrentTrack(const SmtcSnapshot& snap) const;
     void closeSession();
     void applyManualLyrics(LyricResult result, const SmtcSnapshot& snap);
     bool extractAlbumColor();
@@ -102,6 +103,7 @@ private:
     void requestMusicBrainzCover(const SmtcSnapshot& snap);
 
     PlaybackState state_;
+    std::wstring currentSourceAppId_;
     DWORD mainThread_ = GetCurrentThreadId();
     HWND timerWindow_ = nullptr;
     std::function<SmtcSnapshot()> snapshot_;

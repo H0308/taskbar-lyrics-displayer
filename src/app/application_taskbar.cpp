@@ -402,7 +402,7 @@ void App::configureTaskbarHostCallbacks(TaskbarHost* host, bool primary) {
     host->setControlCallback([this](MediaControl c) { onControl(c); });
     host->setImmersiveExitCallback([this] { applyTaskbarViewMode(0); });
     host->setDockQuickAppsCallback([this](POINT pt) { showDockQuickApps(pt); });
-    host->setImmersiveMenuCallback([this](POINT pt) { showTrayMenu(pt); });
+    host->setImmersiveMenuCallback([this](POINT pt) { showTrayMenu(pt, false); });
     host->setContextMenuCallback([this, host](POINT pt) { showTaskbarMenu(pt, host); });
     host->setAnchorChangedCallback([this, host](TaskbarAnchorSpec anchor) {
         if (isLiveTaskbarHost(host))

@@ -4,15 +4,16 @@
 #include <cmath>
 
 // 原生提示的窗口与消息均属于任务栏 UI 线程。
-class TaskbarCoverTip {
+class TaskbarTooltip {
 public:
-    void mouseMove(HWND owner, const RECT& rect, WPARAM keys, LPARAM point);
+    void mouseMove(HWND owner, const RECT& rect, WPARAM keys, LPARAM point, const wchar_t* label);
     void hide();
     void reset();
 
 private:
     HWND hwnd_ = nullptr;
     RECT rect_{};
+    const wchar_t* label_ = nullptr;
     bool active_ = false;
 };
 

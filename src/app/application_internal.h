@@ -136,6 +136,8 @@ constexpr int kCmdTaskbarMonitorBase = 151;
 constexpr int kDockQuickAppCommandBase = 21000;
 constexpr int kCmdTaskbarAnchorBase = 22000;
 constexpr int kCmdTaskbarAnchorMax = 64;
+constexpr int kCmdPlaybackSourceAuto = 23000;
+constexpr int kCmdPlaybackSourceBase = kCmdPlaybackSourceAuto + 1;
 constexpr int kUpdatePromptReleasePage = 1;
 constexpr int kUpdatePromptDownload = 2;
 constexpr int kUpdatePromptAbout = 3;
@@ -214,6 +216,7 @@ private:
     std::vector<std::pair<int, std::wstring>> taskbarMonitorMenuItems_;
     std::unordered_map<const TaskbarHost*, std::vector<TaskbarAnchorOption>> taskbarAnchorOptions_;
     std::vector<TaskbarAnchorSpec> activeTaskbarAnchorMenuSpecs_;
+    std::vector<std::wstring> playbackSourceMenuIds_;
     bool taskbarAllowOverlap_ = false;
     bool taskbarNoSpaceClosePending_ = false;
     bool taskbarRebuildPending_ = false;
@@ -613,9 +616,10 @@ private:
     void destroyTray();
     void updateTrayIcon();
     std::vector<fluent::FluentMenuItem> buildMenuItems(bool fullTrayMenu,
-                                                       const TaskbarHost* menuHost = nullptr);
+                                                       const TaskbarHost* menuHost,
+                                                       bool includePlaybackSources);
     void showTrayMenu();
-    void showTrayMenu(POINT screenPt);
+    void showTrayMenu(POINT screenPt, bool includePlaybackSources = true);
     void showTaskbarMenu(POINT screenPt, const TaskbarHost* menuHost = nullptr);
     void showDockQuickApps(POINT screenPt);
     std::vector<fluent::FluentMenuItem> buildDockQuickAppItems();

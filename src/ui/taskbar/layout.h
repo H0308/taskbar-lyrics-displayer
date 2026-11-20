@@ -13,6 +13,8 @@ inline constexpr float kVerticalRailPadding = 4.0f;
 inline constexpr float kVerticalCoverGap = 6.0f;
 inline constexpr float kVerticalControlsGap = 4.0f;
 inline constexpr float kVerticalLyricGap = 6.0f;
+inline constexpr int kInlineSourceControl = static_cast<int>(MediaControl::NextSource);
+inline constexpr int kInlineControlCount = kInlineSourceControl + 1;
 struct LayoutMetrics {
     float w = 0.0f;
     float h = 0.0f;
@@ -37,6 +39,7 @@ struct PinnedInlineControlsInput {
     float spectrumWidth = 0.0f;
     float coverSlotWidth = 0.0f;
     float lyricFontSize = 0.0f;
+    bool canSwitchSource = false;
 };
 
 struct PinnedInlineControlsLayout {
@@ -46,8 +49,8 @@ struct PinnedInlineControlsLayout {
     float centerY = 0.0f;
     float boundsLeft = 0.0f;
     float boundsRight = 0.0f;
-    bool visible[5]{};
-    float centerX[5]{};
+    bool visible[kInlineControlCount]{};
+    float centerX[kInlineControlCount]{};
 
     bool active() const { return tier != PinnedInlineTier::FallbackHover && slotWidth > 0.0f; }
 };
@@ -62,7 +65,7 @@ struct VerticalLayout {
     float lyricBottom = 0.0f;
     bool showControls = false;
     float controlRadius = 0.0f;
-    D2D1_POINT_2F controlCenters[4]{};
+    D2D1_POINT_2F controlCenters[5]{};
 };
 
 struct HorizontalLayoutInput {
@@ -100,11 +103,15 @@ DynamicBackgroundRegions dynamicBackgroundRegions(
 float expandedSpectrumWidth(float hostWidth);
 float expandedClockWidth(float hostWidth);
 ExpandedSideLayout expandedSideLayout(float hostWidth, bool dock, float resourceWidth);
-float pinnedInlineControlsIdealWidth(float heightDip, bool canRepeat, float lyricFontSize = 0.0f);
+float pinnedInlineControlsIdealWidth(float heightDip, bool canRepeat, float lyricFontSize = 0.0f,
+                                     bool canSwitchSource = false);
 PinnedInlineControlsLayout planPinnedInlineControls(const PinnedInlineControlsInput& input);
+void layoutInlineHoverControls(float left, float width, float height, bool canRepeat,
+                               bool canSwitchSource, float (&centers)[kInlineControlCount],
+                               float& cy, float& radius);
 
 // 纯几何计算。渲染与命中检测读取同一份布局，窗口句柄和设备资源不进入计算。
 LayoutMetrics horizontalLayout(const HorizontalLayoutInput& input);
 VerticalLayout verticalLayout(float width, float height, DisplayScene scene, bool albumCoverVisible,
-                              bool showControls);
+                              bool showControls, bool canSwitchSource = false);
 } // namespace taskbar_detail

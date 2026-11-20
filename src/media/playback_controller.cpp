@@ -71,6 +71,7 @@ void PlaybackController::closeSession() {
     if (!state_.currentKey.empty() || state_.lastStatus != PlaybackStatus::Stopped)
         runtime_log::writef(L"[smtc] %s session closed", playerName(state_.lastPlayer_));
     state_.currentKey.clear();
+    currentSourceAppId_.clear();
     state_.currentTitle.clear();
     state_.currentArtist.clear();
     state_.currentDurationMs = 0;
@@ -82,15 +83,26 @@ void PlaybackController::closeSession() {
     state_.hasAlbumColor_ = false;
 }
 
-TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap,
-                                            const std::wstring& previousSourceAppId) {
+bool PlaybackController::matchesCurrentTrack(const SmtcSnapshot& snap) const {
+    return snap.sourceAppUserModelId == currentSourceAppId_ &&
+           snapshotMatchesTrackKey(snap, state_.currentKey);
+}
+
+TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap) {
     const SmtcPlayerType previousPlayer = state_.lastPlayer_;
     state_.lastPlayer_ = snap.player;
+    const bool sourceChanged = snap.sourceAppUserModelId != currentSourceAppId_;
+    if (sourceChanged) {
+        currentSourceAppId_ = snap.sourceAppUserModelId;
+        cancelLyricDebounce();
+        ++state_.requestGeneration_;
+    }
     const std::wstring key = makeTrackKey(snap);
     // 切入 Spotify 或椒盐音乐时即使曲目文案还没到，也要释放前一个播放器的歌词和封面。
     const bool enteringSampled = player_source::usesMetadataLyricPath(snap.player) &&
                                  snap.player != previousPlayer;
-    const bool trackChanged = key != state_.currentKey && (!snap.title.empty() || enteringSampled);
+    const bool trackChanged =
+        sourceChanged || (key != state_.currentKey && (!snap.title.empty() || enteringSampled));
     // 同一播放器、来源和歌曲文案下的时长补齐保留封面及专辑色。
     // 汽水和元数据路径播放器（Spotify／椒盐音乐）的曲目与时间线分别更新，已知时长也可能需要修正。
     const auto matchesPreviousDurationKey = [&]() {
@@ -102,11 +114,11 @@ TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap,
         return state_.currentKey == makeTrackKey(previousDurationSnap);
     };
     const bool durationOnlyTrackUpdate =
-        trackChanged && snap.player == previousPlayer && !snap.timelineStale &&
+        trackChanged && !sourceChanged && snap.player == previousPlayer && !snap.timelineStale &&
         (state_.currentDurationMs <= 0 || snap.player == SmtcPlayerType::Soda ||
          player_source::usesMetadataLyricPath(snap.player)) &&
         snap.durationMs > 0 && snap.title == state_.currentTitle &&
-        snap.artist == state_.currentArtist && snap.sourceAppUserModelId == previousSourceAppId &&
+        snap.artist == state_.currentArtist &&
         matchesPreviousDurationKey();
     // QQ 的曲目键包含时长，切歌后时间线更新会让 trackChanged 再触发一次；
     // 切歌弹窗只认标题/艺术家身份变化，避免同一首歌弹两次。
@@ -154,7 +166,10 @@ TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap,
         // 跟随专辑开启时不回退配置色：沿用上一首的专辑色直到新封面取色完成，
         // 避免歌词加载窗口期配置色闪一下再切回专辑色
         state_.lyricLoading_ = !player_source::usesMetadataLyricPath(snap.player);
-        if (snap.player == SmtcPlayerType::SaltPlayer) {
+        if (snap.title.empty() && snap.neteaseSongId.empty() && sourceChanged) {
+            state_.lyricLoading_ = false;
+            state_.lyricRequestStale_ = false;
+        } else if (snap.player == SmtcPlayerType::SaltPlayer) {
             cancelLyricDebounce();
             if (!snap.title.empty()) {
                 // 椒盐音乐切歌时常先更新时长、几十毫秒后再更新歌名，短防抖合并同一批事件。
@@ -443,7 +458,7 @@ void PlaybackController::onLyricDebounce() {
         return;
     state_.lyricDebounceArmed_ = false;
     SmtcSnapshot snap = snapshot_();
-    if (!snap.sessionAlive ||
+    if (!snap.sessionAlive || snap.sourceAppUserModelId != currentSourceAppId_ ||
         (snap.player != SmtcPlayerType::QQMusic && snap.player != SmtcPlayerType::SaltPlayer))
         return;
     if (snap.title.empty()) {
@@ -479,7 +494,7 @@ void PlaybackController::onLyricReady(std::unique_ptr<LyricPayload> payload) {
         payload->requestGeneration != state_.requestGeneration_)
         return;
     SmtcSnapshot snap = snapshot_();
-    if (!snapshotMatchesTrackKey(snap, state_.currentKey))
+    if (!matchesCurrentTrack(snap))
         return;
 
     state_.lyricLoading_ = false;
@@ -536,7 +551,7 @@ void PlaybackController::onQqCoverInfoReady(std::unique_ptr<QqCoverInfoPayload> 
         payload->requestGeneration != state_.requestGeneration_)
         return;
     SmtcSnapshot snap = snapshot_();
-    if (!snapshotMatchesTrackKey(snap, state_.currentKey) ||
+    if (!matchesCurrentTrack(snap) ||
         (snap.thumbnail && !snap.thumbnail->empty()) ||
         (state_.lastSmtcThumbnail && !state_.lastSmtcThumbnail->empty()) ||
         (state_.lastCover_ && !state_.lastCover_->empty()))
@@ -555,7 +570,7 @@ void PlaybackController::onCoverReady(std::unique_ptr<CoverPayload> payload) {
         payload->requestGeneration != state_.requestGeneration_)
         return; // 已切歌或重新加载，丢弃过期封面
     SmtcSnapshot snap = snapshot_();
-    if (!snapshotMatchesTrackKey(snap, state_.currentKey))
+    if (!matchesCurrentTrack(snap))
         return;
     if ((snap.thumbnail && !snap.thumbnail->empty()) ||
         (state_.lastSmtcThumbnail && !state_.lastSmtcThumbnail->empty()))
@@ -578,7 +593,8 @@ void PlaybackController::onCoverReady(std::unique_ptr<CoverPayload> payload) {
 void PlaybackController::reloadCurrentQqLyrics(bool forceOnline, bool forceLocal,
                                                bool persistOrder) {
     const SmtcSnapshot snap = snapshot_();
-    if (!snap.sessionAlive || snap.player != SmtcPlayerType::QQMusic || state_.currentKey.empty() ||
+    if (snap.sourceAppUserModelId != currentSourceAppId_ || !snap.sessionAlive ||
+        snap.player != SmtcPlayerType::QQMusic || state_.currentKey.empty() ||
         snap.title.empty() || snap.timelineStale || makeTrackKey(snap) != state_.currentKey ||
         (forceOnline && !state_.currentLyricsFromLocal_) ||
         (forceLocal && (state_.currentLyricsFromLocal_ || state_.currentLyricsFromManual_)))

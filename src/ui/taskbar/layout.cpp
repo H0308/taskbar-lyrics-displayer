@@ -16,7 +16,7 @@ struct PinnedTierSpec {
 };
 
 PinnedTierSpec buildPinnedTierSpec(PinnedInlineTier tier, float heightDip, bool canRepeat,
-                                   float lyricFontSize) {
+                                   float lyricFontSize, bool canSwitchSource) {
     PinnedTierSpec spec{};
     spec.tier = tier;
     if (heightDip <= 0.0f || tier == PinnedInlineTier::FallbackHover)
@@ -27,6 +27,11 @@ PinnedTierSpec buildPinnedTierSpec(PinnedInlineTier tier, float heightDip, bool 
     const float targetFullR =
         lyricFontSize > 0.0f ? lyricFontSize * 0.74f : heightDip * 0.29f;
     const float fullR = std::clamp(targetFullR, minFullR, maxFullR);
+    const auto finish = [canSwitchSource](PinnedTierSpec& tierSpec, float sidePadding) {
+        if (canSwitchSource)
+            tierSpec.span += tierSpec.spacing + tierSpec.radius * 0.14f;
+        tierSpec.slotWidth = tierSpec.span + tierSpec.radius * 2.0f + sidePadding * 2.0f;
+    };
 
     if (tier == PinnedInlineTier::Full) {
         spec.radius = fullR;
@@ -42,7 +47,7 @@ PinnedTierSpec buildPinnedTierSpec(PinnedInlineTier tier, float heightDip, bool 
             spec.volumeGap = spec.spacing + spec.radius * 0.26f;
             spec.span = 2.0f * spec.spacing + spec.volumeGap;
         }
-        spec.slotWidth = spec.span + spec.radius * 2.0f + sidePad * 2.0f;
+        finish(spec, sidePad);
         return spec;
     }
 
@@ -62,13 +67,13 @@ PinnedTierSpec buildPinnedTierSpec(PinnedInlineTier tier, float heightDip, bool 
             spec.volumeGap = spec.spacing + spec.radius * 0.24f;
             spec.span = 2.0f * spec.spacing + spec.volumeGap;
         }
-        spec.slotWidth = spec.span + spec.radius * 2.0f + sidePad * 2.0f;
+        finish(spec, sidePad);
         return spec;
     }
 
     spec.spacing = spec.radius * 2.15f;
     spec.span = 2.0f * spec.spacing;
-    spec.slotWidth = spec.span + spec.radius * 2.0f + sidePad * 2.0f;
+    finish(spec, sidePad);
     return spec;
 }
 } // namespace
@@ -152,7 +157,7 @@ LayoutMetrics horizontalLayout(const HorizontalLayoutInput& input) {
 }
 
 VerticalLayout verticalLayout(float width, float height, DisplayScene scene, bool albumCoverVisible,
-                              bool showControls) {
+                              bool showControls, bool canSwitchSource) {
 
     VerticalLayout layout;
     layout.w = width;
@@ -181,7 +186,9 @@ VerticalLayout verticalLayout(float width, float height, DisplayScene scene, boo
         const float transportGap = std::max(kVerticalControlsGap, transportPitch - diameter);
         // 音量是独立的辅助操作，与上一首/播放/下一首之间留出更明显的层级间距。
         const float volumeGap = transportGap + layout.controlRadius * 0.9f;
-        const float blockH = diameter * 4.0f + transportGap * 2.0f + volumeGap;
+        const float sourcePitch = diameter + transportGap;
+        const float blockH = diameter * 4.0f + transportGap * 2.0f + volumeGap +
+                             (canSwitchSource ? sourcePitch : 0.0f);
         const float controlsTop = layout.lyricY;
         const float controlsBottom = layout.h - pad;
         const float freeSpace = controlsBottom - controlsTop - blockH;
@@ -193,6 +200,9 @@ VerticalLayout verticalLayout(float width, float height, DisplayScene scene, boo
                     D2D1::Point2F(layout.w * 0.5f, firstY + i * transportPitch);
             layout.controlCenters[3] = D2D1::Point2F(
                 layout.w * 0.5f, firstY + transportPitch * 2.0f + diameter + volumeGap);
+            if (canSwitchSource)
+                layout.controlCenters[4] =
+                    D2D1::Point2F(layout.w * 0.5f, layout.controlCenters[3].y + sourcePitch);
             layout.lyricBottom = groupTop - kVerticalLyricGap;
         } else {
             layout.showControls = false;
@@ -223,10 +233,12 @@ ExpandedSideLayout expandedSideLayout(float w, bool dock, float resourceWidth) {
     return result;
 }
 
-float pinnedInlineControlsIdealWidth(float heightDip, bool canRepeat, float lyricFontSize) {
+float pinnedInlineControlsIdealWidth(float heightDip, bool canRepeat, float lyricFontSize,
+                                     bool canSwitchSource) {
     if (heightDip <= 0.0f)
         return 0.0f;
-    return buildPinnedTierSpec(PinnedInlineTier::Full, heightDip, canRepeat, lyricFontSize)
+    return buildPinnedTierSpec(PinnedInlineTier::Full, heightDip, canRepeat, lyricFontSize,
+                               canSwitchSource)
         .slotWidth;
 }
 
@@ -256,7 +268,7 @@ PinnedInlineControlsLayout planPinnedInlineControls(const PinnedInlineControlsIn
     PinnedTierSpec chosen{};
     for (const auto& candidate : candidates) {
         const PinnedTierSpec spec = buildPinnedTierSpec(candidate.tier, input.height, input.canRepeat,
-                                                        input.lyricFontSize);
+                                                        input.lyricFontSize, input.canSwitchSource);
         // 预留 1 DIP 浮点与像素取整容差，避免最小安全宽度下误降级。
         if (effW - start - spec.slotWidth + 1.0f >= candidate.minKeep) {
             chosen = spec;
@@ -293,6 +305,35 @@ PinnedInlineControlsLayout planPinnedInlineControls(const PinnedInlineControlsIn
             result.centerX[4] = result.centerX[2] + chosen.volumeGap;
         }
     }
+    if (input.canSwitchSource) {
+        result.visible[kInlineSourceControl] = true;
+        const int previous = chosen.includeVolume ? 4 : 2;
+        result.centerX[kInlineSourceControl] =
+            result.centerX[previous] + chosen.spacing + chosen.radius * 0.14f;
+    }
     return result;
+}
+
+void layoutInlineHoverControls(float left, float width, float height, bool canRepeat,
+                               bool canSwitchSource, float (&centers)[kInlineControlCount],
+                               float& cy, float& radius) {
+    constexpr float pitch = 2.8f;
+    constexpr float margin = 6.0f;
+    const float repeatExtra = canRepeat ? 0.3f : 0.0f;
+    const float volumeExtra = canRepeat ? 0.4f : 0.9f;
+    const float sourceExtra = canSwitchSource ? 0.3f : 0.0f;
+    const int gaps = 3 + static_cast<int>(canRepeat) + static_cast<int>(canSwitchSource);
+    const float span = pitch * gaps + repeatExtra + volumeExtra + sourceExtra;
+    cy = height * 0.5f;
+    radius = std::min(height * 0.26f, std::max(0.0f, width - margin * 2.0f) / (span + 2.0f));
+
+    const float start = left + (width - span * radius) * 0.5f;
+    for (int i = 0; i < 3; ++i)
+        centers[i] = start + i * pitch * radius;
+    if (canRepeat)
+        centers[3] = centers[2] + (pitch + repeatExtra) * radius;
+    centers[4] = centers[canRepeat ? 3 : 2] + (pitch + volumeExtra) * radius;
+    if (canSwitchSource)
+        centers[kInlineSourceControl] = centers[4] + (pitch + sourceExtra) * radius;
 }
 } // namespace taskbar_detail

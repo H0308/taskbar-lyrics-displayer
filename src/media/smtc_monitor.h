@@ -38,6 +38,7 @@ struct SmtcSnapshot {
     bool canPlayPause = false;
     bool canNext = false;
     bool canRepeat = false;
+    bool canSwitchSource = false;
     // 原始 SMTC 循环维度：0 关闭、1 单曲循环、2 列表循环（AutoRepeatMode）。
     int repeatMode = 0;
     bool shuffle = false; // 随机播放是独立开关（IsShuffleActive），不在 AutoRepeatMode 里
@@ -56,7 +57,17 @@ struct SmtcSnapshot {
     }
 };
 
-// 监听 QQ、汽水、Spotify 和椒盐音乐的系统媒体会话及 Genres 中带 NCM-{ID} 的网易云增强会话。
+struct SmtcPlaybackSource {
+    std::wstring appUserModelId;
+    SmtcPlayerType player;
+};
+
+struct SmtcSourceSelection {
+    std::vector<SmtcPlaybackSource> available;
+    std::wstring preferredAppUserModelId; // 空值表示自动选择
+};
+
+// 监听受支持的系统媒体会话。
 class SmtcMonitor {
 public:
     using ChangeCallback = std::function<void()>; // 快照变化后触发（后台刷新/封面线程）
@@ -77,6 +88,9 @@ public:
     void setGenericSmtcEnabled(bool enabled);
     // 返回运行期间检测到的所有非内置 SMTC 会话来源标识（去重、按最近活跃优先）。
     std::vector<std::wstring> observedGenericSources() const;
+    SmtcSourceSelection sourceSelection() const;
+    void selectSource(std::wstring appUserModelId); // 传空值恢复自动选择
+    void cycleSource(int steps);
     SmtcSnapshot snapshot() const; // 当前快照（Playing 时进度已插值）
 
     // 播放控制（无会话或调用失败时不改变 UI，并记录诊断日志）

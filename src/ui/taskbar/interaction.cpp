@@ -1,7 +1,8 @@
 #include "ui/taskbar/interaction.h"
 #include <commctrl.h>
 
-void TaskbarCoverTip::mouseMove(HWND owner, const RECT& rect, WPARAM keys, LPARAM point) {
+void TaskbarTooltip::mouseMove(HWND owner, const RECT& rect, WPARAM keys, LPARAM point,
+                              const wchar_t* label) {
     if (!hwnd_) {
         hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_NOACTIVATE, TOOLTIPS_CLASSW, nullptr,
                                 WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
@@ -13,13 +14,23 @@ void TaskbarCoverTip::mouseMove(HWND owner, const RECT& rect, WPARAM keys, LPARA
         tool.hwnd = owner;
         tool.uId = 1;
         tool.rect = rect;
-        tool.lpszText = const_cast<wchar_t*>(L"点击打开当前音乐播放器");
+        tool.lpszText = const_cast<wchar_t*>(label);
         if (!SendMessageW(hwnd_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&tool))) {
             reset();
             return;
         }
         rect_ = rect;
+        label_ = label;
         SendMessageW(hwnd_, TTM_SETDELAYTIME, TTDT_INITIAL, 500);
+    }
+    if (label_ != label) {
+        hide();
+        TOOLINFOW tool{sizeof(tool)};
+        tool.hwnd = owner;
+        tool.uId = 1;
+        tool.lpszText = const_cast<wchar_t*>(label);
+        SendMessageW(hwnd_, TTM_UPDATETIPTEXTW, 0, reinterpret_cast<LPARAM>(&tool));
+        label_ = label;
     }
     if (!EqualRect(&rect_, &rect)) {
         TOOLINFOW tool{sizeof(tool)};
@@ -43,19 +54,20 @@ void TaskbarCoverTip::mouseMove(HWND owner, const RECT& rect, WPARAM keys, LPARA
     SendMessageW(hwnd_, TTM_RELAYEVENT, 0, reinterpret_cast<LPARAM>(&message));
 }
 
-void TaskbarCoverTip::hide() {
+void TaskbarTooltip::hide() {
     if (hwnd_ && active_) {
         SendMessageW(hwnd_, TTM_ACTIVATE, FALSE, 0);
         active_ = false;
     }
 }
 
-void TaskbarCoverTip::reset() {
+void TaskbarTooltip::reset() {
     if (hwnd_ && IsWindow(hwnd_))
         DestroyWindow(hwnd_);
     hwnd_ = nullptr;
     active_ = false;
     rect_ = {};
+    label_ = nullptr;
 }
 
 float TaskbarPresence::opacity(ULONGLONG now) const {
