@@ -7,16 +7,20 @@ bool TaskbarWindowAttachment::attach(HWND window, HWND taskbar) {
 
     SetLastError(ERROR_SUCCESS);
     const LONG_PTR originalStyle = GetWindowLongPtrW(window, GWL_STYLE);
-    if (originalStyle == 0 && GetLastError() != ERROR_SUCCESS)
+    if (originalStyle == 0 && GetLastError() != ERROR_SUCCESS) {
+        ++consecutiveFailures_;
         return false;
+    }
 
     // SetParent 不会替窗口切换 WS_POPUP/WS_CHILD；先切成真正的子窗口，
     // 否则后续 SetWindowPos 仍可能按顶层窗口的屏幕坐标解释。
     const LONG_PTR childStyle =
         (originalStyle & ~static_cast<LONG_PTR>(WS_POPUP)) | static_cast<LONG_PTR>(WS_CHILD);
     SetLastError(ERROR_SUCCESS);
-    if (SetWindowLongPtrW(window, GWL_STYLE, childStyle) == 0 && GetLastError() != ERROR_SUCCESS)
+    if (SetWindowLongPtrW(window, GWL_STYLE, childStyle) == 0 && GetLastError() != ERROR_SUCCESS) {
+        ++consecutiveFailures_;
         return false;
+    }
 
     // 初始窗口没有父窗口时，SetParent 成功也会返回 nullptr（返回的是旧父窗口），
     // 必须结合 GetLastError 和实际父窗口判断，不能直接判断返回值。
@@ -26,20 +30,31 @@ bool TaskbarWindowAttachment::attach(HWND window, HWND taskbar) {
     if (!previousParent && error != ERROR_SUCCESS) {
         SetParent(window, nullptr);
         SetWindowLongPtrW(window, GWL_STYLE, originalStyle);
-        runtime_log::writef(L"[taskbar] SetParent failed: error=%lu hwnd=%p parent=%p",
-                            static_cast<unsigned long>(error), window, taskbar);
+        ++consecutiveFailures_;
+        if (consecutiveFailures_ == 1 || retriesExhausted()) {
+            runtime_log::writef(
+                L"[taskbar] SetParent failed: error=%lu hwnd=%p parent=%p attempts=%u%s",
+                static_cast<unsigned long>(error), window, taskbar, consecutiveFailures_,
+                retriesExhausted() ? L" (switching to floating fallback)" : L"");
+        }
         return false;
     }
 
     if (GetParent(window) != taskbar) {
         SetParent(window, nullptr);
         SetWindowLongPtrW(window, GWL_STYLE, originalStyle);
-        runtime_log::writef(L"[taskbar] SetParent parent mismatch: hwnd=%p parent=%p", window,
-                            taskbar);
+        ++consecutiveFailures_;
+        if (consecutiveFailures_ == 1 || retriesExhausted()) {
+            runtime_log::writef(
+                L"[taskbar] SetParent parent mismatch: hwnd=%p parent=%p attempts=%u%s", window,
+                taskbar, consecutiveFailures_,
+                retriesExhausted() ? L" (switching to floating fallback)" : L"");
+        }
         return false;
     }
 
     embedded_ = true;
+    consecutiveFailures_ = 0;
     return true;
 }
 
@@ -76,5 +91,6 @@ bool TaskbarWindowAttachment::detach(HWND window) {
         return false;
     }
     embedded_ = false;
+    consecutiveFailures_ = 0;
     return true;
 }

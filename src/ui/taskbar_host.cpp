@@ -444,6 +444,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     HMONITOR targetMonitor_ = nullptr;
     std::wstring targetMonitorDeviceName_;
     TaskbarWindowAttachment attachment_;
+    ULONGLONG floatingZOrderCooldownUntilMs_ = 0;
     AppBarRegistration appBar_;
     AppBarEdge appBarEdge_ = AppBarEdge::Top;
     HWND notify_ = nullptr;
@@ -868,6 +869,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 requestFrameAndFlush();
             ShowWindow(hwnd, SW_SHOWNA);
             ensureImmersiveZOrder();
+            ensureFloatingFallbackZOrder(true);
             startFrameTimer();
         } else {
             stopFrameTimer();
@@ -1013,7 +1015,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     }
 
     void scheduleTaskbarAttachRetry() {
-        if (hwnd)
+        if (hwnd && !isStoppedMode() && !attachment_.retriesExhausted())
             SetTimer(hwnd, kTaskbarAttachTimerId, kTaskbarAttachRetryMs, nullptr);
     }
 
@@ -1098,7 +1100,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     void unregisterAppBar() { appBar_.unregisterWindow(hwnd); }
 
     void retryTaskbarAttach() {
-        if (!hwnd)
+        if (!hwnd || isAppBarView())
             return;
         if (!findTaskbar())
             return;
@@ -1108,6 +1110,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (immersiveBackdropPrepared)
             initializeBackdropForCurrentViewMode();
         if (!attachToTaskbar(hwnd)) {
+            if (attachment_.retriesExhausted())
+                cancelTaskbarAttachRetry();
             // 附着失败时仍保持顶层窗口，但必须使用屏幕坐标，避免落到屏幕顶部。
             adjustPosition();
             return;
@@ -1484,26 +1488,39 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const bool moved = !hasCurrent || current.x != placement.x || current.y != placement.y;
         const bool resized = !hasCurrent || current.width != placement.width ||
                              current.height != placement.height;
-        if (!moved && !resized && (!bringToFront || GetTopWindow(GetParent(hwnd)) == hwnd))
-            return;
+        const bool embedded = attachment_.embedded();
+        if (!moved && !resized) {
+            if (!bringToFront)
+                return;
+            if (embedded) {
+                if (GetTopWindow(GetParent(hwnd)) == hwnd)
+                    return;
+            } else {
+                ensureFloatingFallbackZOrder(true);
+                return;
+            }
+        }
 
         POINT pt{placement.x, placement.y};
-        if (attachment_.embedded())
+        if (embedded)
             ScreenToClient(taskbar_, &pt);
 
-        // 把窗口提到任务栏子窗口最前面，避免被其他任务栏子窗口盖住。
+        // 嵌入模式把窗口提到任务栏子窗口最前面，避免被其他任务栏子窗口盖住；
+        // 未嵌入悬浮回退模式不在几何更新里抢全屏 HWND_TOP，改由相对任务栏 Z 序统一维护。
         // 尺寸转场期间保持 Z 序且禁止系统自动重绘，画面由后续 render() 统一提交。
         UINT flags = SWP_NOACTIVATE;
         if (!moved)
             flags |= SWP_NOMOVE;
         if (!resized)
             flags |= SWP_NOSIZE;
-        if (!bringToFront)
+        if (!bringToFront || !embedded)
             flags |= SWP_NOZORDER;
         if (noRedraw)
             flags |= SWP_NOREDRAW;
-        SetWindowPos(hwnd, bringToFront ? HWND_TOP : nullptr, pt.x, pt.y, placement.width,
-                     placement.height, flags);
+        SetWindowPos(hwnd, (bringToFront && embedded) ? HWND_TOP : nullptr, pt.x, pt.y,
+                     placement.width, placement.height, flags);
+        if (bringToFront && !embedded)
+            ensureFloatingFallbackZOrder(true);
         mediaPopup.setAnchor(hwnd);
     }
 
@@ -1518,6 +1535,66 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return;
         SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+    }
+
+    // SetParent 无法嵌入任务栏时的顶层悬浮回退 Z 序维护：
+    // 任务栏处于置顶层时，把窗口稳固在任务栏正上方且不抢占开始菜单、弹窗及其他置顶窗；
+    // 全屏应用导致任务栏退出置顶层时，同步撤销置顶并退回到任务栏正上方，避免遮挡全屏画面。
+    void ensureFloatingFallbackZOrder(bool bypassCooldown = false) {
+        if (isAppBarView() || attachment_.embedded() || !isWindowVisible() || !hwnd || !taskbar_ ||
+            !IsWindow(taskbar_))
+            return;
+
+        const bool taskbarTopmost =
+            (GetWindowLongPtrW(taskbar_, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+        const bool selfTopmost =
+            (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+        const HWND aboveTaskbar = GetWindow(taskbar_, GW_HWNDPREV);
+        if (aboveTaskbar == hwnd && selfTopmost == taskbarTopmost) {
+            floatingZOrderCooldownUntilMs_ = 0;
+            return;
+        }
+
+        const ULONGLONG nowMs = monotonicNowMs();
+        if (!bypassCooldown && floatingZOrderCooldownUntilMs_ != 0 &&
+            nowMs < floatingZOrderCooldownUntilMs_)
+            return;
+
+        constexpr UINT kFlags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+
+        if (taskbarTopmost) {
+            const bool validAboveTopmost =
+                aboveTaskbar && aboveTaskbar != hwnd &&
+                (GetWindowLongPtrW(aboveTaskbar, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+            bool adjusted = false;
+            if (validAboveTopmost &&
+                SetWindowPos(hwnd, aboveTaskbar, 0, 0, 0, 0, kFlags) &&
+                (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0) {
+                adjusted = true;
+            }
+            if (!adjusted) {
+                // 任务栏位于置顶队列最顶端（aboveTaskbar == nullptr）或跨层插入未自动提升时，
+                // 必须使用 HWND_TOPMOST 而非 HWND_TOP，确保非置顶窗口越过置顶边界。
+                SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, kFlags);
+                if (validAboveTopmost)
+                    SetWindowPos(hwnd, aboveTaskbar, 0, 0, 0, 0, kFlags);
+            }
+        } else {
+            if (selfTopmost)
+                SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, kFlags);
+            if (aboveTaskbar && aboveTaskbar != hwnd &&
+                (GetWindowLongPtrW(aboveTaskbar, GWL_EXSTYLE) & WS_EX_TOPMOST) == 0) {
+                SetWindowPos(hwnd, aboveTaskbar, 0, 0, 0, 0, kFlags);
+            } else if (!selfTopmost) {
+                SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, kFlags);
+            }
+        }
+
+        const bool settledTopmost =
+            (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+        const bool settled =
+            GetWindow(taskbar_, GW_HWNDPREV) == hwnd && settledTopmost == taskbarTopmost;
+        floatingZOrderCooldownUntilMs_ = settled ? 0 : nowMs + kTaskbarAttachRetryMs;
     }
 
     void adjustPosition() {
@@ -2360,6 +2437,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             setPlacementStatus(TaskbarPlacementStatus::Safe);
         } else {
             findTaskbar();
+            if (!attachment_.embedded())
+                attachment_.reset();
             if (!attachToTaskbar(hwnd))
                 scheduleTaskbarAttachRetry();
         }
@@ -3387,10 +3466,12 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                     cancelTaskbarAttachRetry();
                     if (isSessionVisible() && !isStoppedMode())
                         registerAppBar();
-                } else if (!attachToTaskbar(hwnd)) {
-                    scheduleTaskbarAttachRetry();
                 } else {
-                    cancelTaskbarAttachRetry();
+                    attachment_.reset();
+                    if (!attachToTaskbar(hwnd))
+                        scheduleTaskbarAttachRetry();
+                    else
+                        cancelTaskbarAttachRetry();
                 }
                 if (!immersiveBackdropPrepared)
                     initializeBackdropForCurrentViewMode();
@@ -3413,6 +3494,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         pressedCoverSource_.clear();
         resetImmersivePresence();
         attachment_.reset();
+        floatingZOrderCooldownUntilMs_ = 0;
         // Explorer 强制退出时旧窗口可能没有走 WM_DESTROY，Shell 侧与本地的
         // AppBar 注册状态都必须按已失效处理，避免重建窗口跳过 ABM_NEW。
         appBar_.forget();
@@ -7166,6 +7248,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             }
             stopFrameTimer();
             stopPlacementTimer();
+            if (!isAppBarView() && !attachment_.embedded())
+                scheduleTaskbarAttachRetry();
             reconcileWindowVisibility();
         }
         if (wasMinimal != isMinimalMode()) {
@@ -7204,6 +7288,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             mediaPopupEnabled_ = false;
             mediaPopup.setEnabled(false);
             reconcileWindowVisibility();
+            cancelTaskbarAttachRetry();
             stopPlacementTimer();
             stopResourceMonitoring();
             releaseAll();
@@ -7306,6 +7391,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         // TrafficMonitor 可能在两次渲染之间调整自己的任务栏子窗口 Z 序；
         // 即使当前画面静止，也要及时把沉浸宿主恢复到最上层。
         ensureImmersiveZOrder();
+        ensureFloatingFallbackZOrder();
         // 只有可见动画源跟随当前显示器刷新率；静态播放降到 ~30fps，
         // 避免歌词没有动画时仍高频轮询和提交。状态事件（悬停、恢复播放、seek）走同步
         // render 路径，不依赖定时器，低档位下也不会延迟显示。
@@ -7383,24 +7469,35 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             else if (wp == kRepeatHintTimerId)
                 onRepeatHintTimer();
             return 0;
-        case WM_DISPLAYCHANGE:
+        case WM_DISPLAYCHANGE: {
             // 显示拓扑/分辨率变化（远程接入、虚拟屏开关等）是设备丢失的前置信号，
             // 记录下来便于和随后的 device lost / 重建日志对照。
             runtime_log::writef(
                 L"[display] changed: %lux%lu %lubpp", static_cast<unsigned long>(LOWORD(lp)),
                 static_cast<unsigned long>(HIWORD(lp)), static_cast<unsigned long>(wp));
+            const HWND previousTaskbar = taskbar_;
             findTaskbar();
             updateDisplayRefresh();
-            if (isAppBarView() && appBar_.registered())
-                updateAppBarPosition();
-            else
+            if (isAppBarView()) {
+                if (appBar_.registered())
+                    updateAppBarPosition();
+            } else {
+                if (!attachment_.embedded() && taskbar_ && taskbar_ != previousTaskbar) {
+                    attachment_.reset();
+                    if (!attachToTaskbar(hwnd))
+                        scheduleTaskbarAttachRetry();
+                    else
+                        cancelTaskbarAttachRetry();
+                }
                 adjustPosition();
+            }
             // 不等待歌词、频谱等下一次内容变化才发现客户区尺寸已改变。立即按新
             // 任务栏几何重算安全区，并让 renderer.bind() 在下一帧同步交换链尺寸。
             requestInvalidation(toMask(RenderInvalidation::Layout) |
                                 toMask(RenderInvalidation::Geometry));
             requestFrameAndFlush();
             return 0;
+        }
         case WM_SIZE:
             coverTip_.hide();
             if (wp != SIZE_MINIMIZED) {
@@ -7750,6 +7847,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             unregisterAppBar();
             KillTimer(hwnd, kTaskbarAttachTimerId);
             attachment_.reset();
+            floatingZOrderCooldownUntilMs_ = 0;
             stopFrameTimer();
             stopPlacementTimer();
             stopProbe();
