@@ -1,16 +1,16 @@
 ## Windows任务栏歌词 v2.18.0
 把 QQ 音乐、网易云、汽水音乐、Spotify和椒盐音乐的歌词嵌入 Windows 10/11 任务栏——滚动歌词、每日一言、快速打开、滴答清单今日任务、逐字高亮、播放控制、音频频谱，支持 Windows 11 任务栏上、下、左、右四边布局。程序本体为 C++ 原生实现，无 Electron、WebView 和 .NET/WPF 运行时，秉持工具软件应尽可能少占内存的原则。
 
-### ✨ 新增功能
+### 新增功能
 
 - 新增通用播放器识别功能，开启后默认识别所有上报SMTC的应用，也可以设置识别白名单或者黑名单 @qq297329239
 - 新增模拟逐字效果，对于逐句歌词，开启后会根据当前行时长计算逐字进度模拟逐字歌词
 
-### 🚀 功能优化与修复
+### 功能优化与修复
 
 - 修复任务栏嵌入失败时窗口被遮挡及高频重试刷屏日志的问题 @qq297329239
 
-### 📦 下载与使用
+### 下载与使用
 
 下载软件安装包 `WindowsTaskbarLyrics-2.18.0-Setup.exe` 安装使用，安装向导提供简体中文界面。
 
@@ -22,10 +22,10 @@
 
 > 网易云音乐需要额外下载 BetterNCM 和 InfLink-rs 插件，具体下载方式可以参考 [README](https://github.com/H0308/taskbar-lyrics-displayer?tab=readme-ov-file)。
 
-### ⚠️ 注意事项
+### 注意事项
 
 首次运行如被 SmartScreen 拦截，点击「更多信息」→「仍要运行」即可
 
-### 🔧 自行构建
+### 自行构建
 
 Visual Studio 2022 + vcpkg + CMake + Ninja，详见 [README](https://github.com/H0308/taskbar-lyrics-displayer?tab=readme-ov-file)。
