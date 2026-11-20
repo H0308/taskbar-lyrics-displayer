@@ -34,12 +34,18 @@ bool TaskbarWindowAttachment::attach(HWND window, HWND taskbar) {
     if (GetParent(window) != taskbar) {
         SetParent(window, nullptr);
         SetWindowLongPtrW(window, GWL_STYLE, originalStyle);
-        runtime_log::writef(L"[taskbar] SetParent parent mismatch: hwnd=%p parent=%p", window,
-                            taskbar);
+        // 部分环境（如 Windows 11 24H2+ 收紧了 Shell 窗口的外来子窗口限制）下
+        // SetParent 会静默失败（返回 NULL 且 GetLastError 为 0），宿主会按 250ms
+        // 周期重试并停留在顶层悬浮回退模式；这里限制日志频率避免刷爆日志文件。
+        ++attachFailCount_;
+        if (attachFailCount_ <= 4 || attachFailCount_ % 400 == 0)
+            runtime_log::writef(L"[taskbar] SetParent parent mismatch: hwnd=%p parent=%p attempts=%u",
+                                window, taskbar, attachFailCount_);
         return false;
     }
 
     embedded_ = true;
+    attachFailCount_ = 0;
     return true;
 }
 

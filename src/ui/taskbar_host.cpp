@@ -1104,6 +1104,16 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (!attachToTaskbar(hwnd)) {
             // 附着失败时仍保持顶层窗口，但必须使用屏幕坐标，避免落到屏幕顶部。
             adjustPosition();
+            // 顶层悬浮回退期间需持续把窗口压回任务栏正上方：启动阶段 explorer 会
+            // 多次重排任务栏 Z 序，一旦压到本窗口之上便没有任何事件再纠正，
+            // 表现为"启动后歌词不可见，切换显示模式重建窗口才恢复"。
+            if (isWindowVisible()) {
+                const HWND aboveTaskbar = GetWindow(taskbar_, GW_HWNDPREV);
+                if (aboveTaskbar != hwnd)
+                    SetWindowPos(hwnd, aboveTaskbar ? aboveTaskbar : HWND_TOP, 0, 0, 0, 0,
+                                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE |
+                                     SWP_NOOWNERZORDER);
+            }
             return;
         }
 
