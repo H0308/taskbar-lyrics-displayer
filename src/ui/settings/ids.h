@@ -1,14 +1,15 @@
 #pragma once
 
 namespace settings_ui {
-inline constexpr int kSettingsPageCount = 9;
+inline constexpr int kSettingsPageCount = 10;
 inline constexpr int kTaskbarModePage = 1;
 inline constexpr int kPerformancePage = 2;
 inline constexpr int kFloatingCardPage = 3;
 inline constexpr int kMediaPopupPage = 4;
-inline constexpr int kSpectrumPage = 5;
-inline constexpr int kLyricsPage = 6;
-inline constexpr int kSongToastPage = 7;
+inline constexpr int kPlayerPage = 5;
+inline constexpr int kSpectrumPage = 6;
+inline constexpr int kLyricsPage = 7;
+inline constexpr int kSongToastPage = 8;
 inline constexpr int kIdlePage = kSettingsPageCount - 1;
 inline constexpr int kIdNav = 400;
 inline constexpr int kIdSettingsSearch = 4900;
@@ -66,6 +67,9 @@ inline constexpr int kIdSecondaryType = 433;
 inline constexpr int kIdQqLocalLyricsEnabled = 434;
 inline constexpr int kIdQqLocalLyricsPath = 435;
 inline constexpr int kIdQqLocalLyricsPersistOrder = 436;
+inline constexpr int kIdGenericSmtcEnabled = 518;
+inline constexpr int kIdGenericSmtcFilterMode = 519;
+inline constexpr int kIdGenericSmtcApps = 520;
 inline constexpr int kIdIdleTextEnabled = 446;
 inline constexpr int kIdQuickStartEnabled = 512;
 inline constexpr int kIdIdleQuoteSource = 447;

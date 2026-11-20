@@ -1,6 +1,7 @@
 #pragma once
 
 #include "idle/idle_types.h"
+#include "media/generic_smtc_filter.h"
 #include "model/display_types.h"
 #include <nlohmann/json_fwd.hpp>
 #include <cstdint>
@@ -109,6 +110,10 @@ struct AppSettings {
     bool qqLocalLyricsEnabled_ = false;
     bool qqLocalLyricsPersistOrder_ = false;
     std::wstring qqLocalLyricsPath_;
+    bool genericSmtcEnabled_ = false;
+    GenericSmtcFilterMode genericSmtcFilterMode_ = GenericSmtcFilterMode::All;
+    std::vector<GenericSmtcAppRule> genericSmtcAllowList_;
+    std::vector<GenericSmtcAppRule> genericSmtcBlockList_;
     std::wstring logDirectory_;
     int logRetentionDays_ = 30;
 

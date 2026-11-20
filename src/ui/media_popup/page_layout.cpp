@@ -161,27 +161,35 @@ IdleListLayout IdlePageLayout::list(float w, float top, const IdlePresentation& 
     return result;
 }
 
-MediaPageLayout mediaPageLayout(float w, float origin) {
+MediaPageLayout mediaPageLayout(float w, float origin, bool hasDuration, bool hasArtist) {
     MediaPageLayout result;
+    // 无进度条时保持卡片 224 DIP 总高不变，将封面/文案/伴听宠物与底部按钮向中间收拢，
+    // 让上（26 DIP）、中（28 DIP）、下（20 DIP）三段留白均衡自然。
+    const float contentShiftY = hasDuration ? 0.0f : 16.0f;
+    const float buttonBottomMargin = hasDuration ? 8.0f : 20.0f;
+    const float buttonBottom = origin + kPopupHeightDip - buttonBottomMargin;
+    const float buttonTop = buttonBottom - 36.0f;
     result.buttons = {
         // 0 上一首 / 1 播放 / 2 下一首：以播放键为对称轴
-        D2D1::RectF(w * 0.5f - 80.0f, origin + kPopupHeightDip - 44.0f,
-                    w * 0.5f - 44.0f, origin + kPopupHeightDip - 8.0f),
-        D2D1::RectF(w * 0.5f - 18.0f, origin + kPopupHeightDip - 44.0f,
-                    w * 0.5f + 18.0f, origin + kPopupHeightDip - 8.0f),
-        D2D1::RectF(w * 0.5f + 44.0f, origin + kPopupHeightDip - 44.0f,
-                    w * 0.5f + 80.0f, origin + kPopupHeightDip - 8.0f),
+        D2D1::RectF(w * 0.5f - 80.0f, buttonTop, w * 0.5f - 44.0f, buttonBottom),
+        D2D1::RectF(w * 0.5f - 18.0f, buttonTop, w * 0.5f + 18.0f, buttonBottom),
+        D2D1::RectF(w * 0.5f + 44.0f, buttonTop, w * 0.5f + 80.0f, buttonBottom),
         // 3 播放模式（下一首右侧）：与前三个按钮保持相同的 62 DIP 中心间距
-        D2D1::RectF(w * 0.5f + 106.0f, origin + kPopupHeightDip - 44.0f,
-                    w * 0.5f + 142.0f, origin + kPopupHeightDip - 8.0f)};
+        D2D1::RectF(w * 0.5f + 106.0f, buttonTop, w * 0.5f + 142.0f, buttonBottom)};
     result.source = D2D1::RectF(kMediaSourceTextLeftDip, kMediaSourceRowTopDip,
                                 kMediaSourceTextRightDip, kMediaSourceRowBottomDip);
     result.sourceHit = D2D1::RectF(8.0f, origin + 8.0f, 220.0f, origin + 40.0f);
-    result.title = D2D1::RectF(kPopupTextLeftDip, kMediaTitleTopDip, w - kMediaTextRightReserveDip,
-                               kMediaTitleBottomDip);
-    result.artist = D2D1::RectF(kPopupTextLeftDip, kMediaArtistTopDip,
-                                w - kMediaTextRightReserveDip, kMediaArtistBottomDip);
-    result.cover = D2D1::RectF(20.0f, 44.0f, 20.0f + kCoverSizeDip, 44.0f + kCoverSizeDip);
+    const float coverTop = 44.0f + contentShiftY;
+    result.cover = D2D1::RectF(20.0f, coverTop, 20.0f + kCoverSizeDip, coverTop + kCoverSizeDip);
+    const float titleHeight = kMediaTitleBottomDip - kMediaTitleTopDip;
+    const float titleTop = hasArtist ? (kMediaTitleTopDip + contentShiftY)
+                                     : (coverTop + (kCoverSizeDip - titleHeight) * 0.5f);
+    result.title =
+        D2D1::RectF(kPopupTextLeftDip, titleTop, w - kMediaTextRightReserveDip,
+                    titleTop + titleHeight);
+    result.artist = D2D1::RectF(kPopupTextLeftDip, kMediaArtistTopDip + contentShiftY,
+                                w - kMediaTextRightReserveDip, kMediaArtistBottomDip + contentShiftY);
+    result.petTop = kMediaPetLaneTopDip + contentShiftY;
     result.track = D2D1::RectF(20.0f, 148.5f, std::max(21.0f, w - 20.0f), 151.5f);
     result.timeLeft = D2D1::RectF(20.0f, 128.0f, 92.0f, 144.0f);
     result.timeRight = D2D1::RectF(result.track.right - 72.0f, 128.0f, result.track.right, 144.0f);

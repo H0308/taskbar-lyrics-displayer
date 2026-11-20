@@ -1,5 +1,8 @@
 #pragma once
 
+#include "media/audio_target.h"
+#include "media/generic_smtc_filter.h"
+
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -8,7 +11,8 @@
 
 enum class PlaybackStatus { Stopped, Playing, Paused, Other };
 
-enum class SmtcPlayerType { Unknown, QQMusic, NetEase, Soda, Spotify, SaltPlayer };
+// Generic：白名单外任意 SMTC 会话的兜底类型，走通用采样与元数据歌词路径。
+enum class SmtcPlayerType { Unknown, QQMusic, NetEase, Soda, Spotify, SaltPlayer, Generic };
 
 // SMTC 统一快照：锚点进度 + 本机时间，渲染侧据此插值
 struct SmtcSnapshot {
@@ -56,6 +60,7 @@ struct SmtcSnapshot {
 class SmtcMonitor {
 public:
     using ChangeCallback = std::function<void()>; // 快照变化后触发（后台刷新/封面线程）
+    using SourceTargetResolver = std::function<AudioSessionTarget(const std::wstring&)>;
 
     SmtcMonitor();
     ~SmtcMonitor();
@@ -64,6 +69,14 @@ public:
     SmtcMonitor& operator=(const SmtcMonitor&) = delete;
 
     void start(ChangeCallback onChange);
+    // 注入来源标识到进程/包族的解析器，用于通用 SMTC 规则按进程名与包族跨 AUMID 匹配。
+    void setSourceTargetResolver(SourceTargetResolver resolver);
+    // 更新通用 SMTC 开关与白名单/黑名单过滤配置（运行期实时生效，无需重启）。
+    void setGenericSmtcFilter(GenericSmtcFilterConfig config);
+    // 仅开关白名单外通用 SMTC 会话识别的便捷入口。
+    void setGenericSmtcEnabled(bool enabled);
+    // 返回运行期间检测到的所有非内置 SMTC 会话来源标识（去重、按最近活跃优先）。
+    std::vector<std::wstring> observedGenericSources() const;
     SmtcSnapshot snapshot() const; // 当前快照（Playing 时进度已插值）
 
     // 播放控制（无会话或调用失败时不改变 UI，并记录诊断日志）

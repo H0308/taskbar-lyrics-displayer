@@ -69,6 +69,7 @@ inline settings_icon::Kind iconForRow(int id) {
     case kIdAlbumCover:
         return settings_icon::Kind::AlbumCover;
     case kIdPlatformIcon:
+    case kIdGenericSmtcEnabled:
         return settings_icon::Kind::Platform;
     case kIdCoverEffect:
         return settings_icon::Kind::Vinyl;
@@ -82,6 +83,7 @@ inline settings_icon::Kind iconForRow(int id) {
     case kIdIdleQuoteBackground:
         return settings_icon::Kind::DynamicBackground;
     case kIdIdleQuoteBackgroundScope:
+    case kIdGenericSmtcFilterMode:
         return settings_icon::Kind::Scope;
     case kIdRenderMode:
     case kIdFullscreenRenderMode:
@@ -170,6 +172,7 @@ inline settings_icon::Kind iconForRow(int id) {
     case kIdIdleQuoteRefreshInterval:
         return settings_icon::Kind::Refresh;
     case kIdIdleApps:
+    case kIdGenericSmtcApps:
         return settings_icon::Kind::Apps;
     case kIdTickTickApiToken:
         return settings_icon::Kind::Api;

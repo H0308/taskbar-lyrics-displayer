@@ -1,6 +1,7 @@
 #pragma once
 
 #include "idle/idle_types.h"
+#include "media/generic_smtc_filter.h"
 #include "model/display_types.h"
 #include "ui/fluent_theme.h"
 #include "ui/spectrum_effects.h"
@@ -98,6 +99,9 @@ struct SettingsState {
     bool qqLocalLyricsEnabled = false;
     bool qqLocalLyricsPersistOrder = false;
     std::wstring qqLocalLyricsPath;
+    bool genericSmtcEnabled = false;
+    int genericSmtcFilterMode = 0; // 0 全部应用 1 仅白名单 2 排除黑名单
+    std::vector<GenericSmtcAppRule> genericSmtcRules;
     std::wstring fontDesc;         // 字体设置提示文字（如 "Microsoft YaHei UI, 16px, 常规"）
     UiFontSource uiFontSource = UiFontSource::Independent;
     std::wstring uiFontDesc;
@@ -192,6 +196,10 @@ struct SettingsActions {
     std::function<void(bool)> onQqLocalLyricsEnabled;
     std::function<void(bool)> onQqLocalLyricsPersistOrder;
     std::function<void()> onPickQqLocalLyricsPath;
+    std::function<void(bool)> onGenericSmtcEnabled;
+    std::function<void(int)> onGenericSmtcFilterMode;
+    std::function<void()> onAddGenericSmtcApp;
+    std::function<void(int)> onRemoveGenericSmtcApp;
 };
 
 // 设置窗口：左侧大类目录 + 右侧该类别的设置项（Windows 设置式布局）。

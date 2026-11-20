@@ -2660,14 +2660,15 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const bool statusOneShotChanged = frame.statusTextOneShot != scroll_.oneShot();
         const DisplayScene previousScene = scene_;
         const bool sceneChanged = frame.scene != scene_;
-        const auto* incomingSource = player_source::find(frame.media.sourceAppUserModelId);
+        const SmtcPlayerType incomingPlayer =
+            player_source::resolvePlayerType(frame.media.sourceAppUserModelId);
         const bool inlineControlsShown =
             !pinnedInlineControlsLayoutForScene(scene_, lastLogicalPxW_, lastLogicalPxH_).active() &&
             mouseOver_ && controlsOnHover_ && hoverControlStyle_ == HoverControlStyle::Inline &&
             !isExpandedView();
         const bool loadedLyricsFromPrelude = !trackChanged && lyricsChanged && lines.empty() &&
             !inlineControlsShown &&
-            incomingSource && player_source::showsTrackInfoBeforeLyrics(incomingSource->player) &&
+            player_source::showsTrackInfoBeforeLyrics(incomingPlayer) &&
             isTaskbarMediaScene(scene_) && frame.scene == DisplayScene::Lyrics &&
             frame.currentLine >= 0 && frame.media.playing && frame.animateTransition &&
             !statusText.empty() && lastLyric_ == statusText;
@@ -3245,6 +3246,34 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return taskbarDynamicBackgroundVisible() && clientAnimations_;
     }
 
+    void drawFallbackCover(ID2D1DeviceContext* rt, const D2D1_RECT_F& rect, float radius) const {
+        if (!rt || !brushDim_.Get())
+            return;
+        const float side = std::min(rect.right - rect.left, rect.bottom - rect.top);
+        if (side <= 0.0f)
+            return;
+
+        const D2D1_COLOR_F saved = brushDim_->GetColor();
+        brushDim_->SetColor(lightTheme_ ? D2D1::ColorF(0.08f, 0.10f, 0.15f, 0.10f)
+                                        : D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.11f));
+        rt->FillRoundedRectangle(D2D1::RoundedRect(rect, radius, radius), brushDim_.Get());
+
+        brushDim_->SetColor(lightTheme_ ? D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.10f)
+                                        : D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.15f));
+        rt->DrawRoundedRectangle(
+            D2D1::RoundedRect(D2D1::RectF(rect.left + 0.4f, rect.top + 0.4f, rect.right - 0.4f,
+                                          rect.bottom - 0.4f),
+                              std::max(0.5f, radius - 0.3f), std::max(0.5f, radius - 0.3f)),
+            brushDim_.Get(), 0.75f);
+
+        brushDim_->SetColor(lightTheme_ ? D2D1::ColorF(0.18f, 0.21f, 0.26f, 0.78f)
+                                        : D2D1::ColorF(0.92f, 0.94f, 0.97f, 0.80f));
+        const D2D1_POINT_2F center{(rect.left + rect.right) * 0.5f,
+                                   (rect.top + rect.bottom) * 0.5f};
+        media_control::drawMusicNote(rt, controlGeometry, center, side * 0.52f, brushDim_.Get());
+        brushDim_->SetColor(saved);
+    }
+
     void drawVinylCover(float coverX, float coverY, float s) {
         vinylRenderer_.draw({
             .rt = drawTarget(),
@@ -3714,8 +3743,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (currentLine >= 0 && (size_t)currentLine < lines.size())
             return currentLine;
         // 支持前奏文案的来源在首句未开始时使用歌曲信息。
-        const auto* source = player_source::find(media.sourceAppUserModelId);
-        if (source && player_source::showsTrackInfoBeforeLyrics(source->player))
+        const SmtcPlayerType sourcePlayer =
+            player_source::resolvePlayerType(media.sourceAppUserModelId);
+        if (player_source::showsTrackInfoBeforeLyrics(sourcePlayer))
             return -1;
         return lines.empty() ? -1 : 0;
     }
@@ -3785,9 +3815,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     void onLyricLineTargetChanged(int newLine, int64_t actualPositionMs, uint64_t revision,
                                   bool allowAnimate) {
         const int previous = currentLine;
-        const auto* source = previous == -1 && newLine == 0
-                                 ? player_source::find(media.sourceAppUserModelId) : nullptr;
-        const bool fromPrelude = source && player_source::showsTrackInfoBeforeLyrics(source->player) &&
+        const SmtcPlayerType sourcePlayer =
+            previous == -1 && newLine == 0
+                ? player_source::resolvePlayerType(media.sourceAppUserModelId)
+                : SmtcPlayerType::Unknown;
+        const bool fromPrelude = player_source::showsTrackInfoBeforeLyrics(sourcePlayer) &&
                                  scene_ == DisplayScene::Lyrics && media.playing &&
                                  !statusText.empty() && lastLyric_ == statusText &&
                                  typesetter_.resources().lyricLayout_.Get();
@@ -6000,8 +6032,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                                           D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
                     contentRt->PopLayer();
                 } else {
-                    D2D1_ROUNDED_RECT rr{coverRect, 4.0f, 4.0f};
-                    contentRt->FillRoundedRectangle(rr, brushDim_.Get());
+                    drawFallbackCover(contentRt, coverRect, 4.0f);
                 }
             }
             // 平台图标必须在封面之后绘制，保证它位于专辑封面的最顶层。
@@ -6350,10 +6381,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                     rt->DrawBitmap(cover_.bitmap(), coverRect, 1.0f,
                                    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
                     rt->PopLayer();
-                } else if (brushDim_.Get()) {
-                    rt->FillRoundedRectangle(D2D1::RoundedRect(coverRect, std::min(4.0f, s * 0.18f),
-                                                               std::min(4.0f, s * 0.18f)),
-                                             brushDim_.Get());
+                } else {
+                    drawFallbackCover(rt, coverRect, std::min(4.0f, s * 0.18f));
                 }
             }
             drawPlatformIcon(layout.coverX, layout.coverY, layout.coverSize);
@@ -6651,8 +6680,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                                        D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
                         rt->PopLayer();
                     } else {
-                        D2D1_ROUNDED_RECT rr{coverRect, 4.0f, 4.0f};
-                        rt->FillRoundedRectangle(rr, brushDim_.Get());
+                        drawFallbackCover(rt, coverRect, 4.0f);
                     }
                 }
                 // 平台图标必须在封面之后绘制，保证它位于专辑封面的最顶层。

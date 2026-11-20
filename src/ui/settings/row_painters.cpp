@@ -3,6 +3,7 @@
 #include "ui/fluent_controls.h"
 #include "ui/fluent_theme.h"
 #include "ui/font_sizes.h"
+#include "ui/media_control_icons.h"
 #include "ui/settings/ids.h"
 #include "ui/settings/section_metrics.h"
 
@@ -635,7 +636,6 @@ void drawAppList(fluent::FluentDialogSurface::Painter& painter, const RowPaintCo
     const float innerX = row.cardRect.left + 16.0f;
     const float innerRight = row.cardRect.right - 16.0f;
     const float listTop = row.cardRect.top + kIdleAppsListTop;
-    const size_t count = ctx.idleApps.size();
     auto* nameFormat = painter.textFormat(fluent::font_sizes::label, 600, false, true);
     auto* pathFormat = painter.textFormat(fluent::font_sizes::smallText, 400, false, true);
     auto* actionFormat = painter.textFormat(fluent::font_sizes::smallText, 600, true, true);
@@ -652,6 +652,103 @@ void drawAppList(fluent::FluentDialogSurface::Painter& painter, const RowPaintCo
         painter.strokeRoundRect(enabled ? p.cardStroke : p.disabled, rect, 1.0f, 6.0f);
         painter.drawText(text, actionFormat, rect, enabled ? p.text : p.disabled);
     };
+
+    if (row.id == kIdGenericSmtcApps) {
+        const size_t count = ctx.genericSmtcRules.size();
+        for (size_t i = 0; i < count && i < row.appItemRects.size() && i < row.appDeleteRects.size();
+             ++i) {
+            const auto& rule = ctx.genericSmtcRules[i];
+            const D2D1_RECT_F item = row.appItemRects[i];
+            const int option = ctx.hoverId == row.id ? ctx.hoverOption : -1;
+            const int pressedOptionValue = ctx.pressedId == row.id ? ctx.pressedOption : -1;
+            const bool hovered = row.enabled && option == static_cast<int>(i);
+            const bool pressed = row.enabled && pressedOptionValue == static_cast<int>(i);
+            painter.fillRoundRect(row.enabled ? (hovered ? p.controlHover : p.controlFill)
+                                              : p.listHover,
+                                  item, 7.0f);
+            if (pressed)
+                painter.fillRoundRect(p.controlPressed, item, 7.0f);
+
+            const D2D1_RECT_F iconRect =
+                D2D1::RectF(item.left + 8.0f, item.top + 8.0f, item.left + 36.0f,
+                            item.top + 36.0f);
+            bool drewIcon = false;
+            if (rule.iconPixels && !rule.iconPixels->empty() && rule.iconWidth > 0 &&
+                rule.iconHeight > 0 && painter.target()) {
+                Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
+                const auto props = D2D1::BitmapProperties(
+                    D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                                      D2D1_ALPHA_MODE_PREMULTIPLIED),
+                    static_cast<float>(ctx.dpi), static_cast<float>(ctx.dpi));
+                if (SUCCEEDED(painter.target()->CreateBitmap(
+                        D2D1::SizeU(rule.iconWidth, rule.iconHeight), rule.iconPixels->data(),
+                        rule.iconWidth * 4, &props, &bitmap)) &&
+                    bitmap) {
+                    painter.target()->DrawBitmap(bitmap.Get(), iconRect,
+                                                 row.enabled ? 1.0f : 0.45f,
+                                                 D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                    drewIcon = true;
+                }
+            }
+            if (!drewIcon && painter.target()) {
+                painter.fillRoundRect(p.listHover, iconRect, 6.0f);
+                painter.strokeRoundRect(p.cardStroke, iconRect, 0.75f, 6.0f);
+                Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> noteBrush;
+                if (SUCCEEDED(painter.target()->CreateSolidColorBrush(
+                        row.enabled ? p.textSecondary : p.disabled, &noteBrush)) &&
+                    noteBrush) {
+                    const D2D1_POINT_2F center{(iconRect.left + iconRect.right) * 0.5f,
+                                               (iconRect.top + iconRect.bottom) * 0.5f};
+                    media_control::drawMusicNote(painter.target(), center, 14.0f, noteBrush.Get());
+                }
+            }
+
+            const float textRight = item.right - 82.0f;
+            const D2D1_RECT_F nameRect =
+                D2D1::RectF(item.left + 46.0f, item.top + 3.0f, textRight, item.top + 23.0f);
+            const D2D1_RECT_F subRect =
+                D2D1::RectF(item.left + 46.0f, item.top + 22.0f, textRight, item.bottom - 3.0f);
+            const std::wstring title = !rule.displayName.empty() ? rule.displayName
+                                       : !rule.processName.empty() ? rule.processName
+                                       : !rule.sourceId.empty()    ? rule.sourceId
+                                                                   : L"未知应用";
+            const std::wstring subtitle = !rule.processName.empty() ? rule.processName
+                                          : !rule.sourceId.empty()  ? rule.sourceId
+                                                                    : rule.packageFamilyName;
+            painter.drawTrimmedText(title, nameFormat, nameRect,
+                                    row.enabled ? p.text : p.disabled);
+            painter.drawTrimmedText(subtitle, pathFormat, subRect,
+                                    row.enabled ? p.textSecondary : p.disabled);
+
+            const D2D1_RECT_F deleteRect = row.appDeleteRects[i];
+            drawAction(deleteRect, L"移除", row.enabled, hovered, pressed);
+        }
+
+        if (count == 0) {
+            const wchar_t* emptyText =
+                row.enabled
+                    ? L"暂未添加应用，可从已检测到的 SMTC 应用或本地 EXE 添加"
+                    : L"开启通用识别并选择“仅白名单”或“排除黑名单”后可管理应用";
+            painter.drawText(emptyText, pathFormat,
+                             D2D1::RectF(innerX + 8.0f, listTop + 10.0f, innerRight - 8.0f,
+                                         listTop + 34.0f),
+                             row.enabled ? p.textSecondary : p.disabled);
+        }
+
+        const bool canAdd = row.enabled && count < kMaxGenericSmtcRules;
+        const bool addHovered = canAdd && ctx.hoverId == row.id && ctx.hoverOption == -1;
+        const bool addPressed = canAdd && ctx.pressedId == row.id && ctx.pressedOption == -1;
+        painter.fillRoundRect(
+            canAdd ? (addPressed ? p.accentPressed : addHovered ? p.accentHover : p.accent)
+                   : p.listHover,
+            row.addAppRect, 7.0f);
+        painter.strokeRoundRect(canAdd ? p.accent : p.disabled, row.addAppRect, 1.0f, 7.0f);
+        painter.drawText(L"添加应用…", painter.textFormat(fluent::font_sizes::label, 600, true, true),
+                         row.addAppRect, canAdd ? p.textOnAccent : p.disabled);
+        return;
+    }
+
+    const size_t count = ctx.idleApps.size();
 
     const D2D1_RECT_F toggleLabelRect =
         D2D1::RectF(row.controlRect.left - kIdleAppNamesToggleGap -

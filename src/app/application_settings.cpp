@@ -870,6 +870,38 @@ void App::applyQqLocalLyricsPersistOrder(bool on) {
     saveSettings();
 }
 
+void App::syncGenericSmtcFilterToMonitor() {
+    GenericSmtcFilterConfig config;
+    config.enabled = settings_.genericSmtcEnabled_;
+    config.mode = settings_.genericSmtcFilterMode_;
+    config.allowList = settings_.genericSmtcAllowList_;
+    config.blockList = settings_.genericSmtcBlockList_;
+    monitor.setGenericSmtcFilter(std::move(config));
+}
+
+void App::applyGenericSmtcEnabled(bool on) {
+    if (settings_.genericSmtcEnabled_ == on)
+        return;
+    settings_.genericSmtcEnabled_ = on;
+    syncGenericSmtcFilterToMonitor();
+    logSettingBool(L"generic-smtc", on);
+    refreshSettingsDialog();
+    saveSettings();
+}
+
+void App::applyGenericSmtcFilterMode(int mode) {
+    const auto next = mode == 1   ? GenericSmtcFilterMode::AllowList
+                      : mode == 2 ? GenericSmtcFilterMode::BlockList
+                                  : GenericSmtcFilterMode::All;
+    if (settings_.genericSmtcFilterMode_ == next)
+        return;
+    settings_.genericSmtcFilterMode_ = next;
+    syncGenericSmtcFilterToMonitor();
+    logSettingInt(L"generic-smtc-filter-mode", static_cast<int>(next));
+    refreshSettingsDialog();
+    saveSettings();
+}
+
 void App::setIdleAppNamesVisible(bool show) {
     if (settings_.idleAppNamesVisible_ == show)
         return;
@@ -932,6 +964,7 @@ void App::loadSettings() {
         settings_.readJson(loaded.document, idle_.hasTickTickToken(), migrateLegacyLogDirectory);
         playback_.lyricProvider().setQqLocalLyricsConfig(settings_.qqLocalLyricsEnabled_,
                                                          settings_.qqLocalLyricsPath_);
+        syncGenericSmtcFilterToMonitor();
     } catch (const std::exception&) {
         showSettingsError(L"load-exception",
                           L"读取设置文件时发生异常，文件可能损坏或当前账户没有访问权限。\n\n"
@@ -1303,6 +1336,13 @@ SettingsState App::currentSettingsState() const {
     st.qqLocalLyricsEnabled = settings_.qqLocalLyricsEnabled_;
     st.qqLocalLyricsPersistOrder = settings_.qqLocalLyricsPersistOrder_;
     st.qqLocalLyricsPath = settings_.qqLocalLyricsPath_;
+    st.genericSmtcEnabled = settings_.genericSmtcEnabled_;
+    st.genericSmtcFilterMode = static_cast<int>(settings_.genericSmtcFilterMode_);
+    if (settings_.genericSmtcFilterMode_ == GenericSmtcFilterMode::AllowList)
+        st.genericSmtcRules = settings_.genericSmtcAllowList_;
+    else if (settings_.genericSmtcFilterMode_ == GenericSmtcFilterMode::BlockList)
+        st.genericSmtcRules = settings_.genericSmtcBlockList_;
+    prepareGenericSmtcRuleIcons(st.genericSmtcRules);
     st.fontDesc = settings_.fontFamily_ + L", " +
                   std::to_wstring(static_cast<int>(std::lround(settings_.fontSize_))) + L"px, " +
                   fontStyleLabel(settings_.fontStyle_);
@@ -1440,6 +1480,10 @@ SettingsActions App::buildSettingsActions() {
     act.onQqLocalLyricsEnabled = [this](bool on) { applyQqLocalLyricsEnabled(on); };
     act.onQqLocalLyricsPersistOrder = [this](bool on) { applyQqLocalLyricsPersistOrder(on); };
     act.onPickQqLocalLyricsPath = [this] { pickQqLocalLyricsPath(); };
+    act.onGenericSmtcEnabled = [this](bool on) { applyGenericSmtcEnabled(on); };
+    act.onGenericSmtcFilterMode = [this](int mode) { applyGenericSmtcFilterMode(mode); };
+    act.onAddGenericSmtcApp = [this] { showAddGenericSmtcAppMenu(); };
+    act.onRemoveGenericSmtcApp = [this](int index) { removeGenericSmtcRule(index); };
     return act;
 }
 } // namespace lyrics_app

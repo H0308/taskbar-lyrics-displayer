@@ -225,6 +225,8 @@ std::vector<fluent::FluentMenuItem> App::buildMenuItems(bool fullTrayMenu,
         addItem(kCmdRuntimeLog, L"运行日志", settings_icon::Kind::Log);
     addItem(kCmdSettings, L"设置…", settings_icon::Kind::Settings);
     if (fullTrayMenu) {
+        addItem(kCmdGenericSmtc, L"通用 SMTC 识别", settings_icon::Kind::Platform,
+                settings_.genericSmtcEnabled_);
         addItem(kCmdAutoStart, L"开机自启动", settings_icon::Kind::Trigger, autoStartEnabled());
         addSeparator();
         addItem(kCmdAbout, L"检查更新…", settings_icon::Kind::Download);
@@ -419,6 +421,9 @@ void App::onMenuCommand(int cmd, const wchar_t* source) {
         break;
     case kCmdSettings:
         showSettings();
+        break;
+    case kCmdGenericSmtc:
+        applyGenericSmtcEnabled(!settings_.genericSmtcEnabled_);
         break;
     case kCmdAutoStart: {
         bool enable = !autoStartEnabled();

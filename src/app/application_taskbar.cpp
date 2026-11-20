@@ -276,11 +276,13 @@ void App::syncSpectrumWithMode() {
             }
         });
     }
-    if (anyHostActive) {
-        SmtcSnapshot snap = monitor.snapshot();
-        const wchar_t* processName = spectrumProcessName(snap.player);
-        if (*processName)
-            spectrum_.setTargetProcessName(std::wstring(processName));
+    const SmtcSnapshot snap = monitor.snapshot();
+    const AudioSessionTarget audioTarget = audioTargetForSnapshot(snap);
+    // 播放中但确实解析不到音频进程/包族的未知来源临时抑制频谱显示，不覆盖用户开关偏好。
+    const bool sourceBlocked = snap.sessionAlive && audioTarget.empty();
+    if (anyHostActive && !sourceBlocked) {
+        if (!audioTarget.empty())
+            spectrum_.setTarget(audioTarget);
         spectrum_.start();
         forEachHost([&](TaskbarHost* host) {
             host->setSpectrumVisible(display_rules::spectrumRequested(

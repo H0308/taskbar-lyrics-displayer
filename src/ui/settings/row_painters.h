@@ -1,6 +1,7 @@
 #pragma once
 
 #include "idle/idle_types.h"
+#include "media/generic_smtc_filter.h"
 #include "ui/fluent_dialog_surface.h"
 #include "ui/settings/artwork.h"
 #include "ui/settings/row.h"
@@ -18,6 +19,7 @@ struct RowPaintContext {
     SliderEditor& sliderEditor;
     COLORREF floatingCardBackgroundColor = RGB(255, 255, 255);
     std::span<const IdleAppInfo> idleApps;
+    std::span<const GenericSmtcAppRule> genericSmtcRules;
     UINT dpi = 96;
     bool idleAppDragging = false;
     int idleAppDragIndex = -1;

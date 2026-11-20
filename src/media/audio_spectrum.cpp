@@ -3,6 +3,7 @@
 #include "util/com_release.h"
 
 #include <windows.h>
+#include <appmodel.h>
 #include <audioclient.h>
 #include <audioclientactivationparams.h>
 #include <audiopolicy.h>
@@ -14,6 +15,7 @@
 #include <complex>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -28,51 +30,122 @@ constexpr float kMaxDb = -6.0f;
 constexpr float kRelease = 0.90f;              // 每个 FFT 帧的回落系数（~150ms 时间常数）
 constexpr ULONGLONG kNoDataRebuildMs = 2000;  // 连续无音频包约 2s 后重建捕获会话
 
-// 找目标播放器进程树根：父进程不是同名播放器进程的那个进程。
+bool matchesTargetProcessName(const wchar_t* exeName, const AudioSessionTarget& target) {
+    if (!exeName || !*exeName)
+        return false;
+    for (const auto& name : target.processNames) {
+        if (_wcsicmp(exeName, name.c_str()) == 0)
+            return true;
+    }
+    return false;
+}
+
+bool isTargetProcess(DWORD pid, const AudioSessionTarget& target) {
+    if (target.empty())
+        return false;
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process)
+        return false;
+
+    bool matched = false;
+    if (!target.processNames.empty()) {
+        wchar_t path[MAX_PATH]{};
+        DWORD length = static_cast<DWORD>(sizeof(path) / sizeof(path[0]));
+        if (QueryFullProcessImageNameW(process, 0, path, &length) != FALSE) {
+            const wchar_t* name = wcsrchr(path, L'\\');
+            matched = matchesTargetProcessName(name ? name + 1 : path, target);
+        }
+    }
+    if (!matched && !target.packageFamilyName.empty()) {
+        wchar_t family[PACKAGE_FAMILY_NAME_MAX_LENGTH + 1]{};
+        UINT32 length = static_cast<UINT32>(_countof(family));
+        if (GetPackageFamilyName(process, &length, family) == ERROR_SUCCESS &&
+            _wcsicmp(family, target.packageFamilyName.c_str()) == 0) {
+            matched = true;
+        }
+    }
+    CloseHandle(process);
+    return matched;
+}
+
+// 从活跃音频会话的 PID 沿着同名父进程向上追溯至该实例的进程树根，
+// 确保浏览器（Chrome/Edge/Firefox）与 Electron 应用的音频子进程被 INCLUDE 模式完整覆盖。
+DWORD resolveProcessTreeRootPid(DWORD activePid) {
+    if (activePid == 0)
+        return 0;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE)
+        return activePid;
+
+    struct ProcInfo {
+        DWORD parent = 0;
+        std::wstring exeName;
+    };
+    std::unordered_map<DWORD, ProcInfo> procs;
+    PROCESSENTRY32W pe{};
+    pe.dwSize = sizeof(pe);
+    for (BOOL ok = Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe)) {
+        procs.emplace(pe.th32ProcessID, ProcInfo{pe.th32ParentProcessID, pe.szExeFile});
+    }
+    CloseHandle(snap);
+
+    const auto selfIt = procs.find(activePid);
+    if (selfIt == procs.end())
+        return activePid;
+    const std::wstring targetExe = selfIt->second.exeName;
+    DWORD current = activePid;
+    for (int depth = 0; depth < 16; ++depth) {
+        const auto it = procs.find(current);
+        if (it == procs.end())
+            break;
+        const DWORD parent = it->second.parent;
+        if (parent == 0 || parent == current)
+            break;
+        const auto parentIt = procs.find(parent);
+        if (parentIt == procs.end() ||
+            _wcsicmp(parentIt->second.exeName.c_str(), targetExe.c_str()) != 0)
+            break;
+        current = parent;
+    }
+    return current;
+}
+
+// 找目标播放器进程树根：父进程不属于同一目标的那个进程。
 // 进程级回环捕获 INCLUDE 模式覆盖目标进程及其子进程，从树根捕获最完整。
-DWORD findProcessRootPid(const std::wstring& processName) {
+DWORD findProcessRootPid(const AudioSessionTarget& target) {
+    if (target.empty())
+        return 0;
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap == INVALID_HANDLE_VALUE)
         return 0;
 
     struct Proc { DWORD pid; DWORD parent; };
-    std::vector<Proc> qq;
+    std::vector<Proc> matched;
     PROCESSENTRY32W pe{};
     pe.dwSize = sizeof(pe);
     for (BOOL ok = Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe)) {
-        if (_wcsicmp(pe.szExeFile, processName.c_str()) == 0)
-            qq.push_back({pe.th32ProcessID, pe.th32ParentProcessID});
+        bool hit = matchesTargetProcessName(pe.szExeFile, target);
+        if (!hit && !target.packageFamilyName.empty())
+            hit = isTargetProcess(pe.th32ProcessID, target);
+        if (hit)
+            matched.push_back({pe.th32ProcessID, pe.th32ParentProcessID});
     }
     CloseHandle(snap);
 
-    for (const auto& p : qq) {
-        bool parentIsQQ = std::any_of(qq.begin(), qq.end(),
-                                      [&](const Proc& q) { return q.pid == p.parent; });
-        if (!parentIsQQ)
+    for (const auto& p : matched) {
+        bool parentMatched = std::any_of(matched.begin(), matched.end(),
+                                         [&](const Proc& q) { return q.pid == p.parent; });
+        if (!parentMatched)
             return p.pid;
     }
-    return qq.empty() ? 0 : qq.front().pid;
-}
-
-bool isTargetProcess(DWORD pid, const std::wstring& processName) {
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (!process)
-        return false;
-
-    wchar_t path[MAX_PATH]{};
-    DWORD length = static_cast<DWORD>(sizeof(path) / sizeof(path[0]));
-    bool match = QueryFullProcessImageNameW(process, 0, path, &length) != FALSE;
-    CloseHandle(process);
-    if (!match)
-        return false;
-
-    const wchar_t* name = wcsrchr(path, L'\\');
-    return _wcsicmp(name ? name + 1 : path, processName.c_str()) == 0;
+    return matched.empty() ? 0 : matched.front().pid;
 }
 
 // 从当前默认输出设备的活动音频会话中找真正产生声音的目标播放器进程。
 // 播放器重启后可能同时存在多个同名进程，不能再依赖进程快照中的第一个根进程。
-DWORD findPlayerAudioPid(const std::wstring& processName) {
+DWORD findPlayerAudioPid(const AudioSessionTarget& target) {
+    if (target.empty())
+        return 0;
     IMMDeviceEnumerator* devices = nullptr;
     IMMDevice* device = nullptr;
     IAudioSessionManager2* manager = nullptr;
@@ -106,7 +179,7 @@ DWORD findPlayerAudioPid(const std::wstring& processName) {
             hr = control->QueryInterface(__uuidof(IAudioSessionControl2),
                                           reinterpret_cast<void**>(&control2));
         if (SUCCEEDED(hr) && control2 && SUCCEEDED(control2->GetProcessId(&pid)) &&
-            pid != 0 && isTargetProcess(pid, processName))
+            pid != 0 && isTargetProcess(pid, target))
             result = pid;
 
         if (control2)
@@ -123,7 +196,7 @@ DWORD findPlayerAudioPid(const std::wstring& processName) {
         device->Release();
     if (devices)
         devices->Release();
-    return result;
+    return resolveProcessTreeRootPid(result);
 }
 
 // ActivateAudioInterfaceAsync 完成回调：把结果转交给等待中的捕获线程
@@ -332,20 +405,28 @@ void AudioSpectrum::stop() {
         v.store(0.0f, std::memory_order_relaxed);
 }
 
-void AudioSpectrum::setTargetProcessName(const std::wstring& processName) {
-    if (processName.empty())
+void AudioSpectrum::setTarget(AudioSessionTarget target) {
+    if (target.empty())
         return;
 
     bool changed = false;
     {
         std::lock_guard<std::mutex> lock(targetMutex_);
-        if (targetProcessName_ != processName) {
-            targetProcessName_ = processName;
+        if (target_ != target) {
+            target_ = std::move(target);
             changed = true;
         }
     }
     if (changed)
         requestReconnect();
+}
+
+void AudioSpectrum::setTargetProcessName(const std::wstring& processName) {
+    if (processName.empty())
+        return;
+    AudioSessionTarget target;
+    target.processNames.push_back(processName);
+    setTarget(std::move(target));
 }
 
 void AudioSpectrum::requestReconnect() {
@@ -370,16 +451,16 @@ void AudioSpectrum::run() {
 
     while (!stop_.load()) {
         reconnectRequested_.store(false, std::memory_order_release);
-        std::wstring processName;
+        AudioSessionTarget target;
         {
             std::lock_guard<std::mutex> lock(targetMutex_);
-            processName = targetProcessName_;
+            target = target_;
         }
         // 优先使用当前真正出声的目标播放器音频会话，避免重启后命中同名辅助进程。
         // 暂停或尚未开始播放时没有活动会话，再回退到进程树扫描。
-        DWORD pid = findPlayerAudioPid(processName);
+        DWORD pid = findPlayerAudioPid(target);
         if (!pid)
-            pid = findProcessRootPid(processName);
+            pid = findProcessRootPid(target);
         if (!pid) {
             for (auto& v : bands_)
                 v.store(0.0f, std::memory_order_relaxed);

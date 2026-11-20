@@ -91,6 +91,12 @@ void App::dispatchThreadMessage(const MSG& msg) {
         idleAppPickerOpen_ = false;
         if (payload && !payload->path.empty())
             addIdleApp(payload->path);
+    } else if (msg.message == kMsgGenericSmtcAppReady) {
+        auto payload =
+            std::unique_ptr<IdleAppPayload>(reinterpret_cast<IdleAppPayload*>(msg.lParam));
+        genericSmtcAppPickerOpen_ = false;
+        if (payload && !payload->path.empty())
+            addGenericSmtcRuleFromExe(payload->path);
     } else if (msg.message == kMsgIdleQuoteReady) {
         idle_.onIdleQuoteReady(
             std::unique_ptr<IdleQuotePayload>(reinterpret_cast<IdleQuotePayload*>(msg.lParam)));
@@ -215,6 +221,10 @@ bool App::initialize(HINSTANCE inst, bool wantTaskbar) {
             runtime_log::writef(L"[taskbar] started tray-only reason=taskbar-not-ready");
     }
 
+    monitor.setSourceTargetResolver([](const std::wstring& sourceId) {
+        return platform_icon::resolveSourceAudioTarget(SmtcPlayerType::Generic, sourceId);
+    });
+    syncGenericSmtcFilterToMonitor();
     monitor.start([this] { PostThreadMessageW(mainThread, kMsgSmtcChanged, 0, 0); });
     idle_.refreshHolidayCalendar(false);
     idle_.refreshIdleQuote(false);

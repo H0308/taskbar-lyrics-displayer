@@ -130,6 +130,7 @@ constexpr UINT kCmdTaskbarModeAppBar = 137;
 constexpr UINT kCmdAppBarTop = 138;
 constexpr UINT kCmdAppBarBottom = 139;
 constexpr UINT kCmdRestart = 140;
+constexpr UINT kCmdGenericSmtc = 141;
 constexpr int kCmdTaskbarMonitorAll = 150;
 constexpr int kCmdTaskbarMonitorBase = 151;
 constexpr int kDockQuickAppCommandBase = 21000;
@@ -164,8 +165,7 @@ std::wstring fallbackExeName(const std::wstring& path);
 std::wstring configDir();
 bool autoStartEnabled();
 bool setAutoStart(bool enable);
-const wchar_t* spectrumProcessName(SmtcPlayerType player);
-std::vector<std::wstring> volumeProcessNames(SmtcPlayerType player);
+AudioSessionTarget audioTargetForSnapshot(const SmtcSnapshot& snap);
 fluent::NativeMenuIcon ownMenuIcon(HICON icon);
 fluent::NativeMenuIcon shellIconForPath(const std::wstring& path);
 
@@ -295,6 +295,7 @@ private:
     std::wstring settingsPath_;
     bool qqLocalLyricsPickerOpen_ = false;
     bool idleAppPickerOpen_ = false;
+    bool genericSmtcAppPickerOpen_ = false;
 
     template <typename Fn> void forEachHost(Fn&& fn) {
         if (taskbarHost)
@@ -516,6 +517,24 @@ private:
     void applyQqLocalLyricsEnabled(bool on);
 
     void applyQqLocalLyricsPersistOrder(bool on);
+
+    void applyGenericSmtcEnabled(bool on);
+
+    void applyGenericSmtcFilterMode(int mode);
+
+    void syncGenericSmtcFilterToMonitor();
+
+    void showAddGenericSmtcAppMenu();
+
+    void pickGenericSmtcAppExe();
+
+    void addGenericSmtcRuleFromSource(const std::wstring& sourceId);
+
+    void addGenericSmtcRuleFromExe(const std::wstring& exePath);
+
+    void removeGenericSmtcRule(int index);
+
+    void prepareGenericSmtcRuleIcons(std::vector<GenericSmtcAppRule>& rules) const;
 
     void refreshIdleWelcome();
 

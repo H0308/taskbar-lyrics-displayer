@@ -27,6 +27,10 @@ constexpr float kIconLeft = 18.0f;
 constexpr float kIconSize = 16.0f;
 constexpr float kIconTextGap = 10.0f;
 constexpr float kGutter = kIconLeft + kIconSize + kIconTextGap;
+
+float itemTextLeft(const FluentMenuItem& item) {
+    return (item.nativeIcon || item.icon != settings_icon::Kind::None) ? kGutter : kIconLeft;
+}
 constexpr float kCheckRightPad = 28.0f;
 constexpr float kSubmenuCheckRightPad = 48.0f;
 constexpr float kRightPad = 36.0f;
@@ -77,6 +81,7 @@ struct MenuWnd {
             const auto& item = items[i];
             if (item.separator)
                 continue;
+            const float textLeft = itemTextLeft(item);
             const float stateSpace = item.checked
                 ? (item.submenu.empty() ? kCheckRightPad : kSubmenuCheckRightPad) + 10.0f
                 : kRightPad;
@@ -85,7 +90,7 @@ struct MenuWnd {
             if (!item.rightText.empty() &&
                 SUCCEEDED(dw->CreateTextLayout(item.rightText.c_str(),
                     static_cast<UINT32>(item.rightText.size()), fmt,
-                    std::max(1.0f, widthDip - kGutter - stateSpace), kItemH,
+                    std::max(1.0f, widthDip - textLeft - stateSpace), kItemH,
                     text.detail.GetAddressOf())) && text.detail) {
                 DWRITE_TEXT_METRICS metrics{};
                 text.detail->GetMetrics(&metrics);
@@ -93,7 +98,7 @@ struct MenuWnd {
                 labelRight -= text.detailWidth + kRightTextGap;
             }
             dw->CreateTextLayout(item.text.c_str(), static_cast<UINT32>(item.text.size()), fmt,
-                                 std::max(1.0f, labelRight - kGutter), kItemH,
+                                 std::max(1.0f, labelRight - textLeft), kItemH,
                                  text.label.GetAddressOf());
         }
     }
@@ -198,7 +203,7 @@ struct MenuWnd {
     }
 
     void measure(IDWriteFactory* dw, float& wDip) {
-        float maxText = 0;
+        float maxRow = 0;
         IDWriteTextFormat* f = nullptr;
         if (dw && SUCCEEDED(createUiTextFormat(dw, fluent::font_sizes::label, DWRITE_FONT_WEIGHT_NORMAL, &f)) &&
             f) {
@@ -217,14 +222,14 @@ struct MenuWnd {
                     const float stateSpace = it.checked
                         ? (it.submenu.empty() ? kCheckRightPad : kSubmenuCheckRightPad) + 10.0f
                         : kRightPad;
-                    maxText = std::max(maxText, m.width + stateSpace +
+                    maxRow = std::max(maxRow, itemTextLeft(it) + m.width + stateSpace +
                         (it.rightText.empty() ? 0.0f : kRightTextGap));
                     layout->Release();
                 }
             }
             f->Release();
         }
-        wDip = std::max(kMinWidth, maxText + kGutter + 18.0f);
+        wDip = std::max(kMinWidth, maxRow + 18.0f);
     }
 
     void render() {
@@ -349,7 +354,7 @@ struct MenuWnd {
             }
             brush->SetColor(it.enabled ? p.text : p.disabled);
             if (text.label)
-                rt->DrawTextLayout(D2D1::Point2F(kGutter, y), text.label.Get(), brush);
+                rt->DrawTextLayout(D2D1::Point2F(itemTextLeft(it), y), text.label.Get(), brush);
             if (!it.submenu.empty()) {
                 // 子菜单箭头
                 brush->SetColor(it.enabled ? p.textSecondary : p.disabled);

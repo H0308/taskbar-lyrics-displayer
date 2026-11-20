@@ -1181,8 +1181,13 @@ struct MediaPopup::Impl {
         UINT width = 0;
         UINT height = 0;
         if (!platform_icon::readSourceIconPixels(media.sourceAppUserModelId, pixels, width,
-                                                 height))
+                                                 height)) {
+            if (sourceIconLoadedFor != media.sourceAppUserModelId) {
+                sourceIconBmp.Reset();
+                sourceIconLoadedFor.clear();
+            }
             return;
+        }
 
         const auto props = D2D1::BitmapProperties1(
             D2D1_BITMAP_OPTIONS_NONE,
@@ -1965,7 +1970,8 @@ struct MediaPopup::Impl {
         const float cardH = popupHeightDip();
         const float infoW = textAreaWidth(w);
         updateScrollTimer(infoW);
-        mediaLayout_ = media_popup_detail::mediaPageLayout(w, cardOriginDip);
+        mediaLayout_ = media_popup_detail::mediaPageLayout(
+            w, cardOriginDip, media.durationMs > 0, !media.artist.empty());
 
         // 页面互切：把固定圆角底板、两页内容和横向位移动画一次性提交到
         // DComp。主表面保留上一张完整卡片，切换期间不再重绘。

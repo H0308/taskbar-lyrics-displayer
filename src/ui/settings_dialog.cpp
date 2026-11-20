@@ -100,21 +100,23 @@ settings_icon::Kind iconForPage(int page) {
     switch (page) {
     case 0:
         return settings_icon::Kind::Display;
-    case 1:
+    case kTaskbarModePage:
         return settings_icon::Kind::Background;
-    case 2:
+    case kPerformancePage:
         return settings_icon::Kind::Performance;
-    case 3:
+    case kFloatingCardPage:
         return settings_icon::Kind::Card;
-    case 4:
+    case kMediaPopupPage:
         return settings_icon::Kind::Media;
-    case 5:
+    case kPlayerPage:
+        return settings_icon::Kind::Platform;
+    case kSpectrumPage:
         return settings_icon::Kind::Spectrum;
-    case 6:
+    case kLyricsPage:
         return settings_icon::Kind::Lyrics;
-    case 7:
+    case kSongToastPage:
         return settings_icon::Kind::Toast;
-    case 8:
+    case kIdlePage:
         return settings_icon::Kind::Idle;
     default:
         return settings_icon::Kind::None;
@@ -190,10 +192,10 @@ struct SettingsDialog::Impl {
     POINT searchLocateInitialCursorPt{LONG_MIN, LONG_MIN};
     std::unique_ptr<ColorPickerDialog> colorPicker;
     std::array<std::wstring, kSettingsPageCount> navItems{
-        L"显示", L"展示模式", L"性能", L"悬浮卡片", L"媒体控件", L"频谱", L"歌词",
+        L"显示", L"展示模式", L"性能", L"悬浮卡片", L"媒体控件", L"识别播放器", L"频谱", L"歌词",
         L"切歌弹窗", L"每日一言与更多"};
     std::array<std::wstring, kSettingsPageCount> pageTitles{
-        L"显示", L"展示模式", L"性能", L"悬浮卡片", L"媒体控件", L"频谱", L"歌词",
+        L"显示", L"展示模式", L"性能", L"悬浮卡片", L"媒体控件", L"识别播放器", L"频谱", L"歌词",
         L"切歌弹窗", L"每日一言与更多"};
     D2D1_RECT_F navRect{};
     std::array<D2D1_RECT_F, kSettingsPageCount> navItemRects{};
@@ -1014,6 +1016,35 @@ struct SettingsDialog::Impl {
                 y += rowH + row.gapAfter;
                 continue;
             }
+            if (row.id == kIdGenericSmtcApps) {
+                const float titleTop = y + kTitleTopPadding;
+                placeIcon(titleTop);
+                row.labelRect = D2D1::RectF(labelX, titleTop, innerRight,
+                                            titleTop + row.titleHeight);
+                const float hintTop = titleTop + row.titleHeight + kTitleHintGap;
+                row.hintRect = D2D1::RectF(labelX, hintTop, innerRight, hintTop + 30.0f);
+                const float listTop = y + kIdleAppsListTop;
+                const size_t count = sections_.state.genericSmtcFilterMode == 0
+                                         ? 0
+                                         : sections_.state.genericSmtcRules.size();
+                row.appItemRects.reserve(count);
+                row.appDeleteRects.reserve(count);
+                for (size_t i = 0; i < count; ++i) {
+                    const float itemTop = listTop + static_cast<float>(i) * kIdleAppItemH;
+                    row.appItemRects.push_back(
+                        D2D1::RectF(innerX, itemTop, innerRight, itemTop + 44.0f));
+                    row.appDeleteRects.push_back(
+                        D2D1::RectF(innerRight - kIdleAppActionW - 12.0f, itemTop + 10.0f,
+                                    innerRight - 12.0f, itemTop + 40.0f));
+                }
+                row.addAppRect = D2D1::RectF(
+                    innerX + (innerRight - innerX - 132.0f) * 0.5f,
+                    y + rowH - 44.0f,
+                    innerX + (innerRight - innerX + 132.0f) * 0.5f,
+                    y + rowH - 12.0f);
+                y += rowH + row.gapAfter;
+                continue;
+            }
             if (row.id == kIdCoverEffect) {
                 const float titleTop = y + kTitleTopPadding;
                 placeIcon(titleTop);
@@ -1406,11 +1437,16 @@ struct SettingsDialog::Impl {
     }
 
     row_painters::RowPaintContext rowPaintContext() {
+        const std::span<const GenericSmtcAppRule> visibleGenericRules =
+            sections_.state.genericSmtcFilterMode == 0
+                ? std::span<const GenericSmtcAppRule>{}
+                : std::span<const GenericSmtcAppRule>{sections_.state.genericSmtcRules};
         return {
             artwork_,
             slider_,
             sections_.state.floatingCardBackgroundColor,
             sections_.state.idleApps,
+            visibleGenericRules,
             surface.dpi(),
             idleAppDragging,
             idleAppDragIndex,
@@ -1679,6 +1715,19 @@ struct SettingsDialog::Impl {
             if (!row.enabled)
                 continue;
             if (row.kind == ControlKind::AppList) {
+                if (row.id == kIdGenericSmtcApps) {
+                    for (size_t i = 0; i < row.appDeleteRects.size(); ++i) {
+                        if (contains(row.appDeleteRects[i], x, y)) {
+                            if (option)
+                                *option = static_cast<int>(i);
+                            return row.id;
+                        }
+                    }
+                    if (sections_.state.genericSmtcRules.size() < kMaxGenericSmtcRules &&
+                        contains(row.addAppRect, x, y))
+                        return row.id;
+                    continue;
+                }
                 if (contains(row.controlRect, x, y)) {
                     if (option)
                         *option = kIdleAppNamesOption;

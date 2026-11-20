@@ -1,15 +1,14 @@
 #include "ui/media_popup/page_painter.h"
 #include "media/player_source.h"
 #include "ui/fluent_theme.h"
+#include "ui/platform_icon.h"
 #include "util/com_release.h"
 #include <algorithm>
 #include <cmath>
 
 namespace media_popup_paint {
 std::wstring sourceLabel(const std::wstring& source) {
-    if (const auto* definition = player_source::find(source))
-        return definition->displayName;
-    return L"音乐播放器";
+    return platform_icon::resolveSourceDisplayName(source);
 }
 
 std::wstring formatPlaybackTime(int64_t milliseconds) {

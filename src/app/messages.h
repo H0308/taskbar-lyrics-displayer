@@ -15,5 +15,6 @@ constexpr UINT kMsgTaskbarNoSpace = WM_APP + 11;
 constexpr UINT kMsgQqCoverInfoReady = WM_APP + 12;
 constexpr UINT kMsgTaskbarRebuild = WM_APP + 13;
 constexpr UINT kMsgRequestQuit = WM_APP + 14;
+constexpr UINT kMsgGenericSmtcAppReady = WM_APP + 15;
 
 constexpr UINT_PTR kTimerTickTickStartupRetry = 6;

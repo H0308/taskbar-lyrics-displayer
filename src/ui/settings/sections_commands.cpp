@@ -318,6 +318,29 @@ void SettingsSections::onCommand(int id, int option) {
         if (actions.onPlatformIconVisible)
             actions.onPlatformIconVisible(row->checked);
         break;
+    case kIdGenericSmtcEnabled:
+        row->checked = !row->checked;
+        state.genericSmtcEnabled = row->checked;
+        syncPlayerRows(state);
+        if (actions.onGenericSmtcEnabled)
+            actions.onGenericSmtcEnabled(row->checked);
+        break;
+    case kIdGenericSmtcFilterMode:
+        state.genericSmtcFilterMode = std::clamp(row->selected, 0, 2);
+        syncPlayerRows(state);
+        if (actions.onGenericSmtcFilterMode)
+            actions.onGenericSmtcFilterMode(state.genericSmtcFilterMode);
+        break;
+    case kIdGenericSmtcApps:
+        if (option >= 0) {
+            if (static_cast<size_t>(option) < state.genericSmtcRules.size() &&
+                actions.onRemoveGenericSmtcApp)
+                actions.onRemoveGenericSmtcApp(option);
+        } else if (state.genericSmtcRules.size() < kMaxGenericSmtcRules &&
+                   actions.onAddGenericSmtcApp) {
+            actions.onAddGenericSmtcApp();
+        }
+        break;
     case kIdCoverEffect:
         if (actions.onCoverEffectVinyl)
             actions.onCoverEffectVinyl(row->selected == 1);

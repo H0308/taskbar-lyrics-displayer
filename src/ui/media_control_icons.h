@@ -11,6 +11,8 @@ struct Geometry {
     ID2D1PathGeometry* next = nullptr;
     ID2D1PathGeometry* repeat[3] = {nullptr, nullptr, nullptr}; // 顺序/列表、单曲、随机
     D2D1_RECT_F repeatBounds[3] = {};
+    ID2D1PathGeometry* musicNote = nullptr; // Segoe Fluent Icons / MDL2 Audio 音符字形
+    D2D1_RECT_F musicNoteBounds = {};
 };
 
 void release(Geometry& geometry);
@@ -32,5 +34,12 @@ void drawVolume(ID2D1RenderTarget* target, const D2D1_POINT_2F& center, float ra
 // 列表循环（mode 1）已不再参与轮换，若播放器自行上报则与顺序播放共用字形。
 void drawRepeat(ID2D1RenderTarget* target, const Geometry& geometry,
                 const D2D1_POINT_2F& center, float radius, ID2D1Brush* brush, int mode);
+
+// 系统 Fluent 图标字体（Segoe Fluent Icons / MDL2 Assets）的原生音符字形（U+E8D6），
+// 供无封面占位图与无来源图标兜底复用。持有 Geometry 的绘制方优先使用带 geometry 的重载。
+void drawMusicNote(ID2D1RenderTarget* target, const Geometry& geometry,
+                   const D2D1_POINT_2F& center, float size, ID2D1Brush* brush);
+void drawMusicNote(ID2D1RenderTarget* target, const D2D1_POINT_2F& center, float size,
+                   ID2D1Brush* brush);
 
 } // namespace media_control

@@ -88,9 +88,9 @@ public:
     LyricProvider(const LyricProvider&) = delete;
     LyricProvider& operator=(const LyricProvider&) = delete;
 
-    // 默认／优先在线／优先本地用于 QQ 音乐；Spotify 与椒盐音乐使用各自的
+    // 默认／优先在线／优先本地用于 QQ 音乐；Spotify、椒盐音乐与 Generic 使用各自的
     // 带专辑曲目键走通用在线多源路径，不读取 QQ 本地歌词索引。
-    enum class RequestSource { Default, PreferOnline, PreferLocal, Spotify, SaltPlayer };
+    enum class RequestSource { Default, PreferOnline, PreferLocal, Spotify, SaltPlayer, Generic };
 
     // 异步请求歌词；优先按版本标注匹配，无合适结果时按匹配分排序。
     // persistOrder 在后台保存单曲的本地/在线顺序标记，不阻塞调用线程。
@@ -145,6 +145,9 @@ public:
     // 椒盐音乐的曲目身份：同样带上专辑，避免同专辑不同版本的封面互相覆盖
     static std::wstring makeSaltPlayerKey(const std::wstring& title, const std::wstring& artist,
                                           const std::wstring& album, int64_t durationMs);
+    // 通用 SMTC 曲目身份：与 QQ 键隔离，携带专辑区分不同版本
+    static std::wstring makeGenericKey(const std::wstring& title, const std::wstring& artist,
+                                       const std::wstring& album, int64_t durationMs);
     // 二分定位：最后一个 ms <= positionMs 的行号；无则 -1
     static int findLine(const std::vector<LyricLine>& lines, int64_t positionMs);
 

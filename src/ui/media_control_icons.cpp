@@ -63,6 +63,7 @@ bool createRoundedTriangle(ID2D1Factory* factory, int direction,
 //   Shuffle    U+E8B1  —— 随机播放
 // ---------------------------------------------------------------------------
 constexpr UINT32 kRepeatCodepoints[3] = {0xE8EE, 0xE8ED, 0xE8B1}; // All / One / Shuffle
+constexpr UINT32 kMusicNoteCodepoint = 0xE8D6;                  // Audio 双音符（Fluent / MDL2）
 
 // 按优先级在系统字体里找图标字体（Win11 是 Segoe Fluent Icons，Win10 是 MDL2 Assets）。
 IDWriteFontFace* findIconFontFace(IDWriteFactory* dwrite) {
@@ -149,6 +150,8 @@ void createRepeatGlyphs(ID2D1Factory* factory, Geometry& geometry) {
             buildGlyphGeometry(factory, face, kRepeatCodepoints[i], &geometry.repeat[i],
                                &geometry.repeatBounds[i]);
         }
+        buildGlyphGeometry(factory, face, kMusicNoteCodepoint, &geometry.musicNote,
+                           &geometry.musicNoteBounds);
         face->Release();
     }
     dwrite->Release();
@@ -170,6 +173,8 @@ void release(Geometry& geometry) {
         releaseGeometry(geometry.repeat[i]);
         geometry.repeatBounds[i] = {};
     }
+    releaseGeometry(geometry.musicNote);
+    geometry.musicNoteBounds = {};
 }
 
 
@@ -444,6 +449,98 @@ void drawRepeat(ID2D1RenderTarget* target, const Geometry& geometry,
     // 让这组按钮的视觉分量对得上。
     target->DrawGeometry(glyph, brush, 0.045f);
     target->SetTransform(saved);
+}
+
+namespace {
+
+void drawMusicNoteGlyph(ID2D1RenderTarget* target, ID2D1PathGeometry* glyph,
+                        const D2D1_RECT_F& bounds, const D2D1_POINT_2F& center, float size,
+                        ID2D1Brush* brush) {
+    if (!target || !glyph || !brush || size <= 0.0f)
+        return;
+    const float glyphWidth = bounds.right - bounds.left;
+    const float glyphHeight = bounds.bottom - bounds.top;
+    const float extent = glyphWidth > glyphHeight ? glyphWidth : glyphHeight;
+    if (extent <= 0.0f)
+        return;
+
+    const float scale = size / extent;
+    const float glyphCenterX = (bounds.left + bounds.right) * 0.5f;
+    const float glyphCenterY = (bounds.top + bounds.bottom) * 0.5f;
+
+    // U+E8D6（双音符）左上方留空、双竖干与连杠集中在右侧，仅按几何包围盒居中会显得偏右偏下。
+    // 按实测像素视觉质心做光学偏移校正（区分 Win11 Segoe Fluent Icons 窄高型与 Win10 MDL2 方形）。
+    const bool narrowFluentGlyph = glyphWidth < glyphHeight * 0.92f;
+    const float opticalOffsetX = (narrowFluentGlyph ? -0.060f : -0.025f) * size;
+    const float opticalOffsetY = (narrowFluentGlyph ? -0.022f : -0.042f) * size;
+
+    D2D1_MATRIX_3X2_F saved{};
+    target->GetTransform(&saved);
+    target->SetTransform(
+        D2D1::Matrix3x2F::Scale(scale, scale) *
+        D2D1::Matrix3x2F::Translation(center.x + opticalOffsetX - glyphCenterX * scale,
+                                      center.y + opticalOffsetY - glyphCenterY * scale) *
+        saved);
+    target->FillGeometry(glyph, brush);
+    target->SetTransform(saved);
+}
+
+// 极少数缺少图标字体的环境兜底：用细圆头线条画一个简约柔和的圆润单音符。
+void drawMusicNoteFallback(ID2D1RenderTarget* target, const D2D1_POINT_2F& center, float size,
+                           ID2D1Brush* brush) {
+    const float stroke = size * 0.085f > 1.2f ? size * 0.085f : 1.2f;
+    const float rx = size * 0.17f;
+    const float ry = size * 0.13f;
+    const D2D1_POINT_2F head{center.x - size * 0.10f, center.y + size * 0.24f};
+    const float stemX = head.x + rx - stroke * 0.5f;
+    const D2D1_POINT_2F top{stemX, center.y - size * 0.34f};
+    target->DrawEllipse(D2D1::Ellipse(head, rx, ry), brush, stroke);
+    target->DrawLine(D2D1::Point2F(stemX, head.y), top, brush, stroke);
+    target->DrawLine(top, D2D1::Point2F(top.x + size * 0.28f, top.y + size * 0.14f), brush, stroke);
+}
+
+} // namespace
+
+void drawMusicNote(ID2D1RenderTarget* target, const Geometry& geometry,
+                   const D2D1_POINT_2F& center, float size, ID2D1Brush* brush) {
+    if (!target || !brush || size <= 0.0f)
+        return;
+    if (geometry.musicNote) {
+        drawMusicNoteGlyph(target, geometry.musicNote, geometry.musicNoteBounds, center, size,
+                           brush);
+        return;
+    }
+    drawMusicNote(target, center, size, brush);
+}
+
+void drawMusicNote(ID2D1RenderTarget* target, const D2D1_POINT_2F& center, float size,
+                   ID2D1Brush* brush) {
+    if (!target || !brush || size <= 0.0f)
+        return;
+
+    ID2D1Factory* factory = nullptr;
+    target->GetFactory(&factory);
+    ID2D1PathGeometry* glyph = nullptr;
+    D2D1_RECT_F bounds{};
+    if (factory) {
+        IDWriteFactory* dwrite = nullptr;
+        if (SUCCEEDED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+                                          reinterpret_cast<IUnknown**>(&dwrite))) &&
+            dwrite) {
+            if (IDWriteFontFace* face = findIconFontFace(dwrite)) {
+                buildGlyphGeometry(factory, face, kMusicNoteCodepoint, &glyph, &bounds);
+                face->Release();
+            }
+            dwrite->Release();
+        }
+    }
+
+    if (glyph) {
+        drawMusicNoteGlyph(target, glyph, bounds, center, size, brush);
+        glyph->Release();
+        return;
+    }
+    drawMusicNoteFallback(target, center, size, brush);
 }
 
 } // namespace media_control

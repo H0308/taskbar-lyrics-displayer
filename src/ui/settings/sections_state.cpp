@@ -473,6 +473,33 @@ void SettingsSections::syncThemeFontRows(const SettingsState& s) {
     }
 }
 
+void SettingsSections::syncPlayerRows(const SettingsState& s) {
+    const int mode = std::clamp(s.genericSmtcFilterMode, 0, 2);
+    if (auto* row = findRow(kIdGenericSmtcEnabled))
+        row->checked = s.genericSmtcEnabled;
+    if (auto* row = findRow(kIdGenericSmtcFilterMode)) {
+        row->selected = mode;
+        row->enabled = s.genericSmtcEnabled;
+    }
+    if (auto* row = findRow(kIdGenericSmtcApps)) {
+        row->text = mode == 1   ? L"白名单应用"
+                    : mode == 2 ? L"黑名单应用"
+                                : L"规则应用列表";
+        row->hint =
+            mode == 1
+                ? L"仅识别列表中的通用 SMTC 应用。"
+            : mode == 2
+                ? L"忽略列表中的通用 SMTC 应用，其余支持的软件正常识别。"
+                : L"切换为“仅白名单”或“排除黑名单”后可管理需要指定识别或排除的软件。";
+        row->showHint = true;
+        const size_t visibleCount = mode == 0 ? 0 : s.genericSmtcRules.size();
+        const size_t slots = std::max<size_t>(1, visibleCount);
+        row->minHeight = kIdleAppsBaseH + static_cast<float>(slots) * kIdleAppItemH;
+        row->height = row->minHeight;
+        row->enabled = s.genericSmtcEnabled && mode != 0;
+    }
+}
+
 void SettingsSections::update(const SettingsState& s) {
     state = s;
     syncThemeFontRows(s);
@@ -482,6 +509,7 @@ void SettingsSections::update(const SettingsState& s) {
     settings_ui::updateSpectrumRows(rows[kSpectrumPage], s);
     syncBackgroundRows(s);
     syncMediaControlRows(s);
+    syncPlayerRows(s);
     syncFloatingCardRows(s);
     syncSongToastRows(s);
     settings_ui::updateLyricRows(rows[kLyricsPage], s);

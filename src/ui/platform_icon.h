@@ -1,5 +1,8 @@
 #pragma once
 
+#include "media/audio_target.h"
+#include "media/smtc_monitor.h"
+
 #include <windows.h>
 
 #include <string>
@@ -10,10 +13,19 @@ namespace platform_icon {
 // 从已有 HICON 读取预乘 BGRA 像素；不接管图标句柄所有权。
 bool readHiconPixels(HICON icon, std::vector<BYTE>& pixels, UINT& width, UINT& height);
 
-// 从媒体来源标识对应的播放器进程读取预乘 BGRA 图标像素。
-// sourceAppUserModelId 可以是进程名、可访问的图标路径，或已适配的桥接器／应用名称。
+// 从媒体来源标识对应的应用（AppsFolder AUMID、运行中进程或可执行路径）读取预乘 BGRA 图标像素。
 bool readSourceIconPixels(const std::wstring& sourceAppUserModelId,
                           std::vector<BYTE>& pixels, UINT& width, UINT& height);
+
+// 解析媒体来源的应用展示名（优先白名单，其次系统 AppsFolder 名称与 EXE 文件描述，兜底“未知应用”）。
+std::wstring resolveSourceDisplayName(const std::wstring& sourceAppUserModelId);
+
+// 解析媒体来源对应的本地可执行文件路径（可供菜单提取原生 HICON），找不到时返回空。
+std::wstring resolveSourceExePath(const std::wstring& sourceAppUserModelId);
+
+// 解析媒体来源对应的音频目标（进程名列表与可选的 UWP/MSIX PackageFamilyName），供音量与频谱复用。
+AudioSessionTarget resolveSourceAudioTarget(SmtcPlayerType player,
+                                            const std::wstring& sourceAppUserModelId);
 
 // 从用户配置的 EXE 路径读取正常大小的图标与文件描述。
 bool readExeIconPixels(const std::wstring& path, std::vector<BYTE>& pixels, UINT& width,

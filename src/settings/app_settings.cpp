@@ -521,6 +521,35 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
     qqLocalLyricsEnabled_ = j.value("qqLocalLyricsEnabled", false);
     qqLocalLyricsPersistOrder_ = j.value("qqLocalLyricsPersistOrder", false);
     qqLocalLyricsPath_ = wideOf(j.value("qqLocalLyricsPath", std::string()));
+    genericSmtcEnabled_ = j.value("genericSmtcEnabled", false);
+    {
+        const std::string mode = j.value("genericSmtcFilterMode", std::string("all"));
+        if (mode == "allowlist")
+            genericSmtcFilterMode_ = GenericSmtcFilterMode::AllowList;
+        else if (mode == "blocklist")
+            genericSmtcFilterMode_ = GenericSmtcFilterMode::BlockList;
+        else
+            genericSmtcFilterMode_ = GenericSmtcFilterMode::All;
+    }
+    auto readRuleList = [&](const char* key, std::vector<GenericSmtcAppRule>& out) {
+        out.clear();
+        if (!j.contains(key) || !j[key].is_array())
+            return;
+        for (const auto& entry : j[key]) {
+            if (!entry.is_object() || out.size() >= kMaxGenericSmtcRules)
+                continue;
+            GenericSmtcAppRule rule;
+            rule.sourceId = wideOf(entry.value("sourceId", std::string()));
+            rule.processName = wideOf(entry.value("processName", std::string()));
+            rule.packageFamilyName = wideOf(entry.value("packageFamilyName", std::string()));
+            rule.displayName = wideOf(entry.value("displayName", std::string()));
+            if (rule.sourceId.empty() && rule.processName.empty() && rule.packageFamilyName.empty())
+                continue;
+            out.push_back(std::move(rule));
+        }
+    };
+    readRuleList("genericSmtcAllowList", genericSmtcAllowList_);
+    readRuleList("genericSmtcBlockList", genericSmtcBlockList_);
 }
 
 nlohmann::json AppSettings::toJson() const {
@@ -677,6 +706,25 @@ nlohmann::json AppSettings::toJson() const {
     j["qqLocalLyricsEnabled"] = qqLocalLyricsEnabled_;
     j["qqLocalLyricsPersistOrder"] = qqLocalLyricsPersistOrder_;
     j["qqLocalLyricsPath"] = utf8Of(qqLocalLyricsPath_);
+    j["genericSmtcEnabled"] = genericSmtcEnabled_;
+    j["genericSmtcFilterMode"] =
+        genericSmtcFilterMode_ == GenericSmtcFilterMode::AllowList ? "allowlist"
+        : genericSmtcFilterMode_ == GenericSmtcFilterMode::BlockList ? "blocklist"
+                                                                     : "all";
+    auto writeRuleList = [&](const char* key, const std::vector<GenericSmtcAppRule>& rules) {
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto& rule : rules) {
+            arr.push_back({
+                {"sourceId", utf8Of(rule.sourceId)},
+                {"processName", utf8Of(rule.processName)},
+                {"packageFamilyName", utf8Of(rule.packageFamilyName)},
+                {"displayName", utf8Of(rule.displayName)},
+            });
+        }
+        j[key] = std::move(arr);
+    };
+    writeRuleList("genericSmtcAllowList", genericSmtcAllowList_);
+    writeRuleList("genericSmtcBlockList", genericSmtcBlockList_);
     j["logDirectory"] = utf8Of(logDirectory_);
     j["logRetentionDays"] = logRetentionDays_;
     j["frameRate"] = frameRate_;

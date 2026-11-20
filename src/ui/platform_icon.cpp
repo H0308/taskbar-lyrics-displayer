@@ -1,21 +1,277 @@
 #include "platform_icon.h"
 #include "media/player_source.h"
 
+#include <appmodel.h>
 #include <objbase.h>
 #include <gdiplus.h>
+#include <knownfolders.h>
+#include <propsys.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <shobjidl.h>
 #include <tlhelp32.h>
 
+#include <algorithm>
 #include <cstring>
+#include <cwchar>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace {
 
 using platform_icon::AppLaunchResult;
+
+constexpr PROPERTYKEY kPkeyLinkTargetParsingPath = {
+    {0xB9B4B3FC, 0x2B51, 0x4A42, {0xB5, 0xD8, 0x32, 0x41, 0x46, 0xAF, 0xCF, 0x25}}, 2};
+constexpr PROPERTYKEY kPkeyAppUserModelPackageFamilyName = {
+    {0x9F4C2855, 0x9F79, 0x4B39, {0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3}}, 17};
+
+struct ComScope {
+    bool initialized = false;
+    ComScope() {
+        const HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        initialized = SUCCEEDED(hr);
+    }
+    ~ComScope() {
+        if (initialized)
+            CoUninitialize();
+    }
+};
+
+struct AppsFolderMetadata {
+    std::wstring displayName;
+    std::wstring targetPath;
+    std::wstring packageFamilyName;
+};
+
+bool hasExeExtension(const std::wstring& value) {
+    return value.size() > 4 && _wcsicmp(value.c_str() + value.size() - 4, L".exe") == 0;
+}
+
+std::wstring extractPackageFamilyName(const std::wstring& source) {
+    const size_t bang = source.find(L'!');
+    if (bang == std::wstring::npos || bang == 0)
+        return {};
+    std::wstring family = source.substr(0, bang);
+    if (family.find_first_of(L"\\/") != std::wstring::npos)
+        return {};
+    return family;
+}
+
+void pushUniqueProcessName(std::vector<std::wstring>& target, const std::wstring& name) {
+    if (name.empty())
+        return;
+    const bool exists = std::any_of(target.begin(), target.end(), [&](const std::wstring& item) {
+        return _wcsicmp(item.c_str(), name.c_str()) == 0;
+    });
+    if (!exists)
+        target.push_back(name);
+}
+
+bool readShellItemStringProperty(IShellItem2* item, REFPROPERTYKEY key, std::wstring& out) {
+    out.clear();
+    if (!item)
+        return false;
+    LPWSTR raw = nullptr;
+    if (FAILED(item->GetString(key, &raw)) || !raw)
+        return false;
+    out = raw;
+    CoTaskMemFree(raw);
+    return !out.empty();
+}
+
+constexpr ULONGLONG kNegativeCacheTtlMs = 30000;
+constexpr ULONGLONG kAudioTargetNegativeCacheTtlMs = 10000;
+
+bool queryAppsFolderMetadata(const std::wstring& sourceAppUserModelId, AppsFolderMetadata& out) {
+    out = {};
+    if (sourceAppUserModelId.empty() ||
+        sourceAppUserModelId.find_first_of(L"\\/") != std::wstring::npos)
+        return false;
+
+    struct CachedAppsFolder {
+        bool found = false;
+        AppsFolderMetadata data;
+        ULONGLONG expiresAtMs = 0; // 0 表示命中结果的长期缓存
+    };
+    static std::mutex cacheMutex;
+    static std::unordered_map<std::wstring, CachedAppsFolder> appsCache;
+    const ULONGLONG now = GetTickCount64();
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        if (const auto it = appsCache.find(sourceAppUserModelId); it != appsCache.end()) {
+            if (it->second.expiresAtMs == 0 || now < it->second.expiresAtMs) {
+                out = it->second.data;
+                return it->second.found;
+            }
+        }
+    }
+
+    ComScope com;
+    IShellItem2* item = nullptr;
+    bool found = false;
+    if (SUCCEEDED(SHCreateItemInKnownFolder(FOLDERID_AppsFolder, 0, sourceAppUserModelId.c_str(),
+                                            IID_PPV_ARGS(&item))) &&
+        item) {
+        LPWSTR displayName = nullptr;
+        if (SUCCEEDED(item->GetDisplayName(SIGDN_NORMALDISPLAY, &displayName)) && displayName) {
+            out.displayName = displayName;
+            CoTaskMemFree(displayName);
+        }
+
+        if (!readShellItemStringProperty(item, kPkeyLinkTargetParsingPath, out.targetPath)) {
+            LPWSTR filePath = nullptr;
+            if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &filePath)) && filePath) {
+                out.targetPath = filePath;
+                CoTaskMemFree(filePath);
+            }
+        }
+        readShellItemStringProperty(item, kPkeyAppUserModelPackageFamilyName, out.packageFamilyName);
+
+        item->Release();
+        found = !out.displayName.empty() || !out.targetPath.empty() || !out.packageFamilyName.empty();
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        if (appsCache.size() >= 64)
+            appsCache.clear();
+        appsCache[sourceAppUserModelId] =
+            CachedAppsFolder{found, out, found ? 0 : now + kNegativeCacheTtlMs};
+    }
+    return found;
+}
+
+bool readHbitmapPixels(HBITMAP bitmap, std::vector<BYTE>& pixels, UINT& width, UINT& height) {
+    if (!bitmap)
+        return false;
+
+    BITMAP bm{};
+    if (GetObjectW(bitmap, sizeof(bm), &bm) != sizeof(bm) || bm.bmWidth <= 0 || bm.bmHeight <= 0)
+        return false;
+
+    const UINT iconWidth = static_cast<UINT>(bm.bmWidth);
+    const UINT iconHeight = static_cast<UINT>(bm.bmHeight);
+    HDC screenDc = GetDC(nullptr);
+    if (!screenDc)
+        return false;
+
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = static_cast<LONG>(iconWidth);
+    bmi.bmiHeader.biHeight = -static_cast<LONG>(iconHeight);
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    std::vector<BYTE> colorPixels(static_cast<size_t>(iconWidth) * iconHeight * 4);
+    const bool fetched =
+        GetDIBits(screenDc, bitmap, 0, iconHeight, colorPixels.data(), &bmi, DIB_RGB_COLORS) ==
+        static_cast<int>(iconHeight);
+    ReleaseDC(nullptr, screenDc);
+    if (!fetched)
+        return false;
+
+    bool hasAlpha = false;
+    bool hasStraightAlpha = false;
+    for (size_t i = 0; i < colorPixels.size(); i += 4) {
+        const BYTE a = colorPixels[i + 3];
+        if (a != 0)
+            hasAlpha = true;
+        if (colorPixels[i] > a || colorPixels[i + 1] > a || colorPixels[i + 2] > a)
+            hasStraightAlpha = true;
+    }
+
+    auto premultiply = [](BYTE value, BYTE alpha) -> BYTE {
+        return static_cast<BYTE>((static_cast<unsigned>(value) * alpha + 127u) / 255u);
+    };
+    for (size_t i = 0; i < colorPixels.size(); i += 4) {
+        if (!hasAlpha) {
+            colorPixels[i + 3] = 255;
+            continue;
+        }
+        const BYTE alpha = colorPixels[i + 3];
+        if (alpha == 0) {
+            colorPixels[i] = colorPixels[i + 1] = colorPixels[i + 2] = 0;
+            continue;
+        }
+        if (hasStraightAlpha) {
+            colorPixels[i] = premultiply(colorPixels[i], alpha);
+            colorPixels[i + 1] = premultiply(colorPixels[i + 1], alpha);
+            colorPixels[i + 2] = premultiply(colorPixels[i + 2], alpha);
+        }
+    }
+
+    pixels = std::move(colorPixels);
+    width = iconWidth;
+    height = iconHeight;
+    return true;
+}
+
+bool readAppsFolderIconPixels(const std::wstring& sourceAppUserModelId, std::vector<BYTE>& pixels,
+                              UINT& width, UINT& height) {
+    if (sourceAppUserModelId.empty() ||
+        sourceAppUserModelId.find_first_of(L"\\/") != std::wstring::npos)
+        return false;
+
+    // 先复用元数据缓存，避免对已知不在 AppsFolder 中的无效标识重复发起 Shell 查询。
+    AppsFolderMetadata metadata;
+    if (!queryAppsFolderMetadata(sourceAppUserModelId, metadata))
+        return false;
+
+    ComScope com;
+    IShellItemImageFactory* factory = nullptr;
+    if (FAILED(SHCreateItemInKnownFolder(FOLDERID_AppsFolder, 0, sourceAppUserModelId.c_str(),
+                                         IID_PPV_ARGS(&factory))) ||
+        !factory)
+        return false;
+
+    HBITMAP hbm = nullptr;
+    const SIZE desiredSize{64, 64};
+    HRESULT hr = factory->GetImage(desiredSize, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK, &hbm);
+    if (FAILED(hr) || !hbm)
+        hr = factory->GetImage(desiredSize, SIIGBF_BIGGERSIZEOK, &hbm);
+    factory->Release();
+    if (FAILED(hr) || !hbm)
+        return false;
+
+    const bool ok = readHbitmapPixels(hbm, pixels, width, height);
+    DeleteObject(hbm);
+    return ok;
+}
+
+std::vector<DWORD> findProcessIdsByPackageFamily(const std::wstring& packageFamilyName) {
+    std::vector<DWORD> result;
+    if (packageFamilyName.empty())
+        return result;
+
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE)
+        return result;
+
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    if (Process32FirstW(snapshot, &entry)) {
+        do {
+            HANDLE process =
+                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID);
+            if (!process)
+                continue;
+            wchar_t family[PACKAGE_FAMILY_NAME_MAX_LENGTH + 1]{};
+            UINT32 length = static_cast<UINT32>(_countof(family));
+            const LONG rc = GetPackageFamilyName(process, &length, family);
+            CloseHandle(process);
+            if (rc == ERROR_SUCCESS && _wcsicmp(family, packageFamilyName.c_str()) == 0)
+                result.push_back(entry.th32ProcessID);
+        } while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return result;
+}
 
 std::wstring processImagePath(DWORD processId) {
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
@@ -289,6 +545,31 @@ std::wstring resolveSourceIconPath(const std::wstring& sourceAppUserModelId) {
         }
     }
 
+    const std::wstring family = extractPackageFamilyName(sourceAppUserModelId);
+    if (!family.empty()) {
+        for (DWORD pid : findProcessIdsByPackageFamily(family)) {
+            auto path = processImagePath(pid);
+            if (!path.empty())
+                return path;
+        }
+    }
+
+    AppsFolderMetadata metadata;
+    if (queryAppsFolderMetadata(sourceAppUserModelId, metadata)) {
+        if (!metadata.targetPath.empty()) {
+            const DWORD attrs = GetFileAttributesW(metadata.targetPath.c_str());
+            if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0)
+                return metadata.targetPath;
+        }
+        if (!metadata.packageFamilyName.empty()) {
+            for (DWORD pid : findProcessIdsByPackageFamily(metadata.packageFamilyName)) {
+                auto path = processImagePath(pid);
+                if (!path.empty())
+                    return path;
+            }
+        }
+    }
+
     DWORD attributes = GetFileAttributesW(sourceAppUserModelId.c_str());
     if (attributes != INVALID_FILE_ATTRIBUTES &&
         (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
@@ -555,8 +836,137 @@ bool readHiconPixels(HICON icon, std::vector<BYTE>& pixels, UINT& width, UINT& h
 
 bool readSourceIconPixels(const std::wstring& sourceAppUserModelId,
                           std::vector<BYTE>& pixels, UINT& width, UINT& height) {
+    if (sourceAppUserModelId.empty())
+        return false;
+
+    const bool knownSource = player_source::find(sourceAppUserModelId) != nullptr;
+    if (knownSource) {
+        const std::wstring path = resolveSourceIconPath(sourceAppUserModelId);
+        if (readIconPixelsFromPath(path, pixels, width, height))
+            return true;
+        return readAppsFolderIconPixels(sourceAppUserModelId, pixels, width, height);
+    }
+
+    // 白名单外 SMTC 会话（浏览器、UWP/MSIX 应用等）优先从系统 AppsFolder 提取原生图标，
+    // 失败后再回退到进程或可执行文件路径提取，兼容便携版桌面播放器。
+    if (readAppsFolderIconPixels(sourceAppUserModelId, pixels, width, height))
+        return true;
     const std::wstring path = resolveSourceIconPath(sourceAppUserModelId);
     return readIconPixelsFromPath(path, pixels, width, height);
+}
+
+std::wstring resolveSourceDisplayName(const std::wstring& sourceAppUserModelId) {
+    if (const auto* definition = player_source::find(sourceAppUserModelId))
+        return definition->displayName;
+    if (sourceAppUserModelId.empty())
+        return L"未知应用";
+
+    struct CachedName {
+        std::wstring name;
+        ULONGLONG expiresAtMs = 0; // 0 表示已解析成功的长期缓存，非 0 为未知来源负缓存
+    };
+    static std::mutex cacheMutex;
+    static std::unordered_map<std::wstring, CachedName> nameCache;
+    const ULONGLONG now = GetTickCount64();
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        if (const auto it = nameCache.find(sourceAppUserModelId); it != nameCache.end()) {
+            if (it->second.expiresAtMs == 0 || now < it->second.expiresAtMs)
+                return it->second.name;
+        }
+    }
+
+    std::wstring resolved;
+    AppsFolderMetadata metadata;
+    if (queryAppsFolderMetadata(sourceAppUserModelId, metadata) && !metadata.displayName.empty()) {
+        resolved = std::move(metadata.displayName);
+    } else {
+        const std::wstring path = resolveSourceIconPath(sourceAppUserModelId);
+        if (!path.empty())
+            readExeDisplayName(path, resolved);
+    }
+    if (resolved.empty() && hasExeExtension(sourceAppUserModelId))
+        resolved = fallbackExeName(sourceAppUserModelId);
+
+    const bool known = !resolved.empty();
+    std::wstring result = known ? std::move(resolved) : std::wstring(L"未知应用");
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        if (nameCache.size() >= 64)
+            nameCache.clear();
+        nameCache[sourceAppUserModelId] =
+            CachedName{result, known ? 0 : now + kNegativeCacheTtlMs};
+    }
+    return result;
+}
+
+std::wstring resolveSourceExePath(const std::wstring& sourceAppUserModelId) {
+    return resolveSourceIconPath(sourceAppUserModelId);
+}
+
+AudioSessionTarget resolveSourceAudioTarget(SmtcPlayerType player,
+                                            const std::wstring& sourceAppUserModelId) {
+    AudioSessionTarget target;
+    if (const auto* definition = player_source::find(player)) {
+        for (const wchar_t* name : definition->processNames) {
+            if (name && *name)
+                pushUniqueProcessName(target.processNames, name);
+        }
+        target.packageFamilyName = extractPackageFamilyName(sourceAppUserModelId);
+        return target;
+    }
+    if (sourceAppUserModelId.empty())
+        return target;
+
+    struct CachedTarget {
+        AudioSessionTarget target;
+        ULONGLONG expiresAtMs = 0; // 0 表示成功长期缓存，非 0 为失败负缓存
+    };
+    static std::mutex cacheMutex;
+    static std::unordered_map<std::wstring, CachedTarget> targetCache;
+    const ULONGLONG now = GetTickCount64();
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        if (const auto it = targetCache.find(sourceAppUserModelId); it != targetCache.end()) {
+            if (it->second.expiresAtMs == 0 || now < it->second.expiresAtMs)
+                return it->second.target;
+        }
+    }
+
+    target.packageFamilyName = extractPackageFamilyName(sourceAppUserModelId);
+    if (hasExeExtension(sourceAppUserModelId) ||
+        sourceAppUserModelId.find_first_of(L"\\/") != std::wstring::npos) {
+        const std::wstring fileName = fileNameFromPath(sourceAppUserModelId);
+        if (hasExeExtension(fileName))
+            pushUniqueProcessName(target.processNames, fileName);
+    }
+
+    AppsFolderMetadata metadata;
+    if (queryAppsFolderMetadata(sourceAppUserModelId, metadata)) {
+        if (!metadata.targetPath.empty()) {
+            const std::wstring fileName = fileNameFromPath(metadata.targetPath);
+            if (hasExeExtension(fileName))
+                pushUniqueProcessName(target.processNames, fileName);
+        }
+        if (target.packageFamilyName.empty() && !metadata.packageFamilyName.empty())
+            target.packageFamilyName = std::move(metadata.packageFamilyName);
+    }
+
+    // 若 AppsFolder 未返回目标路径（例如非标准安装的浏览器短标识），检查同名进程是否在运行。
+    if (target.empty() && sourceAppUserModelId.find_first_of(L"\\/! ") == std::wstring::npos) {
+        const std::wstring candidateExe = sourceAppUserModelId + L".exe";
+        if (!findProcessIds(candidateExe).empty())
+            pushUniqueProcessName(target.processNames, candidateExe);
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        if (targetCache.size() >= 64)
+            targetCache.clear();
+        targetCache[sourceAppUserModelId] =
+            CachedTarget{target, target.empty() ? now + kAudioTargetNegativeCacheTtlMs : 0};
+    }
+    return target;
 }
 
 bool readExeIconPixels(const std::wstring& path, std::vector<BYTE>& pixels, UINT& width,
@@ -626,8 +1036,14 @@ AppLaunchResult launchSourceApp(const std::wstring& sourceAppUserModelId) {
     if (sourceAppUserModelId.find_first_of(L"\\/") != std::wstring::npos)
         return launchConfiguredExe(sourceAppUserModelId);
 
+    std::vector<std::wstring> candidates = sourceProcessCandidates(sourceAppUserModelId);
+    const AudioSessionTarget audioTarget = resolveSourceAudioTarget(
+        player_source::resolvePlayerType(sourceAppUserModelId), sourceAppUserModelId);
+    for (const auto& procName : audioTarget.processNames)
+        pushUniqueProcessName(candidates, procName);
+
     std::vector<std::wstring> imagePaths;
-    for (const auto& candidate : sourceProcessCandidates(sourceAppUserModelId)) {
+    for (const auto& candidate : candidates) {
         const auto processIds = findProcessIds(candidate);
         auto imagePath = uniqueProcessImagePath(processIds);
         if (imagePath.empty())

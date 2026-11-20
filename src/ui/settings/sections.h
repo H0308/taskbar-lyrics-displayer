@@ -51,6 +51,7 @@ private:
     void createIdleRows();
     void createBackgroundRows();
     void createMediaControlRows();
+    void createPlayerRows();
     void createFloatingCardRows();
     void createSongToastRows();
     void createPerformanceRows();
@@ -63,6 +64,7 @@ private:
     void syncTaskbarModeRows(const SettingsState& s);
     void syncBackgroundRows(const SettingsState& s);
     void syncMediaControlRows(const SettingsState& s);
+    void syncPlayerRows(const SettingsState& s);
     void syncFloatingCardRows(const SettingsState& s);
     void syncSongToastRows(const SettingsState& s);
     void syncThemeFontRows(const SettingsState& s);

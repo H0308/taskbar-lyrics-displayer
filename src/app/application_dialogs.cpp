@@ -169,6 +169,285 @@ void App::pickIdleApp() {
     }).detach();
 }
 
+namespace {
+
+bool ruleAlreadyExists(const std::vector<GenericSmtcAppRule>& rules,
+                       const GenericSmtcAppRule& candidate) {
+    for (const auto& existing : rules) {
+        if (!candidate.sourceId.empty() && !existing.sourceId.empty() &&
+            _wcsicmp(existing.sourceId.c_str(), candidate.sourceId.c_str()) == 0)
+            return true;
+        if (!candidate.packageFamilyName.empty() && !existing.packageFamilyName.empty() &&
+            _wcsicmp(existing.packageFamilyName.c_str(), candidate.packageFamilyName.c_str()) == 0)
+            return true;
+        if (!candidate.processName.empty() && !existing.processName.empty() &&
+            candidate.sourceId.empty() && existing.sourceId.empty() &&
+            _wcsicmp(existing.processName.c_str(), candidate.processName.c_str()) == 0)
+            return true;
+    }
+    return false;
+}
+
+bool sourceMatchesRuleList(const std::vector<GenericSmtcAppRule>& rules,
+                           const std::wstring& sourceId) {
+    const AudioSessionTarget target =
+        platform_icon::resolveSourceAudioTarget(SmtcPlayerType::Generic, sourceId);
+    for (const auto& rule : rules) {
+        if (!rule.sourceId.empty() && _wcsicmp(sourceId.c_str(), rule.sourceId.c_str()) == 0)
+            return true;
+        if (!rule.packageFamilyName.empty() && !target.packageFamilyName.empty() &&
+            _wcsicmp(target.packageFamilyName.c_str(), rule.packageFamilyName.c_str()) == 0)
+            return true;
+        if (!rule.processName.empty()) {
+            for (const auto& proc : target.processNames) {
+                if (_wcsicmp(proc.c_str(), rule.processName.c_str()) == 0)
+                    return true;
+            }
+        }
+    }
+    return false;
+}
+
+} // namespace
+
+void App::prepareGenericSmtcRuleIcons(std::vector<GenericSmtcAppRule>& rules) const {
+    for (auto& rule : rules) {
+        if (rule.iconPixels && !rule.iconPixels->empty())
+            continue;
+        std::vector<BYTE> pixels;
+        UINT width = 0;
+        UINT height = 0;
+        bool loaded = false;
+        if (!rule.sourceId.empty())
+            loaded = platform_icon::readSourceIconPixels(rule.sourceId, pixels, width, height);
+        if (!loaded && !rule.processName.empty())
+            loaded = platform_icon::readSourceIconPixels(rule.processName, pixels, width, height);
+        if (loaded && !pixels.empty() && width > 0 && height > 0) {
+            rule.iconPixels = std::make_shared<std::vector<uint8_t>>(pixels.begin(), pixels.end());
+            rule.iconWidth = width;
+            rule.iconHeight = height;
+        }
+    }
+}
+
+void App::showAddGenericSmtcAppMenu() {
+    if (settings_.genericSmtcFilterMode_ == GenericSmtcFilterMode::All)
+        return;
+    const auto& currentList =
+        settings_.genericSmtcFilterMode_ == GenericSmtcFilterMode::AllowList
+            ? settings_.genericSmtcAllowList_
+            : settings_.genericSmtcBlockList_;
+    if (currentList.size() >= kMaxGenericSmtcRules)
+        return;
+
+    std::vector<std::wstring> detected = monitor.observedGenericSources();
+    const SmtcSnapshot snap = monitor.snapshot();
+    if (snap.sessionAlive && snap.player == SmtcPlayerType::Generic &&
+        !snap.sourceAppUserModelId.empty()) {
+        const bool exists = std::any_of(detected.begin(), detected.end(), [&](const auto& id) {
+            return _wcsicmp(id.c_str(), snap.sourceAppUserModelId.c_str()) == 0;
+        });
+        if (!exists)
+            detected.insert(detected.begin(), snap.sourceAppUserModelId);
+    }
+
+    constexpr int kCmdPickExe = 1;
+    constexpr int kCmdDetectedBase = 100;
+    std::vector<fluent::FluentMenuItem> items;
+    if (!detected.empty()) {
+        fluent::FluentMenuItem header;
+        header.text = L"已检测到的 SMTC 应用";
+        header.enabled = false;
+        items.push_back(std::move(header));
+
+        for (size_t i = 0; i < detected.size(); ++i) {
+            const std::wstring& sourceId = detected[i];
+            const bool alreadyAdded = sourceMatchesRuleList(currentList, sourceId);
+            std::wstring label = platform_icon::resolveSourceDisplayName(sourceId);
+            if (label == L"未知应用")
+                label += L" (" + sourceId + L")";
+            fluent::FluentMenuItem item;
+            item.id = kCmdDetectedBase + static_cast<int>(i);
+            item.text = std::move(label);
+            item.icon = settings_icon::Kind::MusicNote;
+            const std::wstring exePath = platform_icon::resolveSourceExePath(sourceId);
+            if (!exePath.empty())
+                item.nativeIcon = shellIconForPath(exePath);
+            item.checked = alreadyAdded;
+            item.enabled = !alreadyAdded;
+            items.push_back(std::move(item));
+        }
+    } else {
+        fluent::FluentMenuItem empty;
+        empty.text = L"暂未检测到其他应用（播放一下即可识别）";
+        empty.enabled = false;
+        items.push_back(std::move(empty));
+    }
+
+    fluent::FluentMenuItem sep;
+    sep.separator = true;
+    items.push_back(std::move(sep));
+
+    fluent::FluentMenuItem pickExe;
+    pickExe.id = kCmdPickExe;
+    pickExe.text = L"选择本地 EXE 文件…";
+    pickExe.icon = settings_icon::Kind::Folder;
+    items.push_back(std::move(pickExe));
+
+    POINT pt{};
+    GetCursorPos(&pt);
+    HWND owner = (settingsDialog && settingsDialog->isOpen()) ? settingsDialog->hwnd() : trayHwnd;
+    fluent::FluentMenu::show(owner, pt, std::move(items), [this, detected](int cmd) {
+        if (cmd == kCmdPickExe) {
+            pickGenericSmtcAppExe();
+            return;
+        }
+        if (cmd >= kCmdDetectedBase) {
+            const size_t idx = static_cast<size_t>(cmd - kCmdDetectedBase);
+            if (idx < detected.size())
+                addGenericSmtcRuleFromSource(detected[idx]);
+        }
+    });
+}
+
+void App::pickGenericSmtcAppExe() {
+    if (genericSmtcAppPickerOpen_)
+        return;
+
+    genericSmtcAppPickerOpen_ = true;
+    runtime_log::writef(L"[action][generic-smtc] choose-exe start");
+    const DWORD mainThreadId = mainThread;
+
+    std::thread([mainThreadId] {
+        std::wstring selectedPath;
+        const HRESULT init =
+            CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+        if (SUCCEEDED(init)) {
+            IFileOpenDialog* dialog = nullptr;
+            if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                           IID_PPV_ARGS(&dialog)))) {
+                const COMDLG_FILTERSPEC filters[] = {{L"应用程序 (*.exe)", L"*.exe"}};
+                DWORD options = 0;
+                if (SUCCEEDED(dialog->GetOptions(&options)))
+                    dialog->SetOptions(options | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST |
+                                       FOS_PATHMUSTEXIST);
+                dialog->SetFileTypes(_countof(filters), filters);
+                dialog->SetTitle(L"选择要添加的应用程序");
+                if (SUCCEEDED(dialog->Show(nullptr))) {
+                    IShellItem* item = nullptr;
+                    if (SUCCEEDED(dialog->GetResult(&item)) && item) {
+                        PWSTR path = nullptr;
+                        if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path) {
+                            selectedPath = path;
+                            CoTaskMemFree(path);
+                        }
+                        item->Release();
+                    }
+                }
+                dialog->Release();
+            }
+            CoUninitialize();
+        }
+
+        runtime_log::writef(L"[action][generic-smtc] choose-exe result=%s path=%s",
+                            selectedPath.empty() ? L"cancelled" : L"selected",
+                            selectedPath.c_str());
+        auto* payload = new IdleAppPayload{std::move(selectedPath)};
+        if (!PostThreadMessageW(mainThreadId, kMsgGenericSmtcAppReady, 0,
+                                reinterpret_cast<LPARAM>(payload)))
+            delete payload;
+    }).detach();
+}
+
+void App::addGenericSmtcRuleFromSource(const std::wstring& sourceId) {
+    if (sourceId.empty() || settings_.genericSmtcFilterMode_ == GenericSmtcFilterMode::All)
+        return;
+    auto& targetList =
+        settings_.genericSmtcFilterMode_ == GenericSmtcFilterMode::AllowList
+            ? settings_.genericSmtcAllowList_
+            : settings_.genericSmtcBlockList_;
+    if (targetList.size() >= kMaxGenericSmtcRules)
+        return;
+
+    const AudioSessionTarget audioTarget =
+        platform_icon::resolveSourceAudioTarget(SmtcPlayerType::Generic, sourceId);
+    GenericSmtcAppRule rule;
+    rule.sourceId = sourceId;
+    if (!audioTarget.processNames.empty())
+        rule.processName = audioTarget.processNames.front();
+    rule.packageFamilyName = audioTarget.packageFamilyName;
+    rule.displayName = platform_icon::resolveSourceDisplayName(sourceId);
+    if (ruleAlreadyExists(targetList, rule))
+        return;
+
+    targetList.push_back(std::move(rule));
+    runtime_log::writef(L"[action][generic-smtc] rule-added mode=%d source=%s",
+                        static_cast<int>(settings_.genericSmtcFilterMode_), sourceId.c_str());
+    syncGenericSmtcFilterToMonitor();
+    saveSettings();
+    refreshSettingsDialog();
+}
+
+void App::addGenericSmtcRuleFromExe(const std::wstring& exePath) {
+    if (exePath.empty() || !validExePath(exePath) ||
+        settings_.genericSmtcFilterMode_ == GenericSmtcFilterMode::All)
+        return;
+    auto& targetList =
+        settings_.genericSmtcFilterMode_ == GenericSmtcFilterMode::AllowList
+            ? settings_.genericSmtcAllowList_
+            : settings_.genericSmtcBlockList_;
+    if (targetList.size() >= kMaxGenericSmtcRules)
+        return;
+
+    const size_t slash = exePath.find_last_of(L"\\/");
+    const std::wstring fileName =
+        slash == std::wstring::npos ? exePath : exePath.substr(slash + 1);
+    if (fileName.empty())
+        return;
+
+    GenericSmtcAppRule rule;
+    rule.processName = fileName;
+    if (!platform_icon::readExeDisplayName(exePath, rule.displayName) || rule.displayName.empty())
+        rule.displayName = fallbackExeName(exePath);
+    std::vector<BYTE> pixels;
+    UINT width = 0;
+    UINT height = 0;
+    if (platform_icon::readExeIconPixels(exePath, pixels, width, height) && !pixels.empty()) {
+        rule.iconPixels = std::make_shared<std::vector<uint8_t>>(pixels.begin(), pixels.end());
+        rule.iconWidth = width;
+        rule.iconHeight = height;
+    }
+    if (ruleAlreadyExists(targetList, rule))
+        return;
+
+    targetList.push_back(std::move(rule));
+    runtime_log::writef(L"[action][generic-smtc] rule-added mode=%d exe=%s",
+                        static_cast<int>(settings_.genericSmtcFilterMode_), fileName.c_str());
+    syncGenericSmtcFilterToMonitor();
+    saveSettings();
+    refreshSettingsDialog();
+}
+
+void App::removeGenericSmtcRule(int index) {
+    if (settings_.genericSmtcFilterMode_ == GenericSmtcFilterMode::All)
+        return;
+    auto& targetList =
+        settings_.genericSmtcFilterMode_ == GenericSmtcFilterMode::AllowList
+            ? settings_.genericSmtcAllowList_
+            : settings_.genericSmtcBlockList_;
+    if (index < 0 || static_cast<size_t>(index) >= targetList.size())
+        return;
+
+    const auto& removed = targetList[static_cast<size_t>(index)];
+    runtime_log::writef(L"[action][generic-smtc] rule-removed mode=%d name=%s",
+                        static_cast<int>(settings_.genericSmtcFilterMode_),
+                        removed.displayName.c_str());
+    targetList.erase(targetList.begin() + index);
+    syncGenericSmtcFilterToMonitor();
+    saveSettings();
+    refreshSettingsDialog();
+}
+
 void App::showManualSearch(HINSTANCE inst) {
     runtime_log::writef(L"[action][dialog] open=manual-search title=%s artist=%s",
                         playback_.state().currentTitle.c_str(),

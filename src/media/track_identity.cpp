@@ -4,6 +4,7 @@
 namespace {
 constexpr wchar_t kSpotifyTrackPrefix[] = L"spotify|";
 constexpr wchar_t kSaltPlayerTrackPrefix[] = L"saltplayer|";
+constexpr wchar_t kGenericTrackPrefix[] = L"generic|";
 }
 
 std::wstring makeTrackKey(const SmtcSnapshot& snap) {
@@ -16,6 +17,8 @@ std::wstring makeTrackKey(const SmtcSnapshot& snap) {
         return LyricProvider::makeSpotifyKey(snap.title, snap.artist, snap.album, durationMs);
     if (snap.player == SmtcPlayerType::SaltPlayer)
         return LyricProvider::makeSaltPlayerKey(snap.title, snap.artist, snap.album, durationMs);
+    if (snap.player == SmtcPlayerType::Generic)
+        return LyricProvider::makeGenericKey(snap.title, snap.artist, snap.album, durationMs);
     const wchar_t* prefix = snap.player == SmtcPlayerType::Soda ? L"soda|" : L"qq|";
     return prefix + LyricProvider::makeKey(snap.title, snap.artist, durationMs);
 }
@@ -30,6 +33,8 @@ bool snapshotMatchesTrackKey(const SmtcSnapshot& snap, const std::wstring& key) 
             return key.empty() || key.starts_with(kSpotifyTrackPrefix);
         if (snap.player == SmtcPlayerType::SaltPlayer)
             return key.empty() || key.starts_with(kSaltPlayerTrackPrefix);
+        if (snap.player == SmtcPlayerType::Generic)
+            return key.empty() || key.starts_with(kGenericTrackPrefix);
         return key.empty() || key.starts_with(L"qq|") || key.starts_with(L"soda|");
     }
     return key.empty() || makeTrackKey(snap) == key;

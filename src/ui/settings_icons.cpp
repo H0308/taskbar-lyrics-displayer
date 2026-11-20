@@ -1,4 +1,5 @@
 #include "settings_icons.h"
+#include "media_control_icons.h"
 
 #include <algorithm>
 
@@ -468,6 +469,10 @@ void draw(ID2D1RenderTarget* target, Kind kind, const D2D1_RECT_F& bounds, ID2D1
         c.line(10.0f, 5.0f, 12.5f, 14.0f);
         c.line(12.5f, 14.0f, 15.0f, 8.0f);
         c.line(15.0f, 8.0f, 17.5f, 11.0f);
+        break;
+    case Kind::MusicNote:
+        media_control::drawMusicNote(target, D2D1::Point2F(c.cx, c.cy),
+                                     std::min(width, height) * 0.80f, brush);
         break;
     case Kind::None:
         break;

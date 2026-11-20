@@ -5,6 +5,7 @@
 #include <cmath>
 
 namespace media_popup_paint {
+
 void drawMediaTitles(const PagePaintContext& context, ID2D1DeviceContext* rt, float w,
                      IDWriteTextLayout* title, float titleW, float titleH, float titleOffset,
                      IDWriteTextLayout* artist, float artistW, float artistH, float artistOffset) {
@@ -34,7 +35,8 @@ void drawMediaPet(const PagePaintContext& context, ID2D1DeviceContext* rt, float
     }
     D2D1_MATRIX_3X2_F saved{};
     rt->GetTransform(&saved);
-    rt->SetTransform(D2D1::Matrix3x2F::Translation(0.0f, kMediaPetLaneTopDip) * saved);
+    rt->SetTransform(
+        D2D1::Matrix3x2F::Translation(0.0f, context.geometry.mediaLayout_.petTop) * saved);
     pet.draw(rt);
     rt->SetTransform(saved);
 }
@@ -108,18 +110,39 @@ void drawMediaSnapshot(const PagePaintContext& context, ID2D1DeviceContext* rt, 
 
 void drawSourceIcon(const PagePaintContext& context, ID2D1DeviceContext* rt,
                     const std::wstring& source) {
-    auto& brushAccent = context.resources.brushAccent;
-    auto& brushTextOnAccent = context.resources.brushTextOnAccent;
-    auto& fmtIcon = context.resources.fmtIcon;
+    auto& brushSecondary = context.resources.brushSecondary;
+    auto& brushControl = context.resources.brushControl;
     auto& sourceIconBmp = context.resources.sourceIconBmp;
     auto& sourceIconLoadedFor = context.resources.sourceIconLoadedFor;
 
     const D2D1_RECT_F iconRect = D2D1::RectF(20.0f, 15.0f, 36.0f, 31.0f);
     if (sourceIconBmp && sourceIconLoadedFor == source) {
         rt->DrawBitmap(sourceIconBmp, iconRect, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
-    } else {
-        rt->FillRoundedRectangle(D2D1::RoundedRect(iconRect, 5.0f, 5.0f), brushAccent);
-        drawText(rt, L"♪", fmtIcon, iconRect, brushTextOnAccent);
+        return;
+    }
+
+    // 未能提取应用图标时使用柔和中性底板 + 居中矢量音符，避免刺眼的纯色块与歪斜字符。
+    const bool lightSurface = usesBlackTextForControls(context, PopupPage::Media);
+    if (brushControl) {
+        const D2D1_COLOR_F saved = brushControl->GetColor();
+        const D2D1_ROUNDED_RECT badge = D2D1::RoundedRect(iconRect, 4.5f, 4.5f);
+        brushControl->SetColor(lightSurface ? D2D1::ColorF(0.06f, 0.08f, 0.12f, 0.08f)
+                                            : D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.11f));
+        rt->FillRoundedRectangle(badge, brushControl);
+        brushControl->SetColor(lightSurface ? D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.10f)
+                                            : D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.15f));
+        rt->DrawRoundedRectangle(
+            D2D1::RoundedRect(D2D1::RectF(iconRect.left + 0.4f, iconRect.top + 0.4f,
+                                          iconRect.right - 0.4f, iconRect.bottom - 0.4f),
+                              4.2f, 4.2f),
+            brushControl, 0.75f);
+        brushControl->SetColor(saved);
+    }
+    if (brushSecondary) {
+        const D2D1_POINT_2F center{(iconRect.left + iconRect.right) * 0.5f,
+                                   (iconRect.top + iconRect.bottom) * 0.5f};
+        media_control::drawMusicNote(rt, context.resources.controlGeometry, center, 10.0f,
+                                     brushSecondary);
     }
 }
 
@@ -146,9 +169,14 @@ void drawProgress(const PagePaintContext& context, ID2D1DeviceContext* rt, float
         !fmtTimeRight)
         return;
 
+    // 未上报有效总时长/进度时，本地时钟插值出的时间并不可靠，直接不展示进度条和时间。
+    if (content.durationMs <= 0)
+        return;
+
     const auto track = context.geometry.mediaLayout_.track;
     const float left = track.left, right = track.right;
     const float trackTop = track.top, trackBottom = track.bottom;
+    const int64_t displayPositionMs = std::clamp(positionMs, int64_t{0}, content.durationMs);
     const auto trackColor = brushProgressTrack->GetColor();
     auto subduedTrack = brushSecondary->GetColor();
     subduedTrack.a *= 0.30f;
@@ -156,18 +184,13 @@ void drawProgress(const PagePaintContext& context, ID2D1DeviceContext* rt, float
     rt->FillRoundedRectangle(D2D1::RoundedRect(track, 1.5f, 1.5f), brushProgressTrack);
     brushProgressTrack->SetColor(trackColor);
 
-    const int64_t displayPositionMs = content.durationMs > 0
-                                          ? std::clamp(positionMs, int64_t{0}, content.durationMs)
-                                          : std::max<int64_t>(positionMs, 0);
-    if (content.durationMs > 0) {
-        const float fraction = static_cast<float>(static_cast<double>(displayPositionMs) /
-                                                  static_cast<double>(content.durationMs));
-        const float fillRight = left + (right - left) * fraction;
-        if (fillRight > left)
-            rt->FillRoundedRectangle(
-                D2D1::RoundedRect(D2D1::RectF(left, trackTop, fillRight, trackBottom), 1.5f, 1.5f),
-                brushAccent);
-    }
+    const float fraction = static_cast<float>(static_cast<double>(displayPositionMs) /
+                                              static_cast<double>(content.durationMs));
+    const float fillRight = left + (right - left) * fraction;
+    if (fillRight > left)
+        rt->FillRoundedRectangle(
+            D2D1::RoundedRect(D2D1::RectF(left, trackTop, fillRight, trackBottom), 1.5f, 1.5f),
+            brushAccent);
 
     drawText(rt, formatPlaybackTime(displayPositionMs), fmtSource,
              context.geometry.mediaLayout_.timeLeft, brushSecondary);
@@ -225,13 +248,11 @@ void drawButton(const PagePaintContext& context, ID2D1DeviceContext* rt, int ind
 void drawCover(const PagePaintContext& context, ID2D1DeviceContext* rt, bool useCachedLayer) {
     auto& brushSecondary = context.resources.brushSecondary;
     auto& brushControl = context.resources.brushControl;
-    auto& fmtIcon = context.resources.fmtIcon;
     auto& coverBmp = context.resources.coverBmp;
     auto& coverClip = context.resources.coverClip;
     auto& coverLayer = context.resources.coverLayer;
 
     const D2D1_RECT_F rect = context.geometry.mediaLayout_.cover;
-    rt->FillRoundedRectangle(D2D1::RoundedRect(rect, 8.0f, 8.0f), brushControl);
     ID2D1Layer* temporaryLayer = nullptr;
     ID2D1Layer* clipLayer = useCachedLayer ? coverLayer : nullptr;
     if (coverBmp && coverClip && !clipLayer && FAILED(rt->CreateLayer(&temporaryLayer)))
@@ -251,7 +272,39 @@ void drawCover(const PagePaintContext& context, ID2D1DeviceContext* rt, bool use
     }
     if (temporaryLayer)
         temporaryLayer->Release();
-    drawText(rt, L"♪", fmtIcon, rect, brushSecondary);
+
+    // 无封面占位：贴合深浅主题的柔和半透明表面 + 细描边 + 淡唱片纹环 + 严格居中的矢量双音符。
+    const bool lightSurface = usesBlackTextForControls(context, PopupPage::Media);
+    const D2D1_POINT_2F center{(rect.left + rect.right) * 0.5f, (rect.top + rect.bottom) * 0.5f};
+    const float side = std::min(rect.right - rect.left, rect.bottom - rect.top);
+    if (brushControl) {
+        const D2D1_COLOR_F saved = brushControl->GetColor();
+        brushControl->SetColor(lightSurface ? D2D1::ColorF(0.08f, 0.10f, 0.15f, 0.085f)
+                                            : D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.085f));
+        rt->FillRoundedRectangle(D2D1::RoundedRect(rect, 8.0f, 8.0f), brushControl);
+
+        brushControl->SetColor(lightSurface ? D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.075f)
+                                            : D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.11f));
+        rt->DrawRoundedRectangle(
+            D2D1::RoundedRect(D2D1::RectF(rect.left + 0.5f, rect.top + 0.5f, rect.right - 0.5f,
+                                          rect.bottom - 0.5f),
+                              7.5f, 7.5f),
+            brushControl, 0.85f);
+
+        brushControl->SetColor(lightSurface ? D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.055f)
+                                            : D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.07f));
+        rt->DrawEllipse(D2D1::Ellipse(center, side * 0.34f, side * 0.34f), brushControl, 1.0f);
+        brushControl->SetColor(saved);
+    }
+    if (brushSecondary) {
+        const D2D1_COLOR_F saved = brushSecondary->GetColor();
+        D2D1_COLOR_F noteColor = saved;
+        noteColor.a *= 0.82f;
+        brushSecondary->SetColor(noteColor);
+        media_control::drawMusicNote(rt, context.resources.controlGeometry, center, side * 0.44f,
+                                     brushSecondary);
+        brushSecondary->SetColor(saved);
+    }
 }
 
 } // namespace media_popup_paint

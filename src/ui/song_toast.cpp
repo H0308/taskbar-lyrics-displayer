@@ -7,6 +7,7 @@
 #include "fluent_theme.h"
 #include "logging/runtime_logger.h"
 #include "graphics/composition_renderer.h"
+#include "media_control_icons.h"
 #include "platform_icon.h"
 
 #include <d2d1effects.h>
@@ -883,8 +884,6 @@ struct SongToast::Impl {
         const D2D1_RECT_F coverRect =
             D2D1::RectF(kCoverLeftDip, kCoverTopDip, kCoverLeftDip + kCoverSizeDip,
                         kCoverTopDip + kCoverSizeDip);
-        rt->FillRoundedRectangle(D2D1::RoundedRect(coverRect, kCoverRadiusDip, kCoverRadiusDip),
-                                  brushControl);
         if (coverBmp && coverClip && coverLayer) {
             rt->PushLayer(D2D1::LayerParameters1(
                               D2D1::InfiniteRect(), coverClip,
@@ -894,7 +893,28 @@ struct SongToast::Impl {
             rt->DrawBitmap(coverBmp, coverRect, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
             rt->PopLayer();
         } else {
-            drawText(rt, L"♪", fmtTitle, coverRect, brushSecondary);
+            const D2D1_POINT_2F center{(coverRect.left + coverRect.right) * 0.5f,
+                                       (coverRect.top + coverRect.bottom) * 0.5f};
+            const float side = kCoverSizeDip;
+            const bool lightToast = !fluent::isDarkMode(fluent::ThemeTarget::Window);
+            if (brushControl) {
+                const D2D1_COLOR_F saved = brushControl->GetColor();
+                brushControl->SetColor(lightToast ? D2D1::ColorF(0.08f, 0.10f, 0.15f, 0.085f)
+                                                  : D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.09f));
+                rt->FillRoundedRectangle(
+                    D2D1::RoundedRect(coverRect, kCoverRadiusDip, kCoverRadiusDip), brushControl);
+                brushControl->SetColor(lightToast ? D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.08f)
+                                                  : D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.12f));
+                rt->DrawRoundedRectangle(
+                    D2D1::RoundedRect(D2D1::RectF(coverRect.left + 0.5f, coverRect.top + 0.5f,
+                                                  coverRect.right - 0.5f, coverRect.bottom - 0.5f),
+                                      kCoverRadiusDip - 0.4f, kCoverRadiusDip - 0.4f),
+                    brushControl, 0.8f);
+                brushControl->SetColor(saved);
+            }
+            if (brushSecondary) {
+                media_control::drawMusicNote(rt, center, side * 0.44f, brushSecondary);
+            }
         }
 
         // 封面右下角的来源应用角标

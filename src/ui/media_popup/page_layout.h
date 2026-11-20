@@ -53,6 +53,8 @@ private:
 struct MediaPageLayout {
     std::array<D2D1_RECT_F, 4> buttons;
     D2D1_RECT_F source, sourceHit, title, artist, cover, track, timeLeft, timeRight;
+    float petTop = kMediaPetLaneTopDip;
 };
-MediaPageLayout mediaPageLayout(float width, float origin);
+MediaPageLayout mediaPageLayout(float width, float origin, bool hasDuration = true,
+                                bool hasArtist = true);
 } // namespace media_popup_detail

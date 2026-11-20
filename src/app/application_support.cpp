@@ -71,6 +71,8 @@ const wchar_t* trayCommandName(int command) {
         return L"manual-search";
     case kCmdRestart:
         return L"restart";
+    case kCmdGenericSmtc:
+        return L"generic-smtc";
     case kCmdExit:
         return L"exit";
     default:
@@ -230,17 +232,10 @@ bool setAutoStart(bool enable) {
     return ret == ERROR_SUCCESS;
 }
 
-const wchar_t* spectrumProcessName(SmtcPlayerType player) {
-    const auto* source = player_source::find(player);
-    return source && !source->processNames.empty() ? source->processNames.front() : L"";
-}
-
-std::vector<std::wstring> volumeProcessNames(SmtcPlayerType player) {
-    const auto* source = player_source::find(player);
-    if (!source)
+AudioSessionTarget audioTargetForSnapshot(const SmtcSnapshot& snap) {
+    if (!snap.sessionAlive)
         return {};
-    const auto names = source->processNames;
-    return {names.begin(), names.end()};
+    return platform_icon::resolveSourceAudioTarget(snap.player, snap.sourceAppUserModelId);
 }
 
 fluent::NativeMenuIcon ownMenuIcon(HICON icon) {

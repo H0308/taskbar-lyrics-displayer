@@ -1,5 +1,7 @@
 #pragma once
 
+#include "media/audio_target.h"
+
 #include <array>
 #include <atomic>
 #include <mutex>
@@ -21,8 +23,9 @@ public:
 
     void start();
     void stop();
-    // 设置当前 SMTC 播放源对应的可执行文件名，例如 QQMusic.exe 或 cloudmusic.exe。
-    // 目标变化时会要求捕获线程重建进程级回环会话。
+    // 设置当前 SMTC 播放源对应的进程/包族匹配目标；目标变化时会要求捕获线程重建进程级回环会话。
+    void setTarget(AudioSessionTarget target);
+    // 兼容单进程名入口，例如 QQMusic.exe 或 cloudmusic.exe。
     void setTargetProcessName(const std::wstring& processName);
 
     // 通知捕获线程：当前播放器的 SMTC 会话已关闭或重新建立。
@@ -38,5 +41,5 @@ private:
     std::atomic<bool> reconnectRequested_{false};
     std::array<std::atomic<float>, kBandCount> bands_{};
     mutable std::mutex targetMutex_;
-    std::wstring targetProcessName_ = L"QQMusic.exe";
+    AudioSessionTarget target_{{L"QQMusic.exe"}, {}};
 };

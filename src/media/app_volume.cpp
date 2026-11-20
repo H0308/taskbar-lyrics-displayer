@@ -1,6 +1,7 @@
 #include "app_volume.h"
 
 #include <windows.h>
+#include <appmodel.h>
 #include <audiopolicy.h>
 #include <mmdeviceapi.h>
 
@@ -15,26 +16,39 @@
 
 namespace {
 
-// 判断进程 ID 对应的进程镜像文件名是否与任一目标可执行文件名一致（不区分大小写）。
-bool isTargetProcess(DWORD pid, const std::vector<std::wstring>& processNames) {
+// 判断进程 ID 是否匹配目标可执行文件名列表或 UWP/MSIX PackageFamilyName（均不区分大小写）。
+bool isTargetProcess(DWORD pid, const AudioSessionTarget& target) {
+    if (target.empty())
+        return false;
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (!process)
         return false;
 
-    wchar_t path[MAX_PATH]{};
-    DWORD length = static_cast<DWORD>(sizeof(path) / sizeof(path[0]));
-    const bool match = QueryFullProcessImageNameW(process, 0, path, &length) != FALSE;
-    CloseHandle(process);
-    if (!match)
-        return false;
-
-    const wchar_t* name = wcsrchr(path, L'\\');
-    const wchar_t* baseName = name ? name + 1 : path;
-    for (const auto& target : processNames) {
-        if (_wcsicmp(baseName, target.c_str()) == 0)
-            return true;
+    bool matched = false;
+    if (!target.processNames.empty()) {
+        wchar_t path[MAX_PATH]{};
+        DWORD length = static_cast<DWORD>(sizeof(path) / sizeof(path[0]));
+        if (QueryFullProcessImageNameW(process, 0, path, &length) != FALSE) {
+            const wchar_t* name = wcsrchr(path, L'\\');
+            const wchar_t* baseName = name ? name + 1 : path;
+            for (const auto& candidate : target.processNames) {
+                if (_wcsicmp(baseName, candidate.c_str()) == 0) {
+                    matched = true;
+                    break;
+                }
+            }
+        }
     }
-    return false;
+    if (!matched && !target.packageFamilyName.empty()) {
+        wchar_t family[PACKAGE_FAMILY_NAME_MAX_LENGTH + 1]{};
+        UINT32 length = static_cast<UINT32>(_countof(family));
+        if (GetPackageFamilyName(process, &length, family) == ERROR_SUCCESS &&
+            _wcsicmp(family, target.packageFamilyName.c_str()) == 0) {
+            matched = true;
+        }
+    }
+    CloseHandle(process);
+    return matched;
 }
 
 // 音频会话事件：音量/静音变化和会话过期都通知上层刷新。
@@ -204,7 +218,7 @@ struct AppVolumeController::Impl {
         uint64_t generation = 0;
     };
 
-    std::vector<std::wstring> processNames;
+    AudioSessionTarget target;
     ChangedCallback onChanged;
 
     IMMDeviceEnumerator* devices = nullptr;
@@ -414,7 +428,7 @@ struct AppVolumeController::Impl {
             SUCCEEDED(control->QueryInterface(__uuidof(IAudioSessionControl2),
                                               reinterpret_cast<void**>(&control2))) &&
             control2 && SUCCEEDED(control2->GetProcessId(&pid)) && pid != 0 &&
-            isTargetProcess(pid, processNames) &&
+            isTargetProcess(pid, target) &&
             SUCCEEDED(control->QueryInterface(__uuidof(ISimpleAudioVolume),
                                               reinterpret_cast<void**>(&volume))) &&
             volume;
@@ -449,10 +463,10 @@ struct AppVolumeController::Impl {
             control2->Release();
     }
 
-    // 重新枚举默认输出设备上与目标进程名匹配的未过期会话（可跨多个进程）。
+    // 重新枚举默认输出设备上与目标进程名或包族匹配的未过期会话（可跨多个进程）。
     void refreshSessions() {
         clearSessions();
-        if (processNames.empty()) {
+        if (target.empty()) {
             clearPendingSessions();
             return;
         }
@@ -508,7 +522,7 @@ struct AppVolumeController::Impl {
     bool query(int& percent, bool& muted) {
         percent = 0;
         muted = false;
-        if (processNames.empty()) {
+        if (target.empty()) {
             clearPendingSessions();
             return false;
         }
@@ -564,11 +578,17 @@ struct AppVolumeController::Impl {
 AppVolumeController::AppVolumeController() : impl_(std::make_unique<Impl>()) {}
 AppVolumeController::~AppVolumeController() = default;
 
-void AppVolumeController::setTargetProcessNames(std::vector<std::wstring> processNames) {
-    if (impl_->processNames == processNames)
+void AppVolumeController::setTarget(AudioSessionTarget target) {
+    if (impl_->target == target)
         return;
-    impl_->processNames = std::move(processNames);
+    impl_->target = std::move(target);
     impl_->refreshSessions();
+}
+
+void AppVolumeController::setTargetProcessNames(std::vector<std::wstring> processNames) {
+    AudioSessionTarget target;
+    target.processNames = std::move(processNames);
+    setTarget(std::move(target));
 }
 
 void AppVolumeController::setChangedCallback(ChangedCallback cb) {
@@ -582,7 +602,7 @@ bool AppVolumeController::query(int& percent, bool& muted) {
 }
 
 bool AppVolumeController::setVolumePercent(int percent) {
-    if (impl_->processNames.empty())
+    if (impl_->target.empty())
         return false;
     const float level = std::clamp(percent, 0, 100) / 100.0f;
     const bool unmute = false; // 调整音量同时解除静音
@@ -590,7 +610,7 @@ bool AppVolumeController::setVolumePercent(int percent) {
 }
 
 bool AppVolumeController::setMuted(bool muted) {
-    if (impl_->processNames.empty())
+    if (impl_->target.empty())
         return false;
     int percent = 0;
     bool currentMuted = false;

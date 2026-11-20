@@ -1,5 +1,7 @@
 #pragma once
 
+#include "media/audio_target.h"
+
 #include <functional>
 #include <memory>
 #include <string>
@@ -19,8 +21,9 @@ public:
     AppVolumeController(const AppVolumeController&) = delete;
     AppVolumeController& operator=(const AppVolumeController&) = delete;
 
-    // 目标进程可执行文件名列表（如 QQMusic.exe；网易云为 cloudmusic.exe + 桥接插件
-    // NeteaseBridge.exe，两者在音量合成器中各占一格）。空列表表示无目标。
+    // 目标音频会话匹配条件（桌面进程文件名与可选的 UWP/MSIX PackageFamilyName）。空目标表示不可控。
+    void setTarget(AudioSessionTarget target);
+    // 目标进程可执行文件名列表（如 QQMusic.exe；网易云为 cloudmusic.exe + NeteaseBridge.exe）。
     void setTargetProcessNames(std::vector<std::wstring> processNames);
     void setChangedCallback(ChangedCallback cb);
 

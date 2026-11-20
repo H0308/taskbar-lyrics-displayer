@@ -269,6 +269,34 @@ void SettingsSections::createMediaControlRows() {
         kRowTallH);
 }
 
+void SettingsSections::createPlayerRows() {
+    addHeader(kPlayerPage, L"通用识别");
+    Row& genericSmtc = addRow(
+        kPlayerPage, kIdGenericSmtcEnabled, ControlKind::Toggle, L"通用 SMTC 识别",
+        L"开启后可识别浏览器及其他支持 Windows 系统媒体控制（SMTC）的应用；关闭后仅识别已深度适配的音乐播放器。",
+        40.0f, kRowTallH);
+    genericSmtc.checked = state.genericSmtcEnabled;
+    addRadio(kPlayerPage, kIdGenericSmtcFilterMode, L"识别范围", nullptr,
+             {L"全部应用", L"仅白名单", L"排除黑名单"},
+             std::clamp(state.genericSmtcFilterMode, 0, 2), state.genericSmtcEnabled, kRowH);
+    const int mode = std::clamp(state.genericSmtcFilterMode, 0, 2);
+    const wchar_t* listTitle = mode == 1   ? L"白名单应用"
+                               : mode == 2 ? L"黑名单应用"
+                                           : L"规则应用列表";
+    const wchar_t* listHint =
+        mode == 1
+            ? L"仅识别列表中的通用 SMTC 应用。"
+        : mode == 2
+            ? L"忽略列表中的通用 SMTC 应用，其余支持的软件正常识别。"
+            : L"切换为“仅白名单”或“排除黑名单”后可管理需要指定识别或排除的软件。";
+    const size_t visibleCount = mode == 0 ? 0 : state.genericSmtcRules.size();
+    Row& genericApps = addRow(
+        kPlayerPage, kIdGenericSmtcApps, ControlKind::AppList, listTitle, listHint, 0.0f,
+        kIdleAppsBaseH + static_cast<float>(std::max<size_t>(1, visibleCount)) * kIdleAppItemH);
+    genericApps.height = genericApps.minHeight;
+    genericApps.enabled = state.genericSmtcEnabled && mode != 0;
+}
+
 void SettingsSections::createFloatingCardRows() {
     const bool minimal = minimalModeActive();
     addHeader(kFloatingCardPage, L"行为");
@@ -369,6 +397,7 @@ void SettingsSections::create() {
     createIdleRows();
     createBackgroundRows();
     createMediaControlRows();
+    createPlayerRows();
     createFloatingCardRows();
     createSongToastRows();
     createPerformanceRows();

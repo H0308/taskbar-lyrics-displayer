@@ -12,6 +12,8 @@
 
 #include <winrt/Windows.Media.h>
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cwchar>
@@ -73,6 +75,8 @@ const wchar_t* playerName(SmtcPlayerType player) noexcept {
         return L"Spotify";
     case SmtcPlayerType::SaltPlayer:
         return L"Salt Player";
+    case SmtcPlayerType::Generic:
+        return L"Generic";
     default:
         return L"Unknown";
     }
@@ -195,6 +199,10 @@ struct SmtcMonitor::Impl {
 
     // 新播放器只需实现一个适配器并在这里注册，监控器本身不再增加播放器分支。
     std::vector<std::unique_ptr<smtc::SmtcPlayerAdapter>> adapters;
+    mutable std::mutex filterMtx;
+    GenericSmtcFilterConfig genericFilter;
+    SmtcMonitor::SourceTargetResolver sourceTargetResolver;
+    std::vector<std::wstring> observedGenericSourceIds;
 
     std::shared_ptr<RefreshSignal> refreshSignal = std::make_shared<RefreshSignal>();
     std::thread pollThread;
@@ -229,6 +237,9 @@ struct SmtcMonitor::Impl {
         adapters.emplace_back(std::make_unique<smtc::SampledSmtcAdapter>(SmtcPlayerType::Soda));
         adapters.emplace_back(std::make_unique<smtc::SampledSmtcAdapter>(SmtcPlayerType::Spotify));
         adapters.emplace_back(std::make_unique<smtc::SampledSmtcAdapter>(SmtcPlayerType::SaltPlayer));
+        // Generic 兜底必须注册在最后：identifySession 按顺序取第一个识别结果，
+        // 已知播放器先由专属适配器认领，其余 SMTC 会话统一走通用采样。
+        adapters.emplace_back(std::make_unique<smtc::SampledSmtcAdapter>(SmtcPlayerType::Generic));
     }
 
     ~Impl() {
@@ -437,13 +448,93 @@ struct SmtcMonitor::Impl {
         }
     }
 
+    void recordObservedGenericSession(const Session& candidate) {
+        if (!candidate)
+            return;
+        try {
+            const std::wstring sourceId = candidate.SourceAppUserModelId().c_str();
+            if (sourceId.empty() || player_source::find(sourceId) != nullptr)
+                return;
+            using Status =
+                winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus;
+            auto info = candidate.GetPlaybackInfo();
+            if (!info || info.PlaybackStatus() == Status::Closed)
+                return;
+            std::lock_guard<std::mutex> lk(filterMtx);
+            for (auto it = observedGenericSourceIds.begin(); it != observedGenericSourceIds.end();
+                 ++it) {
+                if (_wcsicmp(it->c_str(), sourceId.c_str()) == 0) {
+                    if (it != observedGenericSourceIds.begin())
+                        std::rotate(observedGenericSourceIds.begin(), it, it + 1);
+                    return;
+                }
+            }
+            observedGenericSourceIds.insert(observedGenericSourceIds.begin(), sourceId);
+            if (observedGenericSourceIds.size() > kMaxGenericSmtcRules)
+                observedGenericSourceIds.resize(kMaxGenericSmtcRules);
+        } catch (...) {
+        }
+    }
+
+    static bool matchesGenericRule(const std::wstring& sourceId,
+                                   const AudioSessionTarget& resolvedTarget,
+                                   const GenericSmtcAppRule& rule) {
+        if (!rule.sourceId.empty() && _wcsicmp(sourceId.c_str(), rule.sourceId.c_str()) == 0)
+            return true;
+        if (!rule.packageFamilyName.empty() && !resolvedTarget.packageFamilyName.empty() &&
+            _wcsicmp(resolvedTarget.packageFamilyName.c_str(), rule.packageFamilyName.c_str()) == 0)
+            return true;
+        if (!rule.processName.empty()) {
+            for (const auto& proc : resolvedTarget.processNames) {
+                if (_wcsicmp(proc.c_str(), rule.processName.c_str()) == 0)
+                    return true;
+            }
+            if (_wcsicmp(sourceId.c_str(), rule.processName.c_str()) == 0)
+                return true;
+        }
+        return false;
+    }
+
+    bool isGenericSourceAllowed(const std::wstring& sourceId) const {
+        if (sourceId.empty())
+            return false;
+        GenericSmtcFilterConfig config;
+        SmtcMonitor::SourceTargetResolver resolver;
+        {
+            std::lock_guard<std::mutex> lk(filterMtx);
+            config = genericFilter;
+            resolver = sourceTargetResolver;
+        }
+        if (!config.enabled)
+            return false;
+        if (config.mode == GenericSmtcFilterMode::All)
+            return true;
+
+        const auto& rules = config.mode == GenericSmtcFilterMode::AllowList ? config.allowList
+                                                                            : config.blockList;
+        if (rules.empty())
+            return config.mode == GenericSmtcFilterMode::BlockList;
+
+        AudioSessionTarget resolvedTarget;
+        if (resolver)
+            resolvedTarget = resolver(sourceId);
+        const bool matched = std::any_of(rules.begin(), rules.end(), [&](const auto& rule) {
+            return matchesGenericRule(sourceId, resolvedTarget, rule);
+        });
+        return config.mode == GenericSmtcFilterMode::AllowList ? matched : !matched;
+    }
+
     smtc::SmtcSessionIdentity identifySession(const Session& candidate) const {
         for (const auto& adapter : adapters) {
             if (!adapter)
                 continue;
             auto identity = adapter->identifySession(candidate);
-            if (identity.player != SmtcPlayerType::Unknown)
-                return identity;
+            if (identity.player == SmtcPlayerType::Unknown)
+                continue;
+            if (identity.player == SmtcPlayerType::Generic &&
+                !isGenericSourceAllowed(identity.sourceAppUserModelId))
+                continue;
+            return identity;
         }
         return {};
     }
@@ -933,12 +1024,16 @@ struct SmtcMonitor::Impl {
         Session selectedSession{ nullptr };
         bool selectedSessionAlive = false;
         SmtcPlayerType selectedPlayer = SmtcPlayerType::Unknown;
+        std::wstring selectedSourceId;
         {
             std::lock_guard<std::mutex> lk(mtx);
             selectedSession = session;
             selectedSessionAlive = snap.sessionAlive;
             selectedPlayer = snap.player;
+            selectedSourceId = snap.sourceAppUserModelId;
         }
+        const bool selectedGenericDisallowed =
+            selectedPlayer == SmtcPlayerType::Generic && !isGenericSourceAllowed(selectedSourceId);
         if (manager) {
             try {
                 // Windows 已经维护了“用户当前最可能想控制”的媒体会话。
@@ -976,6 +1071,8 @@ struct SmtcMonitor::Impl {
                 }
 
                 if (sessions) {
+                    for (auto const& candidate : sessions)
+                        recordObservedGenericSession(candidate);
                     if (rebuildWatchers)
                         watchSessions(sessions);
                     if (!found) {
@@ -999,8 +1096,8 @@ struct SmtcMonitor::Impl {
 
                 // 暂停或停止不是切换理由：已选中的会话仍存在时保持选中。否则网易云暂停后，
                 // Windows 当前会话若指向另一个暂停的播放器（如 QQ 音乐），显示会跳走，
-                // 后续控制按钮也会作用到错误的会话上。
-                if (!found && selectedSessionAlive && sessions) {
+                // 后续控制按钮也会作用到错误的会话上。当通用 SMTC 开关关闭或当前应用被规则排除时不再保留。
+                if (!found && selectedSessionAlive && !selectedGenericDisallowed && sessions) {
                     for (auto const& candidate : sessions) {
                         if (smtc::sameSession(selectedSession, candidate) &&
                             isResponsiveSession(candidate)) {
@@ -1058,7 +1155,7 @@ struct SmtcMonitor::Impl {
             }
         }
 
-        if (!found && selectedSessionAlive && selectedSession) {
+        if (!found && selectedSessionAlive && selectedSession && !selectedGenericDisallowed) {
             // 汽水、Spotify 和椒盐音乐的展示以 SMTC 会话为准，会话消失后不能仅凭进程维持展示。
             // 仍经过下面的稳定窗口，短暂的会话重建不会立即清空展示。
             if (selectedPlayer != SmtcPlayerType::Soda &&
@@ -1310,6 +1407,35 @@ void SmtcMonitor::start(ChangeCallback onChange) {
     impl_->onChange = std::move(onChange);
     impl_->startThumbnailReader();
     impl_->startPolling();
+}
+
+void SmtcMonitor::setSourceTargetResolver(SourceTargetResolver resolver) {
+    std::lock_guard<std::mutex> lk(impl_->filterMtx);
+    impl_->sourceTargetResolver = std::move(resolver);
+}
+
+void SmtcMonitor::setGenericSmtcFilter(GenericSmtcFilterConfig config) {
+    {
+        std::lock_guard<std::mutex> lk(impl_->filterMtx);
+        impl_->genericFilter = std::move(config);
+    }
+    Impl::requestRefresh(impl_->refreshSignal);
+}
+
+void SmtcMonitor::setGenericSmtcEnabled(bool enabled) {
+    bool changed = false;
+    {
+        std::lock_guard<std::mutex> lk(impl_->filterMtx);
+        changed = impl_->genericFilter.enabled != enabled;
+        impl_->genericFilter.enabled = enabled;
+    }
+    if (changed)
+        Impl::requestRefresh(impl_->refreshSignal);
+}
+
+std::vector<std::wstring> SmtcMonitor::observedGenericSources() const {
+    std::lock_guard<std::mutex> lk(impl_->filterMtx);
+    return impl_->observedGenericSourceIds;
 }
 
 SmtcSnapshot SmtcMonitor::snapshot() const {
