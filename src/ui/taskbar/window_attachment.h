@@ -11,4 +11,5 @@ public:
 
 private:
     bool embedded_ = false;
+    unsigned attachFailCount_ = 0;
 };
