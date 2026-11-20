@@ -73,6 +73,8 @@ const wchar_t* playerName(SmtcPlayerType player) noexcept {
         return L"Spotify";
     case SmtcPlayerType::SaltPlayer:
         return L"Salt Player";
+    case SmtcPlayerType::Generic:
+        return L"Generic";
     default:
         return L"Unknown";
     }
@@ -229,6 +231,9 @@ struct SmtcMonitor::Impl {
         adapters.emplace_back(std::make_unique<smtc::SampledSmtcAdapter>(SmtcPlayerType::Soda));
         adapters.emplace_back(std::make_unique<smtc::SampledSmtcAdapter>(SmtcPlayerType::Spotify));
         adapters.emplace_back(std::make_unique<smtc::SampledSmtcAdapter>(SmtcPlayerType::SaltPlayer));
+        // Generic 兜底必须注册在最后：identifySession 按顺序取第一个识别结果，
+        // 已知播放器先由专属适配器认领，其余 SMTC 会话（浏览器等）统一走通用采样。
+        adapters.emplace_back(std::make_unique<smtc::SampledSmtcAdapter>(SmtcPlayerType::Generic));
     }
 
     ~Impl() {

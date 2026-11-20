@@ -39,6 +39,8 @@ const wchar_t* playerName(SmtcPlayerType player) {
         return L"Spotify";
     case SmtcPlayerType::SaltPlayer:
         return L"Salt Player";
+    case SmtcPlayerType::Generic:
+        return L"Generic SMTC";
     default:
         return L"Unknown";
     }
@@ -171,7 +173,11 @@ TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap,
                 state_.lyricRequestStale_ = false;
                 ++state_.requestGeneration_;
             }
-        } else if (snap.player == SmtcPlayerType::Spotify) {
+        } else if (snap.player == SmtcPlayerType::Spotify ||
+                   snap.player == SmtcPlayerType::Generic) {
+            // Spotify 与 Generic 会话均来自 SMTC 快照，无切歌事件批合并问题，直接请求；
+            // Generic 不能落入下方 QQ 防抖分支：onLyricDebounce 只放行 QQ/椒盐，
+            // 否则防抖到期后请求会被丢弃，表现为永远不自动加载歌词。
             cancelLyricDebounce();
             if (!snap.title.empty()) {
                 startLyricRequest(snap);

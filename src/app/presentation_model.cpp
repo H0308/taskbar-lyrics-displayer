@@ -21,6 +21,8 @@ const wchar_t* notRunningStatus(const PlaybackState& playback) {
         return L"Spotify 未运行";
     if (playback.lastPlayer_ == SmtcPlayerType::SaltPlayer)
         return L"椒盐音乐未运行";
+    if (playback.lastPlayer_ == SmtcPlayerType::Generic)
+        return L"播放器未运行";
     return playback.lastPlayer_ == SmtcPlayerType::NetEase ? L"网易云音乐未运行" : L"QQ 音乐未运行";
 }
 

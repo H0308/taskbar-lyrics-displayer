@@ -8,7 +8,8 @@
 
 enum class PlaybackStatus { Stopped, Playing, Paused, Other };
 
-enum class SmtcPlayerType { Unknown, QQMusic, NetEase, Soda, Spotify, SaltPlayer };
+// Generic：白名单外任意 SMTC 会话的兜底类型，走与 Spotify/椒盐相同的通用采样路径。
+enum class SmtcPlayerType { Unknown, QQMusic, NetEase, Soda, Spotify, SaltPlayer, Generic };
 
 // SMTC 统一快照：锚点进度 + 本机时间，渲染侧据此插值
 struct SmtcSnapshot {

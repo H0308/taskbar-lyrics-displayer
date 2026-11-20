@@ -1131,6 +1131,10 @@ void LyricProvider::setManualOverride(const std::wstring& title, const std::wstr
                                       int64_t durationMs, std::vector<LyricLine> lines,
                                       SongInfo info, SmtcPlayerType player,
                                       const std::wstring& album) {
+    // Generic 会话的歌词请求在 requestAsync 内按 QQMusic 键读取；写入侧同样归一化，
+    // 保证通用播放器上手动指定的歌词与 QQ 曲目键互通，重启后仍可命中。
+    if (player == SmtcPlayerType::Generic)
+        player = SmtcPlayerType::QQMusic;
     std::lock_guard<std::mutex> lk(impl_->mtx);
     const std::wstring key =
         player == SmtcPlayerType::SaltPlayer

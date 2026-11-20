@@ -14,7 +14,12 @@ SmtcSessionIdentity SampledSmtcAdapter::identifySession(const Session& session) 
     try {
         identity.sourceAppUserModelId = session.SourceAppUserModelId().c_str();
         const auto* source = player_source::find(identity.sourceAppUserModelId);
-        if (source && source->player == playerType()) {
+        // Generic 实例兜底接管所有白名单之外的 SMTC 会话；已知播放器仍由注册顺序
+        // 在前的专属适配器识别，已关闭或无来源标识的会话不做兜底，保持原有语义。
+        const bool matches = player_ == SmtcPlayerType::Generic
+                                 ? (source == nullptr && !identity.sourceAppUserModelId.empty())
+                                 : (source && source->player == player_);
+        if (matches) {
             // 系统可能暂留已关闭的来源标识，不能将其重新绑定为有效会话。
             using Status =
                 winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus;
