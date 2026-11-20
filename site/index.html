@@ -100,8 +100,8 @@
     <section class="highlights">
       <div class="container highlights-grid">
         <div class="hl reveal"><strong>C++ 原生</strong><span>无 Electron、WebView 和 .NET/WPF 运行时，日常使用占用内存20~80MB<sup class="feature-footnote"><a href="#memory-note" aria-label="查看内存占用说明">1</a></sup></span></div>
-        <div class="hl reveal"><strong>多播放器支持</strong><span>QQ 音乐、网易云音乐、汽水音乐、Spotify、椒盐音乐，自动识别当前播放来源</span></div>
-        <div class="hl reveal"><strong>逐字高亮</strong><span>逐字时间轴按像素进度平滑填充</span></div>
+        <div class="hl reveal"><strong>多播放器支持</strong><span>自动识别当前播放来源，可开启通用 SMTC 识别以支持浏览器等应用</span></div>
+        <div class="hl reveal"><strong>逐字高亮</strong><span>逐字歌词平滑填充，逐行歌词可按行时长模拟逐字推进</span></div>
         <div class="hl reveal"><strong>音频频谱</strong><span>只捕获当前播放器的音频，不受其他软件发声影响</span></div>
       </div>
     </section>
@@ -125,7 +125,7 @@
         <div class="feature-row reverse reveal">
           <div class="feature-text">
             <h2>逐字跟唱与辅助歌词</h2>
-            <p>支持多格式歌词：逐字歌词平滑填充，支持底深顶浅的已播放色连续渐变，LRC 整行高亮；外文歌曲可显示翻译或罗马音，辅助歌词可一键切换；没有辅助歌词时可开启双行模式，同时预览当前行与下一行。</p>
+            <p>逐字歌词平滑填充，支持底深顶浅的已播放色连续渐变。普通 LRC 等逐行歌词可开启<a href="docs.html#settings-lyrics">「逐行歌词模拟逐字效果」</a>，按当前行的估算时长逐字推进，并联动歌词特效。外文歌曲可显示翻译或罗马音，没有辅助歌词时可开启双行模式，预览下一行。</p>
             <p>星尘跟唱让五角星沿逐字进度跳动、缓慢旋转，并留下向后散开的流星粒子；逐字浮波让整行长波轻柔起伏、当前唱词下沉后缓慢浮起；跟唱流光、笔触下划线、字间涟漪以及随关键词触发意象动画的歌词彩蛋可独立开关、组合使用。星尘与逐字浮波互斥，且星尘仅用于单行逐字歌词、与翻译和罗马音互斥。<a href="docs.html#settings-lyric-effects">查看歌词特效说明 →</a></p>
           </div>
           <figure class="shot" data-shot="feature-bilingual.png">
@@ -257,7 +257,7 @@
           <div class="step reveal">
             <span class="step-num">2</span>
             <h3>打开音乐</h3>
-            <p>打开 QQ 音乐、网易云音乐、汽水音乐、Spotify 或椒盐音乐并播放歌曲，歌词自动出现在任务栏。多个播放器同时运行时，自动识别当前播放来源。</p>
+            <p>打开已适配的播放器并播放歌曲，歌词自动出现在任务栏。使用浏览器或其他支持系统媒体控制的应用时，可开启<a href="docs.html#settings-players">「通用 SMTC 识别」</a>，按需设置白名单或黑名单。</p>
           </div>
           <div class="step-connector" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
           <div class="step reveal">

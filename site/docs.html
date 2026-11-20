@@ -76,6 +76,7 @@
               <a href="#settings-performance">性能</a>
               <a href="#settings-cards">悬浮卡片</a>
               <a href="#settings-controls">媒体控件</a>
+              <a href="#settings-players">识别播放器</a>
               <a href="#settings-spectrum">频谱</a>
               <a href="#settings-lyrics">歌词</a>
               <a href="#settings-lyric-effects">歌词特效</a>
@@ -91,7 +92,7 @@
       </aside>
 
       <article class="docs-content" id="docsContent">
-        <p class="docs-intro">右键 Windows 通知区域中的软件图标，选择「设置…」。下文按照设置窗口的九个页面编排：先说明选项，再说明相关操作和限制。大多数选项立即生效；字体、颜色等独立对话框需要点击「确定」。</p>
+        <p class="docs-intro">右键 Windows 通知区域中的软件图标，选择「设置…」。下文按设置页面说明各项选项及其操作和限制。大多数选项立即生效，字体、颜色等独立对话框需要点击「确定」。</p>
 
         <section class="doc-section" id="getting-started">
           <h2>快速开始</h2>
@@ -124,7 +125,9 @@
             <li>打开网易云音乐的 BetterNCM 插件商店，搜索并安装 <strong>InfLink-rs</strong>。插件商店不可用时，可从 <a href="https://github.com/apoint123/inflink-rs/releases/latest" target="_blank" rel="noopener">InfLink-rs Releases</a> 下载并手动安装。</li>
             <li>按提示重启网易云音乐，再运行或重启 <code>WindowsTaskbarLyrics.exe</code>。</li>
           </ol>
-          <div class="doc-callout doc-callout-warning"><strong>不要混用插件</strong><p>只安装 InfLink-rs，不要同时安装旧版 InfLink。酷狗音乐的 SMTC 会话目前未适配，酷狗歌词可供所有已适配播放器自动匹配或手动选择。</p></div>
+          <div class="doc-callout doc-callout-warning"><strong>不要混用插件</strong><p>只安装 InfLink-rs，不要同时安装旧版 InfLink。</p></div>
+          <h3>浏览器和其他 SMTC 应用</h3>
+          <p>在「设置 → 识别播放器」开启<a href="#settings-players">「通用 SMTC 识别」</a>，即可识别浏览器和其他向 Windows 上报系统媒体会话的应用。软件会根据应用提供的曲目信息匹配在线歌词，歌词同步取决于应用提供的播放进度。</p>
         </section>
 
         <section class="doc-group-heading" id="settings-reference">
@@ -280,6 +283,17 @@
           <p>沉浸与 Dock 模式使用自身固定的控制区，不需要另行开启这里的播放控件。切歌提示的时长、位置和全屏应用行为可在「切歌弹窗」中设置。</p>
         </section>
 
+        <section class="doc-section doc-subsection" id="settings-players">
+          <h3 class="doc-section-title">识别播放器</h3>
+          <p>对应「设置 → 识别播放器」。以下选项用于通用 SMTC 会话，已深度适配的播放器继续使用各自的识别规则。</p>
+          <dl class="doc-settings">
+            <div><dt>通用 SMTC 识别</dt><dd>默认关闭，开启后可识别浏览器及其他上报 Windows 系统媒体会话的应用。</dd></div>
+            <div><dt>识别范围</dt><dd>默认选择「全部应用」。「仅白名单」只识别列表中的通用应用，「排除黑名单」会忽略列表中的通用应用。</dd></div>
+            <div><dt>白名单应用／黑名单应用</dt><dd>选择对应的识别范围后，点击「添加应用…」，从已检测到的 SMTC 应用中选择，或选择本地 EXE 文件。设置即时生效。</dd></div>
+          </dl>
+          <div class="doc-callout"><strong>通用识别的兼容性</strong><p>成功识别媒体会话后，各项功能仍取决于应用提供的媒体信息和支持的控制指令，无法保证全部功能可用。歌名、歌手等信息不完整时，可能匹配不到正确歌词；播放进度缺失或不准确时，歌词可能无法同步。封面显示取决于是否有可用封面，播放／暂停、切歌和播放模式切换也可能因应用而异。</p></div>
+        </section>
+
         <section class="doc-section doc-subsection" id="settings-spectrum">
           <h3 class="doc-section-title">频谱</h3>
           <p>对应「设置 → 频谱」，控制当前音乐播放器进程的音频频谱。侧边任务栏和极简模式下不可用，低渲染与完全停止模式会暂停捕获。</p>
@@ -327,13 +341,14 @@
             <div><dt>歌词字体颜色与效果</dt><dd>打开独立对话框，设置未播放颜色、已播放颜色、未播放不透明度（5～100%）、光晕颜色与开关、描边颜色与开关，并实时预览。开启「全局设置」后深浅色模式共用一套配置；关闭后可分别设置「深色模式」和「浅色模式」。点击「确定」才应用，取消或关闭不影响现有配置。</dd></div>
             <div><dt>歌词已播放颜色跟随专辑</dt><dd>让已播放歌词颜色随专辑封面主色变化，优先级高于固定的已播放字体颜色。</dd></div>
             <div><dt>歌词已播放色渐变</dt><dd>以歌词已播放色为基色，由底部深色连续过渡到顶部浅色。支持随专辑封面颜色动态变化，默认关闭。</dd></div>
+            <div><dt>逐行歌词模拟逐字效果</dt><dd>默认关闭。开启后，普通 LRC 等没有逐字时间轴的逐行歌词会按当前行的估算时长逐字高亮，并可联动<a href="#settings-lyric-effects">歌词特效</a>。已有逐字时间轴的歌词继续按原有时间轴显示。极简模式下停用。</dd></div>
           </dl>
           <h4>翻译与罗马音</h4>
           <dl class="doc-settings">
             <div><dt>开启翻译/罗马音</dt><dd>控制辅助歌词总开关；竖向任务栏下不可用，小任务栏下临时停用。与星尘跟唱互斥：开启星尘会关闭辅助歌词，从设置或右键菜单重新开启辅助歌词会关闭星尘，辅助歌词类型选择仍然保留。</dd></div>
             <div><dt>辅助歌词类型</dt><dd>可选「翻译」或「罗马音」。只有辅助歌词开启且当前歌曲存在可用内容时可切换；检查中会显示对应状态。</dd></div>
           </dl>
-          <p>托盘菜单的「辅助歌词」可快速切换类型或关闭显示。逐字歌词按时间轴平滑填充，普通 LRC 按行显示；极简模式不使用逐字高亮。字体、字号和粗斜体在「显示 → 通用字体」中调整。</p>
+          <p>托盘菜单的「辅助歌词」可快速切换类型或关闭显示。字体、字号和粗斜体在「显示 → 通用字体」中调整。</p>
           <h4>本地歌词</h4>
           <dl class="doc-settings">
             <div><dt>使用 QQ 音乐本地歌词</dt><dd>启用本地 QRC 索引与本地优先获取，仅用于 QQ 音乐。</dd></div>
@@ -367,7 +382,7 @@
           </dl>
           <h4>布局与开关关系</h4>
           <p>双行模式下星尘暂停并保留开关偏好；逐字浮波、歌词彩蛋及跟唱流光、笔触下划线、字间涟漪作用于当前演唱行，不作用于下一行预览、翻译或罗马音。星尘跟唱与逐字浮波互斥，且星尘跟唱与辅助歌词互斥，后开启的一项会关闭另一项；关闭其中一项不会自动开启另一项。</p>
-          <p>小任务栏会临时停用星尘、逐字浮波和歌词彩蛋，竖向任务栏也会停用逐字浮波和歌词彩蛋，恢复横向正常尺寸后按保留的偏好恢复。普通 LRC 没有逐字时间轴，因此不会显示这些特效；极简模式或关闭 Windows 系统动画时也不显示。暂停后短尾迹逐渐消散，拖动进度和切歌时重新同步。</p>
+          <p>小任务栏会临时停用星尘、逐字浮波和歌词彩蛋，竖向任务栏也会停用逐字浮波和歌词彩蛋，恢复横向正常尺寸后按保留的偏好恢复。普通 LRC 可先开启「逐行歌词模拟逐字效果」，再使用这些特效。极简模式或关闭 Windows 系统动画时暂停特效。暂停播放后短尾迹逐渐消散，拖动进度和切歌时重新同步。</p>
         </section>
 
         <section class="doc-section doc-subsection" id="settings-toast">
@@ -445,7 +460,7 @@
           <h4>背景波浪开关为什么是灰色？</h4>
           <p>先开启频谱，并在「频谱样式」中选择「梦幻波浪」。其他样式不能开启背景波浪；同时确认使用横向布局和「正常」性能模式。</p>
           <h4>星尘跟唱开启后为什么没有星星？</h4>
-          <p>星尘需要单行逐字歌词，普通 LRC 不显示；双行模式、小任务栏、极简模式或关闭 Windows 系统动画时也不显示。开启逐字浮波，或重新开启翻译、罗马音都会关闭星尘。具体开关关系见<a href="#settings-lyric-effects">歌词特效</a>。</p>
+          <p>星尘需要单行逐字歌词，播放普通 LRC 时可开启「逐行歌词模拟逐字效果」。双行模式、小任务栏、极简模式或关闭 Windows 系统动画时会暂停星尘。开启逐字浮波，或重新开启翻译、罗马音都会关闭星尘。具体开关关系见<a href="#settings-lyric-effects">歌词特效</a>。</p>
           <h4>小任务栏下部分功能置灰、资源监视只剩两个指标？</h4>
           <p>这是<a href="#small-taskbar">小任务栏自动适配</a>：双行、星尘、逐字浮波、歌词彩蛋和辅助歌词临时停用，资源监视改为每页两个指标，在资源区滚动鼠标即可查看后续指标。恢复正常任务栏大小后，软件会按保留的偏好恢复，无需逐项开启。</p>
           <h4>字号列表的绿色、黄色和红色是什么意思？</h4>
