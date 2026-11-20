@@ -127,7 +127,7 @@ TEST_CASE("playback_controller.platform_switch_rejects_inflight_qq_results_befor
         [&](const SmtcSnapshot&, PresentationUpdate) { ++publishes; },
         [](const SmtcSnapshot&) {}, [&] { ++covers; });
     controller.setTimerWindow(timerWindow.hwnd());
-    controller.updateTrack(current, current.sourceAppUserModelId);
+    controller.updateTrack(current);
     controller.cancelLyricDebounce(); // 不触发网络请求，仅验证已有在途结果的接收规则。
     controller.releaseCurrentCover(); // 不让 SMTC 封面优先规则掩盖跨平台结果校验。
     current.thumbnail.reset();
@@ -275,7 +275,7 @@ TEST_CASE("playback_controller.stale_payload_rejection_and_duration_completion")
     controller.setTimerWindow(timerWindow.hwnd());
 
     // 1. 歌曲 A 首次以残留时间线进入（duration 视为 0），随后补上真实时长
-    const TrackChange firstChange = controller.updateTrack(currentSnap, L"QQMusic.exe");
+    const TrackChange firstChange = controller.updateTrack(currentSnap);
     EXPECT_TRUE(firstChange.trackChanged);
     EXPECT_FALSE(firstChange.durationOnly);
     EXPECT_TRUE(firstChange.songIdentityChanged);
@@ -284,7 +284,7 @@ TEST_CASE("playback_controller.stale_payload_rejection_and_duration_completion")
 
     currentSnap.timelineStale = false;
     currentSnap.durationMs = 200000;
-    const TrackChange durationCompletion = controller.updateTrack(currentSnap, L"QQMusic.exe");
+    const TrackChange durationCompletion = controller.updateTrack(currentSnap);
     EXPECT_TRUE(durationCompletion.trackChanged);
     EXPECT_TRUE(durationCompletion.durationOnly);
     EXPECT_FALSE(durationCompletion.songIdentityChanged);
@@ -318,7 +318,7 @@ TEST_CASE("playback_controller.stale_payload_rejection_and_duration_completion")
     currentSnap.artist = L"歌手B";
     currentSnap.durationMs = 180000;
     currentSnap.thumbnail.reset();
-    controller.updateTrack(currentSnap, L"QQMusic.exe");
+    controller.updateTrack(currentSnap);
     controller.cancelLyricDebounce();
     EXPECT_EQ(controller.state().currentKey, std::wstring(L"qq|歌曲B|歌手B|36"));
 
@@ -442,8 +442,7 @@ TEST_CASE("playback_controller.salt_player_debounce_duration_update_and_transien
     controller.setTimerWindow(timerWindow.hwnd());
 
     // 1. 首次进入椒盐音乐曲目 A：挂载 200ms 防抖并保留封面
-    const TrackChange first =
-        controller.updateTrack(currentSnap, currentSnap.sourceAppUserModelId);
+    const TrackChange first = controller.updateTrack(currentSnap);
     EXPECT_TRUE(first.trackChanged);
     EXPECT_FALSE(first.durationOnly);
     EXPECT_TRUE(first.songIdentityChanged);
@@ -454,8 +453,7 @@ TEST_CASE("playback_controller.salt_player_debounce_duration_update_and_transien
     // 2. 旧歌名 + 新时长：识别为仅时长更新，保留封面、刷新代次并继续挂起防抖
     const uint64_t genBeforeDuration = controller.state().requestGeneration_;
     currentSnap.durationMs = 215000;
-    const TrackChange durationUpdate =
-        controller.updateTrack(currentSnap, currentSnap.sourceAppUserModelId);
+    const TrackChange durationUpdate = controller.updateTrack(currentSnap);
     EXPECT_TRUE(durationUpdate.trackChanged);
     EXPECT_TRUE(durationUpdate.durationOnly);
     EXPECT_FALSE(durationUpdate.songIdentityChanged);
@@ -468,8 +466,7 @@ TEST_CASE("playback_controller.salt_player_debounce_duration_update_and_transien
     currentSnap.title = L"歌曲B";
     currentSnap.artist = L"歌手B";
     currentSnap.thumbnail.reset();
-    const TrackChange songBChange =
-        controller.updateTrack(currentSnap, currentSnap.sourceAppUserModelId);
+    const TrackChange songBChange = controller.updateTrack(currentSnap);
     EXPECT_TRUE(songBChange.trackChanged);
     EXPECT_FALSE(songBChange.durationOnly);
     EXPECT_TRUE(songBChange.songIdentityChanged);
@@ -480,8 +477,7 @@ TEST_CASE("playback_controller.salt_player_debounce_duration_update_and_transien
     // 4. 同歌名歌手但专辑变化：不视为 durationOnly
     currentSnap.album = L"专辑2";
     currentSnap.thumbnail = thumbB;
-    const TrackChange albumChange =
-        controller.updateTrack(currentSnap, currentSnap.sourceAppUserModelId);
+    const TrackChange albumChange = controller.updateTrack(currentSnap);
     EXPECT_TRUE(albumChange.trackChanged);
     EXPECT_FALSE(albumChange.durationOnly);
     EXPECT_FALSE(albumChange.songIdentityChanged);
