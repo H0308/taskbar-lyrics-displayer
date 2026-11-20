@@ -61,9 +61,18 @@ export const About = () => <Scene duration={6}>
       <CanvasImage src={staticFile('logo-light.png')} style={{width: 64, height: 64}} />
       <Interactive.Div name="关于产品名称" style={{fontSize: 48}}>{productName}</Interactive.Div>
     </div>
-    <div style={{fontSize: 24, color: '#4384aa', marginTop: 36}}>当前支持的播放器</div>
-    <Interactive.Div name="当前支持的播放器" style={{fontSize: 32, color: '#516c7e', marginTop: 16}}>{supportedPlayers.join(' · ')}</Interactive.Div>
-    <div style={{fontSize: 27, color: '#647e8f', lineHeight: 1.8, marginTop: 28}}>自动识别播放来源，随播放状态切换。<br />在关于窗口查看版本与更新日志，选择 GitHub 或 Gitee 更新源。</div>
+    <div style={{fontSize: 24, color: '#4384aa', marginTop: 32}}>已适配的播放器</div>
+    <Interactive.Div name="已适配的播放器" style={{fontSize: 32, color: '#516c7e', marginTop: 12}}>{supportedPlayers.join(' · ')}</Interactive.Div>
+    <div style={{borderTop: '1px solid #d7e5ef', marginTop: 28, paddingTop: 24}}>
+      <div style={{fontSize: 24, color: '#4384aa'}}>通用 SMTC 识别</div>
+      <Interactive.Div name="通用 SMTC 支持范围" style={{fontSize: 30, color: '#516c7e', marginTop: 12}}>
+        支持浏览器及其他上报 Windows 系统媒体会话的应用。
+      </Interactive.Div>
+      <Interactive.Div name="通用 SMTC 开启位置" style={{fontSize: 25, color: '#647e8f', marginTop: 12}}>
+        在「设置 → 识别播放器」开启。
+      </Interactive.Div>
+    </div>
+    <div style={{fontSize: 23, color: '#647e8f', marginTop: 28}}>在关于窗口查看版本与更新日志，选择 GitHub 或 Gitee 更新源。</div>
   </Surface>
   <Footer text="最新支持列表与使用说明 · www.taskbar-lyrics.top" />
 </Scene>;
