@@ -1,6 +1,7 @@
 #include "taskbar_host.h"
 #include "ui/font_sizes.h"
 #include "lyric/lyric_provider.h"
+#include "lyric/simulated_karaoke.h"
 #include "media/player_source.h"
 #include "ui/taskbar/vinyl_animation.h"
 #include "ui/taskbar/vinyl_renderer.h"
@@ -322,6 +323,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                                   value.secondaryLyricMode.romanization);
         if (!appearance_ || appearance_->doubleLineLyrics != value.doubleLineLyrics)
             setDoubleLineLyrics(value.doubleLineLyrics);
+        if (!appearance_ ||
+            appearance_->simulateWordByWordLyrics != value.simulateWordByWordLyrics)
+            setSimulateWordByWordLyrics(value.simulateWordByWordLyrics);
         if (!appearance_ || appearance_->lyricEffects != value.lyricEffects)
             setLyricEffects(value.lyricEffects);
         if (!appearance_ || appearance_->lyricAlignment != value.lyricAlignment)
@@ -463,7 +467,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     // 最后一个持有者负责回收尚未拾取的结果，允许跨进程调用晚于窗口销毁返回。
     PlacementProbe placementProbe_;
 
-    // 歌词状态
+    // 歌词状态：sourceLines_ 保持原始歌词不变，lines 为渲染使用的派生视图。
+    std::vector<LyricLine> sourceLines_;
     std::vector<LyricLine> lines;
     std::wstring statusText = L"等待播放…";
     std::function<void()> onStatusTextCycleCompleted_;
@@ -619,6 +624,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     bool translationEnabled_ = true;
     bool romanizationEnabled_ = false;
     bool doubleLineLyricsEnabled_ = false;
+    bool simulateWordByWordLyrics_ = false;
     LyricAlignment lyricAlignment_ = LyricAlignment::Left;
     LyricAlignment idleQuoteAlignment_ = LyricAlignment::Left;
     IdleQuoteBackground idleQuoteBackground_ = IdleQuoteBackground::None;
@@ -1955,6 +1961,31 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         requestFrameAndFlush();
     }
 
+    void rebuildDisplayLyrics() {
+        if (simulateWordByWordLyrics_ && !sourceLines_.empty())
+            lines = lyric_timing::buildSimulatedKaraokeLines(sourceLines_, media.durationMs);
+        else
+            lines = sourceLines_;
+    }
+
+    void setSimulateWordByWordLyrics(bool on) {
+        if (simulateWordByWordLyrics_ == on)
+            return;
+        simulateWordByWordLyrics_ = on;
+        rebuildDisplayLyrics();
+        clearLyricEffectGeometry();
+        syncLyricEffectClock(positionMs_, media.playing, true);
+        karaoke_.clearGeometry();
+        karaoke_.reset();
+        if (isLyricDCompActive()) {
+            renderer.clearTransitionLayers();
+            clearLyricDCompState();
+        }
+        clearImmersiveSongContentTransition();
+        requestInvalidation(RenderInvalidation::Text);
+        requestFrameAndFlush();
+    }
+
     void setLyricAlignment(LyricAlignment alignment) {
         if (lyricAlignment_ == alignment)
             return;
@@ -2654,7 +2685,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         syncLyricEffectClock(frame.actualPositionMs, frame.media.playing, trackChanged);
         if (trackChanged)
             resetSpectrumVisuals();
-        const bool lyricsChanged = !sameLyrics(lines, frame.lyrics);
+        const int64_t previousDurationMs = media.durationMs;
+        const bool lyricsChanged = !sameLyrics(sourceLines_, frame.lyrics);
         const bool lineChanged = frame.currentLine != currentLine;
         const bool statusChanged = frame.statusText != statusText;
         const bool statusOneShotChanged = frame.statusTextOneShot != scroll_.oneShot();
@@ -2666,7 +2698,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             !pinnedInlineControlsLayoutForScene(scene_, lastLogicalPxW_, lastLogicalPxH_).active() &&
             mouseOver_ && controlsOnHover_ && hoverControlStyle_ == HoverControlStyle::Inline &&
             !isExpandedView();
-        const bool loadedLyricsFromPrelude = !trackChanged && lyricsChanged && lines.empty() &&
+        const bool loadedLyricsFromPrelude = !trackChanged && lyricsChanged && sourceLines_.empty() &&
             !inlineControlsShown &&
             player_source::showsTrackInfoBeforeLyrics(incomingPlayer) &&
             isTaskbarMediaScene(scene_) && frame.scene == DisplayScene::Lyrics &&
@@ -2784,7 +2816,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const bool sceneTransitionInProgress =
             transition_.kind() == LyricTransitionKind::Scene && isLyricTransitionInProgress();
         if (trackChanged || lyricsChanged) {
-            lines = frame.lyrics;
+            sourceLines_ = frame.lyrics;
+            rebuildDisplayLyrics();
             currentLine = frame.currentLine;
             if (!sceneTransitionInProgress) {
                 resetLyricTransition();
@@ -2796,18 +2829,33 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 sceneTransition_.setNeedsRelayout(true);
                 transition_.setRevision(frame.frameRevision);
             }
-        } else if (lineChanged) {
-            if (sceneTransitionInProgress) {
-                currentLine = frame.currentLine;
-                sceneTransition_.setNeedsRelayout(true);
-                transition_.setRevision(frame.frameRevision);
-            } else {
-                onLyricLineTargetChanged(frame.currentLine, frame.actualPositionMs,
-                                         frame.frameRevision, frame.animateTransition);
+        } else {
+            if (simulateWordByWordLyrics_ && previousDurationMs != media.durationMs &&
+                !sourceLines_.empty() && sourceLines_.back().chars.empty()) {
+                lines.back().chars = lyric_timing::synthesizeSimulatedKaraokeChars(
+                    sourceLines_, sourceLines_.size() - 1, media.durationMs);
+                const int displayLine = displayLyricLine();
+                if (!lineChanged && displayLine == static_cast<int>(lines.size()) - 1) {
+                    clearLyricEffectGeometry();
+                    if (!isMinimalMode() && typesetter_.resources().lyricLayout_.Get())
+                        karaoke_.build(lines, displayLine,
+                                       typesetter_.resources().lyricLayout_.Get());
+                    requestFrame();
+                }
             }
-        } else if (isLyricTransitionInProgress()) {
-            // 同一目标行的低频媒体/场景更新不应打断动画，但动画版本要跟随最新完整帧。
-            transition_.setRevision(frame.frameRevision);
+            if (lineChanged) {
+                if (sceneTransitionInProgress) {
+                    currentLine = frame.currentLine;
+                    sceneTransition_.setNeedsRelayout(true);
+                    transition_.setRevision(frame.frameRevision);
+                } else {
+                    onLyricLineTargetChanged(frame.currentLine, frame.actualPositionMs,
+                                             frame.frameRevision, frame.animateTransition);
+                }
+            } else if (isLyricTransitionInProgress()) {
+                // 同一目标行的低频媒体/场景更新不应打断动画，但动画版本要跟随最新完整帧。
+                transition_.setRevision(frame.frameRevision);
+            }
         }
         if (statusChanged || statusOneShotChanged || sceneChanged) {
             if (sceneTransitionInProgress && (!sceneChanged || continueSceneTransition)) {
@@ -8008,7 +8056,7 @@ bool TaskbarHost::isDisplayed() const {
 
 std::vector<LyricLine> TaskbarHost::lyrics() const {
     return thread_->invoke([=, this]() mutable {
-        return impl_->lines;
+        return impl_->sourceLines_;
     });
 }
 

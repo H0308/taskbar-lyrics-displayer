@@ -62,6 +62,7 @@ enum class Kind {
     Download,
     Restart,
     MusicNote,
+    WordByWord,
 };
 
 // 以 brush 的当前颜色绘制一个小型矢量图标；bounds 建议使用 16~20 DIP。

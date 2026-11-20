@@ -474,6 +474,15 @@ void draw(ID2D1RenderTarget* target, Kind kind, const D2D1_RECT_F& bounds, ID2D1
         media_control::drawMusicNote(target, D2D1::Point2F(c.cx, c.cy),
                                      std::min(width, height) * 0.80f, brush);
         break;
+    case Kind::WordByWord:
+        // 上排前两块实心、末块空心表达逐字高亮，下排右向箭头表达随时间推进。
+        c.fillRounded(2.5f, 5.0f, 6.2f, 9.6f, 1.0f);
+        c.fillRounded(8.1f, 5.0f, 11.8f, 9.6f, 1.0f);
+        c.rounded(13.7f, 5.0f, 17.4f, 9.6f, 1.0f);
+        c.line(2.5f, 14.2f, 16.5f, 14.2f);
+        c.line(13.8f, 11.8f, 16.5f, 14.2f);
+        c.line(13.8f, 16.6f, 16.5f, 14.2f);
+        break;
     case Kind::None:
         break;
     }

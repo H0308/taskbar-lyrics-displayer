@@ -13,6 +13,7 @@ struct TaskbarAppearance {
     bool doubleLineLyrics{};
     uint32_t lyricEffects{};
     bool lyricPlayedGradient{};
+    bool simulateWordByWordLyrics{};
     LyricAlignment lyricAlignment{};
     LyricAlignment idleQuoteAlignment{};
     bool songInfoVisible{};

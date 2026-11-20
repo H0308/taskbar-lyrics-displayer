@@ -433,6 +433,7 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
     }
     doubleLineLyricsEnabled_ = j.value("doubleLineLyrics", false);
     lyricPlayedGradient_ = j.value("lyricPlayedGradient", false);
+    simulateWordByWordLyrics_ = j.value("simulateWordByWordLyrics", false);
     lyricEffects_ = j.value("lyricEffects", 0u) & kLyricEffectsMask;
     if ((lyricEffects_ & lyricEffectBit(LyricEffect::WordWave)) != 0)
         lyricEffects_ = withLyricEffect(lyricEffects_, LyricEffect::WordWave, true);
@@ -693,6 +694,7 @@ nlohmann::json AppSettings::toJson() const {
     j["doubleLineLyrics"] = doubleLineLyricsEnabled_;
     j["lyricEffects"] = lyricEffects_;
     j["lyricPlayedGradient"] = lyricPlayedGradient_;
+    j["simulateWordByWordLyrics"] = simulateWordByWordLyrics_;
     j["lyricAlignment"] = lyricAlignment_ == LyricAlignment::Center  ? "center"
                           : lyricAlignment_ == LyricAlignment::Right ? "right"
                                                                      : "left";

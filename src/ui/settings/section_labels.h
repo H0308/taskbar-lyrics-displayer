@@ -123,6 +123,8 @@ inline settings_icon::Kind iconForRow(int id) {
     case kIdLyricPlayedGradient:
     case kIdFontColor:
         return settings_icon::Kind::Color;
+    case kIdSimulateWordByWord:
+        return settings_icon::Kind::WordByWord;
     case kIdFloatingCardFollowAlbum:
     case kIdFollowAlbum:
         return settings_icon::Kind::Follow;

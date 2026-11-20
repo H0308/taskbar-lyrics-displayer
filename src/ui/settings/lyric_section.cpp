@@ -21,6 +21,12 @@ std::vector<Row> createLyricRows(const SettingsState& state) {
         kIdLyricPlayedGradient, ControlKind::Toggle, L"歌词已播放色渐变",
         L"以歌词已播放色为基色，由底部深色连续过渡到顶部浅色。", 40.0f, kRowTallH);
     gradient.checked = state.lyricPlayedGradient;
+    Row& simulateKaraoke = builder.addRow(
+        kIdSimulateWordByWord, ControlKind::Toggle, L"逐行歌词模拟逐字效果",
+        L"对无逐字时间轴的逐行歌词，按当前行估算时长模拟逐字推进，并联动歌词特效；极简模式下停用。",
+        40.0f, kRowTallH);
+    simulateKaraoke.checked = state.simulateWordByWordLyrics;
+    simulateKaraoke.enabled = !minimal;
     builder.addHeader(L"歌词特效");
     const wchar_t* lyricEffectNames[kLyricEffectCount] = {L"星尘跟唱", L"跟唱流光", L"笔触下划线",
                                                           L"字间涟漪", L"逐字浮波", L"歌词彩蛋"};
@@ -80,6 +86,10 @@ void updateLyricRows(std::vector<Row>& rows, const SettingsState& s) {
         row->checked = s.followAlbum;
     if (auto* row = findRow(kIdLyricPlayedGradient))
         row->checked = s.lyricPlayedGradient;
+    if (auto* row = findRow(kIdSimulateWordByWord)) {
+        row->checked = s.simulateWordByWordLyrics;
+        row->enabled = !minimal;
+    }
     if (auto* row = findRow(kIdDoubleLine)) {
         row->checked = vertical ? false : s.doubleLineLyrics;
         row->enabled = !vertical;
@@ -172,6 +182,12 @@ bool handleLyricCommand(int id, Row& value, std::vector<Row>& rows, SettingsStat
         state.lyricPlayedGradient = row->checked;
         if (actions.onLyricPlayedGradient)
             actions.onLyricPlayedGradient(row->checked);
+        break;
+    case kIdSimulateWordByWord:
+        row->checked = !row->checked;
+        state.simulateWordByWordLyrics = row->checked;
+        if (actions.onSimulateWordByWordLyrics)
+            actions.onSimulateWordByWordLyrics(row->checked);
         break;
     case kIdFollowAlbum:
         row->checked = !row->checked;

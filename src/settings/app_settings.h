@@ -101,6 +101,7 @@ struct AppSettings {
     bool doubleLineLyricsEnabled_ = false;
     uint32_t lyricEffects_ = 0;
     bool lyricPlayedGradient_ = false;
+    bool simulateWordByWordLyrics_ = false;
     LyricAlignment lyricAlignment_ = LyricAlignment::Left;
     LyricAlignment idleQuoteAlignment_ = LyricAlignment::Left;
     bool songInfoVisible_ = true;

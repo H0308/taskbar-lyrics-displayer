@@ -55,6 +55,7 @@ inline constexpr int kIdPickUiFont = 511;
 inline constexpr int kIdFontColor = 421;
 inline constexpr int kIdFollowAlbum = 422;
 inline constexpr int kIdLyricPlayedGradient = 513;
+inline constexpr int kIdSimulateWordByWord = 521;
 inline constexpr int kIdFullscreenRenderModeEnabled = 514;
 inline constexpr int kIdFullscreenRenderMode = 515;
 inline constexpr int kIdFullscreenRenderModeMonitor = 516;

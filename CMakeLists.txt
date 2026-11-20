@@ -67,6 +67,7 @@ set(WINDOWS_TASKBAR_LYRICS_CORE_SOURCES
     src/lyric/lyricsfile_parser.cpp
     src/lyric/qrc_decoder.cpp
     src/lyric/qrc_des.cpp
+    src/lyric/simulated_karaoke.cpp
     src/lyric/sources/kugou_lyric_source.cpp
     src/lyric/sources/lrclib_lyric_source.cpp
     src/lyric/sources/netease_lyric_source.cpp

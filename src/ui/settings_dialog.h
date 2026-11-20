@@ -90,6 +90,7 @@ struct SettingsState {
     bool compactTaskbar = false; // 小任务栏仅临时限制显示，保留用户偏好。
     bool followAlbum = false;
     bool lyricPlayedGradient = false;
+    bool simulateWordByWordLyrics = false;
     bool doubleLineLyrics = false;
     uint32_t lyricEffects = 0;
     int lyricAlignment = 0; // 0 左对齐 1 居中 2 右对齐
@@ -188,6 +189,7 @@ struct SettingsActions {
     std::function<void()> onFontColorEffect;
     std::function<void(bool)> onFollowAlbum;
     std::function<void(bool)> onLyricPlayedGradient;
+    std::function<void(bool)> onSimulateWordByWordLyrics;
     std::function<void(bool)> onDoubleLineLyrics;
     std::function<void(int, bool)> onLyricEffect;
     std::function<void(int)> onLyricAlignment;

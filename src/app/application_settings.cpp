@@ -1320,6 +1320,7 @@ SettingsState App::currentSettingsState() const {
     st.windowThemeMode = settings_.windowThemeMode_;
     st.followAlbum = settings_.lyricFollowAlbum_;
     st.lyricPlayedGradient = settings_.lyricPlayedGradient_;
+    st.simulateWordByWordLyrics = settings_.simulateWordByWordLyrics_;
     st.doubleLineLyrics = view.doubleLineLyrics;
     st.compactTaskbar = taskbarHost && taskbarHost->isCompactTaskbar();
     st.lyricEffects = settings_.lyricEffects_;
@@ -1412,6 +1413,11 @@ SettingsActions App::buildSettingsActions() {
     act.onLyricPlayedGradient = [this](bool on) {
         settings_.lyricPlayedGradient_ = on;
         logSettingBool(L"lyric-played-gradient", on);
+        commitAppearanceSettings();
+    };
+    act.onSimulateWordByWordLyrics = [this](bool on) {
+        settings_.simulateWordByWordLyrics_ = on;
+        logSettingBool(L"simulate-word-by-word-lyrics", on);
         commitAppearanceSettings();
     };
     act.onSpectrumEffect = [this](int effect, bool on) { applySpectrumEffect(effect, on); };
