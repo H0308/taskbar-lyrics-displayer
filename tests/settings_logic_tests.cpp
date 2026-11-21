@@ -116,7 +116,7 @@ TEST_CASE("taskbar_appearance.temporary_restrictions_preserve_user_preferences")
     EXPECT_FALSE(vertical.doubleLineLyrics);
     EXPECT_EQ(vertical.lyricAlignment, LyricAlignment::Left);
     EXPECT_EQ(vertical.idleQuoteAlignment, LyricAlignment::Left);
-    EXPECT_FALSE(vertical.songInfoVisible);
+    EXPECT_TRUE(vertical.songInfoVisible);
     EXPECT_EQ(vertical.spectrumStyle, SpectrumStyle::Default);
     EXPECT_FALSE(vertical.spectrumColor.customized);
     EXPECT_FALSE(vertical.spectrumGradient);
@@ -139,6 +139,10 @@ TEST_CASE("taskbar_appearance.temporary_restrictions_preserve_user_preferences")
     context.vertical = false;
     const auto restored = resolveTaskbarAppearance(settings, context);
     EXPECT_TRUE(restored == normal);
+
+    settings.songInfoVisible_ = false;
+    context.vertical = true;
+    EXPECT_FALSE(resolveTaskbarAppearance(settings, context).songInfoVisible);
 }
 
 TEST_CASE("app_settings.json_roundtrip_and_legacy_migrations") {
