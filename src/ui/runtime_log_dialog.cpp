@@ -939,7 +939,6 @@ struct RuntimeLogDialog::Impl {
             }
             break;
         case WM_SETFOCUS:
-            focusVisible = true;
             invalidateContent();
             return 0;
         case WM_KILLFOCUS:

@@ -1244,7 +1244,6 @@ struct FontPickerDialog::Impl {
                 return 0;
             break;
         case WM_SETFOCUS:
-            focusVisible = true;
             surface.invalidate();
             return 0;
         case WM_KILLFOCUS:

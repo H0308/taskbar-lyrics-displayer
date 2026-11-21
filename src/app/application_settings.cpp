@@ -1161,7 +1161,6 @@ LRESULT CALLBACK App::updatePromptWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp
         }
         break;
     case WM_SETFOCUS:
-        app->updatePromptFocusVisible_ = true;
         app->updatePromptSurface_.invalidate();
         return 0;
     case WM_KILLFOCUS:
