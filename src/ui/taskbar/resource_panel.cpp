@@ -10,6 +10,9 @@ namespace {
 constexpr float kDockResourceZoneGap = 4.0f;
 constexpr float kCompactResourceZoneGap = 3.0f;
 constexpr float kResourceCellSafetyPadding = 0.0f;
+constexpr float kVerticalResourceInset = 2.0f;
+constexpr float kVerticalResourceLabelGap = 1.0f;
+constexpr float kVerticalResourceGroupGap = 4.0f;
 constexpr UINT kResourceSnapshotPollMs = 250;
 } // namespace
 using taskbar_detail::monotonicNowMs;
@@ -37,17 +40,23 @@ float ResourcePanel::width() const {
     return width;
 }
 
-std::vector<ResourcePanel::DockResourceRow> ResourcePanel::rows() const {
-    std::vector<std::wstring> cells{L"CPU: " + resourceCpuText_, L"内存: " + resourceMemoryText_};
+std::vector<ResourcePanel::Reading> ResourcePanel::readings() const {
+    std::vector<Reading> result{{L"CPU", resourceCpuText_}, {L"内存", resourceMemoryText_}};
     if (dockResourceVisibility_.download)
-        cells.push_back(L"下行: " + resourceDownloadText_);
+        result.push_back({L"下行", resourceDownloadText_});
     if (dockResourceVisibility_.upload)
-        cells.push_back(L"上行: " + resourceUploadText_);
+        result.push_back({L"上行", resourceUploadText_});
     if (dockResourceVisibility_.gpuUsage)
-        cells.push_back(L"GPU: " + resourceGpuText_);
+        result.push_back({L"GPU", resourceGpuText_});
     if (dockResourceVisibility_.cpuFrequency)
-        cells.push_back(L"频率: " + resourceCpuFrequencyText_);
+        result.push_back({L"频率", resourceCpuFrequencyText_});
+    return result;
+}
 
+std::vector<ResourcePanel::DockResourceRow> ResourcePanel::rows() const {
+    std::vector<std::wstring> cells;
+    for (const auto& reading : readings())
+        cells.push_back(std::wstring(reading.label) + L": " + reading.value);
     std::vector<DockResourceRow> rows;
     if (compact_) {
         for (size_t i = 0; i < cells.size(); i += 2)
@@ -63,8 +72,59 @@ std::vector<ResourcePanel::DockResourceRow> ResourcePanel::rows() const {
 }
 
 size_t ResourcePanel::pageCount() const {
-    const auto rows = ResourcePanel::rows();
-    return compact_ ? rows.size() : rows.size() / 2;
+    const size_t perPage = compact_ || vertical_ ? 2 : 4;
+    const size_t count = readings().size();
+    return (count + perPage - 1) / perPage;
+}
+
+std::wstring_view ResourcePanel::shortVerticalValue(std::wstring_view value) {
+    if (value.ends_with(L"B/s") || value.ends_with(L"GHz"))
+        return value.substr(0, value.find_first_not_of(L"0123456789.") + 1);
+    return value;
+}
+
+float ResourcePanel::verticalHeight(float width) const {
+    const float available = width - 2.0f * kVerticalResourceInset;
+    if (verticalLineHeight_ <= 0.0f || available < verticalStackedWidth_)
+        return 0.0f;
+    if (available < verticalInlineWidth_)
+        return 2.0f * (2.0f * verticalLineHeight_ + kVerticalResourceLabelGap) +
+               kVerticalResourceGroupGap;
+    return 2.0f * verticalLineHeight_;
+}
+
+void ResourcePanel::drawVertical(ID2D1DeviceContext* rt, IDWriteTextFormat* format,
+                                 ID2D1Brush* brush, const D2D1_RECT_F& area) const {
+    if (!rt || !format || !brush || area.bottom <= area.top)
+        return;
+
+    const auto values = readings();
+    const size_t first = std::min(dockResourcePage_, (values.size() - 1) / 2) * 2;
+    const bool stacked = area.right - area.left - 2.0f * kVerticalResourceInset <
+                         verticalInlineWidth_;
+    float top = area.top;
+    const auto previousAlignment = format->GetTextAlignment();
+    format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    const auto drawLine = [&](std::wstring_view text) {
+        rt->DrawTextW(text.data(), static_cast<UINT32>(text.size()), format,
+                      D2D1::RectF(area.left + kVerticalResourceInset, top,
+                                  area.right - kVerticalResourceInset, top + verticalLineHeight_),
+                      brush, D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
+        top += verticalLineHeight_;
+    };
+    for (size_t index = first; index < std::min(first + 2, values.size()); ++index) {
+        const auto& reading = values[index];
+        if (stacked) {
+            if (index != first)
+                top += kVerticalResourceGroupGap;
+            drawLine(reading.label);
+            top += kVerticalResourceLabelGap;
+            drawLine(shortVerticalValue(reading.value));
+        } else {
+            drawLine(std::wstring(reading.label) + L" " + reading.value);
+        }
+    }
+    format->SetTextAlignment(previousAlignment);
 }
 
 std::wstring ResourcePanel::formatResourcePercent(double percent) {
@@ -211,7 +271,7 @@ void ResourcePanel::draw(ID2D1DeviceContext* rt, IDWriteTextFormat* format, ID2D
 }
 
 float ResourcePanel::measureResourceTextWidth(IDWriteFactory* dwrite, IDWriteTextFormat* format,
-                                              const std::wstring& text) {
+                                              const std::wstring& text, float* lineHeight) {
     if (!dwrite || !format || text.empty())
         return 0.0f;
     IDWriteTextLayout* layout = nullptr;
@@ -222,8 +282,11 @@ float ResourcePanel::measureResourceTextWidth(IDWriteFactory* dwrite, IDWriteTex
     layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
     float measuredWidth = 0.0f;
     DWRITE_TEXT_METRICS metrics{};
-    if (SUCCEEDED(layout->GetMetrics(&metrics)))
+    if (SUCCEEDED(layout->GetMetrics(&metrics))) {
         measuredWidth = std::max(measuredWidth, metrics.widthIncludingTrailingWhitespace);
+        if (lineHeight)
+            *lineHeight = std::max(*lineHeight, metrics.height);
+    }
     DWRITE_OVERHANG_METRICS overhangs{};
     if (SUCCEEDED(layout->GetOverhangMetrics(&overhangs)))
         measuredWidth = std::max(measuredWidth, overhangs.right);
@@ -253,38 +316,53 @@ bool ResourcePanel::updateColumnWidths(IDWriteFactory* dwrite, IDWriteTextFormat
 
     std::vector<std::array<float, 2>> pageColumnWidths;
     std::array<float, 2> singleLineWidths{};
+    const auto values = readings();
+    float verticalInlineWidth = 0.0f;
+    float verticalStackedWidth = 0.0f;
+    float verticalLineHeight = 0.0f;
     size_t cellIndex = 0;
     auto measureCell = [&](const std::vector<std::wstring>& samples) {
         const size_t indexInPage = cellIndex % 4;
         if (indexInPage == 0)
             pageColumnWidths.push_back({});
         float& columnWidth = pageColumnWidths.back()[indexInPage / 2];
+        const auto& reading = values[cellIndex];
+        const std::wstring label = reading.label;
+        const std::wstring prefix = label + L": ";
+        verticalStackedWidth = std::max(
+            verticalStackedWidth, measureResourceTextWidth(dwrite, format, label));
         for (const auto& sample : samples) {
-            const float measured = ResourcePanel::measureResourceTextWidth(dwrite, format, sample);
+            const float measured = measureResourceTextWidth(dwrite, format, prefix + sample);
             columnWidth = std::max(columnWidth, measured);
             singleLineWidths[cellIndex % 2] = std::max(singleLineWidths[cellIndex % 2], measured);
+            verticalInlineWidth = std::max(
+                verticalInlineWidth, measureResourceTextWidth(
+                    dwrite, format, label + L" " + sample, &verticalLineHeight));
+            verticalStackedWidth = std::max(
+                verticalStackedWidth, measureResourceTextWidth(
+                    dwrite, format, std::wstring(shortVerticalValue(sample))));
         }
         ++cellIndex;
     };
-    measureCell({L"CPU: 100%", L"CPU: " + twoDigits + L"%"});
-    measureCell({L"内存: 100%", L"内存: " + twoDigits + L"%"});
+    measureCell({L"100%", twoDigits + L"%"});
+    measureCell({L"100%", twoDigits + L"%"});
     static constexpr const wchar_t* rateUnits[] = {L"B/s", L"KB/s", L"MB/s", L"GB/s", L"TB/s"};
-    auto measureRate = [&](const wchar_t* prefixLabel) {
+    auto measureRate = [&] {
         std::vector<std::wstring> samples;
         for (const wchar_t* unitLabel : rateUnits) {
-            samples.push_back(std::wstring(prefixLabel) + decimalDigits + unitLabel);
-            samples.push_back(std::wstring(prefixLabel) + threeDigits + unitLabel);
+            samples.push_back(decimalDigits + unitLabel);
+            samples.push_back(threeDigits + unitLabel);
         }
         measureCell(samples);
     };
     if (dockResourceVisibility_.download)
-        measureRate(L"下行: ");
+        measureRate();
     if (dockResourceVisibility_.upload)
-        measureRate(L"上行: ");
+        measureRate();
     if (dockResourceVisibility_.gpuUsage)
-        measureCell({L"GPU: 100%", L"GPU: " + twoDigits + L"%"});
+        measureCell({L"100%", twoDigits + L"%"});
     if (dockResourceVisibility_.cpuFrequency)
-        measureCell({L"频率: " + decimalDigits + L"GHz"});
+        measureCell({decimalDigits + L"GHz"});
 
     for (auto& [left, right] : pageColumnWidths) {
         left = std::max(1.0f, std::ceil(left) + kResourceCellSafetyPadding);
@@ -295,10 +373,18 @@ bool ResourcePanel::updateColumnWidths(IDWriteFactory* dwrite, IDWriteTextFormat
         if (cellWidth > 0.0f)
             cellWidth = std::ceil(cellWidth) + kResourceCellSafetyPadding;
 
+    const float inlineWidth = std::ceil(verticalInlineWidth);
+    const float stackedWidth = std::ceil(verticalStackedWidth);
+    const float lineHeight = std::ceil(verticalLineHeight);
     const bool changed = pageColumnWidths != resourcePageColumnWidths_ ||
-                         singleLineWidths != resourceSingleLineWidths_;
+                         singleLineWidths != resourceSingleLineWidths_ ||
+                         inlineWidth != verticalInlineWidth_ || stackedWidth != verticalStackedWidth_ ||
+                         lineHeight != verticalLineHeight_;
     resourcePageColumnWidths_.swap(pageColumnWidths);
     resourceSingleLineWidths_ = singleLineWidths;
+    verticalInlineWidth_ = inlineWidth;
+    verticalStackedWidth_ = stackedWidth;
+    verticalLineHeight_ = lineHeight;
     return changed;
 }
 

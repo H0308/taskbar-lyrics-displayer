@@ -174,7 +174,7 @@ const PresentationFrame& App::preparePresentationFrame(const SmtcSnapshot& snap,
     input.tasksEnabled = idle_.tickTickEffectiveEnabled();
     input.resourcesVisible = settings_.taskbarViewMode_ == TaskbarViewMode::AppBar ||
         (settings_.taskbarViewMode_ == TaskbarViewMode::Embedded &&
-         settings_.embeddedResourceMonitor_ && !taskbarVertical_);
+         settings_.embeddedResourceMonitor_);
     if (input.summaryActive)
         input.summaryText = idle_.startupTaskSummaryText();
     return presentation_.update(snap, settings_, playback_.state(), input, update);

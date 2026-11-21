@@ -157,7 +157,7 @@ LayoutMetrics horizontalLayout(const HorizontalLayoutInput& input) {
 }
 
 VerticalLayout verticalLayout(float width, float height, DisplayScene scene, bool albumCoverVisible,
-                              bool showControls, bool canSwitchSource) {
+                              bool showControls, bool canSwitchSource, float resourceHeight) {
 
     VerticalLayout layout;
     layout.w = width;
@@ -176,7 +176,14 @@ VerticalLayout verticalLayout(float width, float height, DisplayScene scene, boo
 
     layout.lyricY =
         layout.coverSize > 0.0f ? layout.coverY + layout.coverSize + kVerticalCoverGap : pad;
-    layout.lyricBottom = std::max(layout.lyricY + 1.0f, layout.h - pad);
+    const float contentBottom = layout.h - pad;
+    layout.lyricBottom = std::max(layout.lyricY + 1.0f, contentBottom);
+    const float resourceTop = contentBottom - resourceHeight;
+    const float resourceContentBottom = resourceTop - kVerticalLyricGap;
+    const auto reserveResourceArea = [&] {
+        layout.resources = D2D1::RectF(0.0f, resourceTop, layout.w, contentBottom);
+        layout.lyricBottom = resourceContentBottom;
+    };
     layout.showControls = showControls && playbackScene;
     if (layout.showControls) {
         layout.controlRadius = std::clamp(layout.w * 0.23f, 6.0f, 9.0f);
@@ -190,7 +197,11 @@ VerticalLayout verticalLayout(float width, float height, DisplayScene scene, boo
         const float blockH = diameter * 4.0f + transportGap * 2.0f + volumeGap +
                              (canSwitchSource ? sourcePitch : 0.0f);
         const float controlsTop = layout.lyricY;
-        const float controlsBottom = layout.h - pad;
+        if (resourceHeight > 0.0f &&
+            resourceContentBottom - controlsTop > blockH + 2.0f * kVerticalLyricGap)
+            reserveResourceArea();
+        const float controlsBottom =
+            layout.resources.bottom > layout.resources.top ? resourceContentBottom : contentBottom;
         const float freeSpace = controlsBottom - controlsTop - blockH;
         const float groupTop = controlsTop + std::max(0.0f, freeSpace) * 0.5f;
         const float firstY = groupTop + layout.controlRadius;
@@ -208,6 +219,9 @@ VerticalLayout verticalLayout(float width, float height, DisplayScene scene, boo
             layout.showControls = false;
         }
     }
+    if (!layout.showControls && resourceHeight > 0.0f &&
+        resourceContentBottom - layout.lyricY >= 48.0f)
+        reserveResourceArea();
     return layout;
 }
 

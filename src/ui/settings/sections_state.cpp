@@ -120,7 +120,7 @@ void SettingsSections::updateImmersiveRowsEnabled() {
         row->height = row->minHeight;
     }
     updateBackgroundAdjustmentPresentation();
-    const bool embeddedResources = selectedMode == 0 && !state.verticalTaskbar;
+    const bool embeddedResources = selectedMode == 0;
     if (auto* row = findRow(kIdEmbeddedResourceMonitor))
         row->enabled = embeddedResources;
     const bool resourceExtrasEnabled =
@@ -339,11 +339,11 @@ void SettingsSections::syncTaskbarModeRows(const SettingsState& s) {
     updateBackgroundAdjustmentPresentation();
     if (auto* row = findRow(kIdEmbeddedResourceMonitor)) {
         row->checked = s.embeddedResourceMonitor;
-        row->enabled = s.taskbarViewMode == 0 && !vertical;
+        row->enabled = s.taskbarViewMode == 0;
     }
     const bool resourceExtrasEnabled =
         s.taskbarViewMode == 2 ||
-        (s.taskbarViewMode == 0 && !vertical && s.embeddedResourceMonitor);
+        (s.taskbarViewMode == 0 && s.embeddedResourceMonitor);
     if (auto* row = findRow(kIdDockResourceDownload)) {
         row->checked = s.dockResourceDownload;
         row->enabled = resourceExtrasEnabled;

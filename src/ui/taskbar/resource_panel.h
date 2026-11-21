@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // 独占采样、展示文案、列宽和分页；绘图目标、字体和画刷只在 draw 调用期间借用。
@@ -16,12 +17,12 @@ public:
         dockResourceVisibility_ = value;
         resetPage();
     }
-    void setCompact(bool compact) {
-        if (compact_ == compact)
-            return;
-        dockResourcePage_ = compact ? dockResourcePage_ * 2 : dockResourcePage_ / 2;
+    void setLayout(bool compact, bool vertical) {
+        const bool twoPerPage = compact || vertical;
+        if (twoPerPage != (compact_ || vertical_))
+            dockResourcePage_ = twoPerPage ? dockResourcePage_ * 2 : dockResourcePage_ / 2;
         compact_ = compact;
-        dockResourcePage_ = std::min(dockResourcePage_, pageCount() - 1);
+        vertical_ = vertical;
     }
     void resetPage() { dockResourcePage_ = 0; }
     void start();
@@ -31,20 +32,29 @@ public:
     size_t pageCount() const;
     bool advancePage(int steps);
     bool updateColumnWidths(IDWriteFactory* dwrite, IDWriteTextFormat* format);
+    float verticalHeight(float width) const;
+    void drawVertical(ID2D1DeviceContext* target, IDWriteTextFormat* format, ID2D1Brush* brush,
+                      const D2D1_RECT_F& area) const;
     void draw(ID2D1DeviceContext* target, IDWriteTextFormat* format, ID2D1Brush* brush, float x,
               float height, float width) const;
 
 private:
+    struct Reading {
+        const wchar_t* label;
+        const std::wstring& value;
+    };
     struct DockResourceRow {
         std::wstring left, right;
     };
+    std::vector<Reading> readings() const;
     std::vector<DockResourceRow> rows() const;
+    static std::wstring_view shortVerticalValue(std::wstring_view value);
     float columnGap() const;
     static std::wstring formatResourcePercent(double percent);
     static std::wstring formatNetworkRate(uint64_t bytesPerSecond);
     static std::wstring formatFrequency(bool available, double gigahertz);
     static float measureResourceTextWidth(IDWriteFactory* dwrite, IDWriteTextFormat* format,
-                                          const std::wstring& text);
+                                          const std::wstring& text, float* lineHeight = nullptr);
     system_monitor::ResourceMonitor resourceMonitor_;
     uint64_t resourceSnapshotRevision_ = 0;
     ULONGLONG nextResourceSnapshotPollMs_ = 0;
@@ -58,5 +68,9 @@ private:
     size_t dockResourcePage_ = 0;
     std::vector<std::array<float, 2>> resourcePageColumnWidths_{{76.0f, 100.0f}};
     std::array<float, 2> resourceSingleLineWidths_{};
+    float verticalInlineWidth_ = 0.0f;
+    float verticalStackedWidth_ = 0.0f;
+    float verticalLineHeight_ = 0.0f;
     bool compact_ = false;
+    bool vertical_ = false;
 };

@@ -520,6 +520,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     std::function<void(std::vector<TaskbarAnchorOption>)> onAnchorOptionsChanged_;
     std::vector<TaskbarAnchorOption> publishedAnchorOptions_;
     bool mouseOver_ = false;
+    bool verticalResourceHovered_ = false;
     bool trackingLeave_ = false;
     int immersiveControlHover_ = -1;
     int inlineControlHover_ = -1;
@@ -3026,12 +3027,16 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     }
 
     bool hitDockResourceArea(float clientX, float clientY) const {
-        if ((!isAppBarView() && !embeddedResourceVisible()) || !dockResourceExtrasVisible())
+        if (!resourceMonitoringEnabled() || !dockResourceExtrasVisible())
             return false;
 
         float x = 0.0f;
         float y = 0.0f;
         clientPointToLogicalDip(clientX, clientY, x, y);
+        if (isVerticalTaskbar()) {
+            const auto area = verticalLayout().resources;
+            return x >= area.left && x < area.right && y >= area.top && y < area.bottom;
+        }
         int pxW = 0;
         int pxH = 0;
         logicalClientPixelSize(pxW, pxH);
@@ -3612,15 +3617,16 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     void syncCompactTaskbarLayout(int heightPixels) {
         const float height = dip(heightPixels);
         const float taskbarHeight = dip(rcTaskbar_.bottom - rcTaskbar_.top);
+        const bool vertical = isVerticalTaskbar();
         const float compactHeight =
-            !isVerticalTaskbar() && !isAppBarView() && taskbarHeight > 0.0f &&
+            !vertical && !isAppBarView() && taskbarHeight > 0.0f &&
                     taskbarHeight < kCompactTaskbarHeightDip && height > 0.0f
                 ? height
                 : 0.0f;
+        resourcePanel_.setLayout(compactHeight > 0.0f, vertical);
         if (compactHeight == compactTaskbarHeight_)
             return;
         compactTaskbarHeight_ = compactHeight;
-        resourcePanel_.setCompact(compactHeight > 0.0f);
         resetLyricTransition();
         clearImmersiveSongContentTransition();
         releaseSpectrumEffectResources();
@@ -4253,13 +4259,20 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     }
 
     VerticalLayout verticalLayout() const {
+        return verticalLayout(mouseOver_ && !verticalResourceHovered_);
+    }
+
+    VerticalLayout verticalLayout(bool hovered) const {
         int width = 0;
         int height = 0;
         clientPixelSize(width, height);
-        return taskbar_detail::verticalLayout(dip(width), dip(height), scene_, albumCoverVisible_,
-                                              mouseOver_ && controlsOnHover_ &&
+        const float widthDip = dip(width);
+        const float resourceHeight =
+            resourceMonitoringEnabled() ? resourcePanel_.verticalHeight(widthDip) : 0.0f;
+        return taskbar_detail::verticalLayout(widthDip, dip(height), scene_, albumCoverVisible_,
+                                              hovered && controlsOnHover_ &&
                                                   hoverControlStyle_ == HoverControlStyle::Inline,
-                                              media.canSwitchSource);
+                                              media.canSwitchSource, resourceHeight);
     }
 
     bool pinnedInlineControlsConfigured() const {
@@ -6569,6 +6582,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         } else {
             drawVerticalLyrics(layout);
         }
+        if (layout.resources.bottom > layout.resources.top && ensureResourceFormat())
+            resourcePanel_.drawVertical(rt, typesetter_.resources().fmtResource_.Get(),
+                                        brushText_.Get(), layout.resources);
 
         return finishTaskbarFrame(rt->EndDraw());
     }
@@ -7628,6 +7644,16 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             const float mouseX = static_cast<float>(GET_X_LPARAM(lp));
             const float mouseY = static_cast<float>(GET_Y_LPARAM(lp));
             const bool inPinnedControls = pointInPinnedControlsZone(mouseX, mouseY);
+            const bool wasOverResource = verticalResourceHovered_;
+            verticalResourceHovered_ = false;
+            if (isVerticalTaskbar() && resourceMonitoringEnabled()) {
+                const auto area = verticalLayout(false).resources;
+                float x = 0.0f;
+                float y = 0.0f;
+                clientPointToLogicalDip(mouseX, mouseY, x, y);
+                verticalResourceHovered_ =
+                    x >= area.left && x < area.right && y >= area.top && y < area.bottom;
+            }
             bool wasOver = mouseOver_;
             mouseOver_ = true;
             if (mediaPopupEnabledForScene()) {
@@ -7636,7 +7662,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 else
                     mediaPopup.onAnchorEnter();
             }
-            if (!wasOver)
+            if (!wasOver || wasOverResource != verticalResourceHovered_)
                 requestFrameAndFlush();
             trackMouseLeave();
             const int immersiveHover = isExpandedView() ? hitImmersiveControl(mouseX, mouseY) : -1;
@@ -7684,6 +7710,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 return 0;
             cancelImmersiveYield();
             mouseOver_ = false;
+            verticalResourceHovered_ = false;
             trackingLeave_ = false;
             volumeHover_ = false;
             immersiveControlHover_ = -1;
@@ -7715,8 +7742,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 }
                 return 0;
             }
-            if (dockResourceExtrasVisible() &&
-                hitDockResourceArea(static_cast<float>(pt.x), static_cast<float>(pt.y))) {
+            if (hitDockResourceArea(static_cast<float>(pt.x), static_cast<float>(pt.y))) {
                 const int steps = delta / WHEEL_DELTA;
                 if (steps != 0)
                     advanceDockResourcePage(steps);

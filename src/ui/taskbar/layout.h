@@ -63,6 +63,7 @@ struct VerticalLayout {
     float coverSize = 0.0f;
     float lyricY = 0.0f;
     float lyricBottom = 0.0f;
+    D2D1_RECT_F resources{};
     bool showControls = false;
     float controlRadius = 0.0f;
     D2D1_POINT_2F controlCenters[5]{};
@@ -113,5 +114,6 @@ void layoutInlineHoverControls(float left, float width, float height, bool canRe
 // 纯几何计算。渲染与命中检测读取同一份布局，窗口句柄和设备资源不进入计算。
 LayoutMetrics horizontalLayout(const HorizontalLayoutInput& input);
 VerticalLayout verticalLayout(float width, float height, DisplayScene scene, bool albumCoverVisible,
-                              bool showControls, bool canSwitchSource = false);
+                              bool showControls, bool canSwitchSource = false,
+                              float resourceHeight = 0.0f);
 } // namespace taskbar_detail
