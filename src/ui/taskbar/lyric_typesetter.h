@@ -112,7 +112,8 @@ private:
                                    float& height, bool& rotated, float& inkWidth);
     bool createMixedVerticalLyricLayout(const std::wstring& text, IDWriteTextFormat* format,
                                         float layoutWidth, std::vector<VerticalLyricPart>& parts,
-                                        float& width, float& height, float& inkWidth);
+                                        float& width, float& height, float& inkWidth,
+                                        bool rotateLatinRuns = true);
     void buildVerticalContent(const LyricTextInput& input, LyricTextMetrics& metrics);
     void createFormat(Microsoft::WRL::ComPtr<IDWriteTextFormat>& format, const std::wstring& family,
                       LyricFontStyle style, float size, DWRITE_FONT_WEIGHT weight,

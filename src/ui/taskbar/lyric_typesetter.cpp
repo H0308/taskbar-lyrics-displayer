@@ -217,7 +217,8 @@ bool LyricTypesetter::hasMixedVerticalLyric(const std::wstring& text) const {
 bool LyricTypesetter::createMixedVerticalLyricLayout(const std::wstring& text,
                                                      IDWriteTextFormat* format, float layoutWidth,
                                                      std::vector<VerticalLyricPart>& parts,
-                                                     float& width, float& height, float& inkWidth) {
+                                                     float& width, float& height, float& inkWidth,
+                                                     bool rotateLatinRuns) {
     parts.clear();
     width = layoutWidth;
     height = 0.0f;
@@ -250,7 +251,11 @@ bool LyricTypesetter::createMixedVerticalLyricLayout(const std::wstring& text,
             return false;
         }
         const float partWidth = rotated ? metrics.height : layoutWidth;
-        const float partHeight = rotated ? metrics.width : metrics.height;
+        // 独立空格沿竖轴占用横排时的推进宽度；旋转字串末尾的空格也计入长度。
+        const bool blank = partText.size() == 1 &&
+                           (partText[0] == L' ' || partText[0] == L'\t');
+        const float partHeight = rotated || blank ? metrics.widthIncludingTrailingWhitespace
+                                                  : metrics.height;
         if (partHeight <= 0.0f) {
             layout.Reset();
             return true;
@@ -268,7 +273,7 @@ bool LyricTypesetter::createMixedVerticalLyricLayout(const std::wstring& text,
             continue;
         }
 
-        if (isLatinRunStartCharacter(text[i])) {
+        if (rotateLatinRuns && isLatinRunStartCharacter(text[i])) {
             const size_t start = i;
             size_t end = i;
             while (end < text.size()) {
@@ -280,10 +285,7 @@ bool LyricTypesetter::createMixedVerticalLyricLayout(const std::wstring& text,
                     break;
                 ++end;
             }
-            size_t partEnd = end;
-            while (partEnd > start && (text[partEnd - 1] == L' ' || text[partEnd - 1] == L'\t'))
-                --partEnd;
-            if (partEnd > start && !appendPart(text.substr(start, partEnd - start), true)) {
+            if (!appendPart(text.substr(start, end - start), true)) {
                 created = false;
                 break;
             }
@@ -378,12 +380,17 @@ void LyricTypesetter::buildVerticalContent(const LyricTextInput& input, LyricTex
     auto* primaryFormat = resources_.fmtLyric_.Get();
     auto* secondaryFormat = resources_.fmtSecondary_.Get();
     const bool primaryMixed = hasMixedVerticalLyric(input.lyric);
+    const auto needsParts = [&](const std::wstring& text, bool mixed) {
+        return mixed || (text.find_first_of(L" \t") != std::wstring::npos &&
+                         !useRotatedVerticalLyric(text));
+    };
+    const bool primaryParts = needsParts(input.lyric, primaryMixed);
     float primaryInkWidth = 0.0f;
     const auto buildPrimary = [&](float width) {
-        if (primaryMixed)
+        if (primaryParts)
             return createMixedVerticalLyricLayout(
                 input.lyric, primaryFormat, width, resources_.verticalLyricParts_,
-                metrics.verticalWidth, metrics.verticalHeight, primaryInkWidth);
+                metrics.verticalWidth, metrics.verticalHeight, primaryInkWidth, primaryMixed);
         return createVerticalLyricLayout(
             input.lyric, primaryFormat, width, resources_.verticalLyricLayout_.ReleaseAndGetAddressOf(),
             metrics.verticalWidth, metrics.verticalHeight, metrics.verticalRotated, primaryInkWidth);
@@ -405,13 +412,14 @@ void LyricTypesetter::buildVerticalContent(const LyricTextInput& input, LyricTex
             float secondaryInkWidth = 0.0f;
             float secondaryHeight = 0.0f;
             const bool secondaryMixed = hasMixedVerticalLyric(input.secondary);
+            const bool secondaryParts = needsParts(input.secondary, secondaryMixed);
             const auto buildSecondary = [&](float width) {
                 parts.clear();
-                if (secondaryMixed) {
+                if (secondaryParts) {
                     float slotWidth = 0.0f;
                     return createMixedVerticalLyricLayout(
                         input.secondary, secondaryFormat, width, parts, slotWidth, secondaryHeight,
-                        secondaryInkWidth);
+                        secondaryInkWidth, secondaryMixed);
                 }
                 VerticalLyricPart part;
                 if (!createVerticalLyricLayout(
