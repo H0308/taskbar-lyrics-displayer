@@ -155,6 +155,10 @@ bool shuffleFor(int mode) { return mode == 3; }
 
 struct SmtcMonitor::Impl {
     enum class ControlAction { PlayPause, SkipNext, SkipPrevious, CycleRepeat };
+    struct ControlRequest {
+        ControlAction action;
+        uint64_t sessionGeneration;
+    };
 
     struct RefreshSignal {
         std::mutex mtx;
@@ -165,7 +169,7 @@ struct SmtcMonitor::Impl {
         bool mediaPropertiesChanged = false;
         std::optional<std::wstring> pendingSourceSelection;
         int pendingSourceSteps = 0;
-        std::deque<ControlAction> pendingControls;
+        std::deque<ControlRequest> pendingControls;
     };
 
     struct ThumbnailRequest {
@@ -283,12 +287,12 @@ struct SmtcMonitor::Impl {
     }
 
     static void requestControl(const std::shared_ptr<RefreshSignal>& signal,
-                               ControlAction action) {
+                               ControlRequest request) {
         {
             std::lock_guard<std::mutex> lk(signal->mtx);
             if (signal->stopping)
                 return;
-            signal->pendingControls.push_back(action);
+            signal->pendingControls.push_back(request);
         }
         signal->cv.notify_one();
     }
@@ -982,7 +986,9 @@ struct SmtcMonitor::Impl {
         {
             std::lock_guard<std::mutex> lk(mtx);
             session = selected;
+            const auto generation = snap.sessionGeneration + 1;
             snap = {};
+            snap.sessionGeneration = generation;
             thumbCacheKey_.clear();
             thumbCache_.reset();
             ++thumbnailGeneration;
@@ -1330,11 +1336,13 @@ struct SmtcMonitor::Impl {
         }
     }
 
-    void executeControl(ControlAction action) {
+    void executeControl(ControlRequest request) {
         Session current{ nullptr };
         SmtcSnapshot snapshotCopy;
         {
             std::lock_guard<std::mutex> lk(mtx);
+            if (!snap.sessionAlive || request.sessionGeneration != snap.sessionGeneration)
+                return;
             if (!sourceSelection.preferredAppUserModelId.empty() &&
                 _wcsicmp(sourceSelection.preferredAppUserModelId.c_str(),
                          snap.sourceAppUserModelId.c_str()) != 0)
@@ -1342,7 +1350,7 @@ struct SmtcMonitor::Impl {
             current = session;
             snapshotCopy = snap;
         }
-        switch (action) {
+        switch (request.action) {
         case ControlAction::PlayPause:
             startControlOperation(L"play-pause", L"TryTogglePlayPauseAsync", current, snapshotCopy,
                                   [current] { return current.TryTogglePlayPauseAsync(); });
@@ -1471,7 +1479,7 @@ struct SmtcMonitor::Impl {
             for (;;) {
                 bool rebuildWatchers = false;
                 bool mediaPropertiesChanged = false;
-                std::deque<ControlAction> controls;
+                std::deque<ControlRequest> controls;
                 std::optional<std::wstring> sourceRequest;
                 int sourceSteps = 0;
                 {
@@ -1605,18 +1613,18 @@ SmtcSnapshot SmtcMonitor::snapshot() const {
     return source;
 }
 
-void SmtcMonitor::playPause() {
-    Impl::requestControl(impl_->refreshSignal, Impl::ControlAction::PlayPause);
+void SmtcMonitor::playPause(uint64_t sessionGeneration) {
+    Impl::requestControl(impl_->refreshSignal, {Impl::ControlAction::PlayPause, sessionGeneration});
 }
 
-void SmtcMonitor::skipNext() {
-    Impl::requestControl(impl_->refreshSignal, Impl::ControlAction::SkipNext);
+void SmtcMonitor::skipNext(uint64_t sessionGeneration) {
+    Impl::requestControl(impl_->refreshSignal, {Impl::ControlAction::SkipNext, sessionGeneration});
 }
 
-void SmtcMonitor::skipPrevious() {
-    Impl::requestControl(impl_->refreshSignal, Impl::ControlAction::SkipPrevious);
+void SmtcMonitor::skipPrevious(uint64_t sessionGeneration) {
+    Impl::requestControl(impl_->refreshSignal, {Impl::ControlAction::SkipPrevious, sessionGeneration});
 }
 
-void SmtcMonitor::cycleRepeatMode() {
-    Impl::requestControl(impl_->refreshSignal, Impl::ControlAction::CycleRepeat);
+void SmtcMonitor::cycleRepeatMode(uint64_t sessionGeneration) {
+    Impl::requestControl(impl_->refreshSignal, {Impl::ControlAction::CycleRepeat, sessionGeneration});
 }

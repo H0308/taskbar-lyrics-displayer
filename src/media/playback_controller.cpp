@@ -72,6 +72,7 @@ void PlaybackController::closeSession() {
         runtime_log::writef(L"[smtc] %s session closed", playerName(state_.lastPlayer_));
     state_.currentKey.clear();
     currentSourceAppId_.clear();
+    currentSessionGeneration_ = 0;
     state_.currentTitle.clear();
     state_.currentArtist.clear();
     state_.currentDurationMs = 0;
@@ -84,16 +85,19 @@ void PlaybackController::closeSession() {
 }
 
 bool PlaybackController::matchesCurrentTrack(const SmtcSnapshot& snap) const {
-    return snap.sourceAppUserModelId == currentSourceAppId_ &&
+    return snap.sessionGeneration == currentSessionGeneration_ &&
+           snap.sourceAppUserModelId == currentSourceAppId_ &&
            snapshotMatchesTrackKey(snap, state_.currentKey);
 }
 
 TrackChange PlaybackController::updateTrack(const SmtcSnapshot& snap) {
     const SmtcPlayerType previousPlayer = state_.lastPlayer_;
     state_.lastPlayer_ = snap.player;
-    const bool sourceChanged = snap.sourceAppUserModelId != currentSourceAppId_;
+    const bool sourceChanged = snap.sessionGeneration != currentSessionGeneration_ ||
+                               snap.sourceAppUserModelId != currentSourceAppId_;
     if (sourceChanged) {
         currentSourceAppId_ = snap.sourceAppUserModelId;
+        currentSessionGeneration_ = snap.sessionGeneration;
         cancelLyricDebounce();
         ++state_.requestGeneration_;
     }
@@ -458,7 +462,8 @@ void PlaybackController::onLyricDebounce() {
         return;
     state_.lyricDebounceArmed_ = false;
     SmtcSnapshot snap = snapshot_();
-    if (!snap.sessionAlive || snap.sourceAppUserModelId != currentSourceAppId_ ||
+    if (!snap.sessionAlive || snap.sessionGeneration != currentSessionGeneration_ ||
+        snap.sourceAppUserModelId != currentSourceAppId_ ||
         (snap.player != SmtcPlayerType::QQMusic && snap.player != SmtcPlayerType::SaltPlayer))
         return;
     if (snap.title.empty()) {
@@ -593,7 +598,8 @@ void PlaybackController::onCoverReady(std::unique_ptr<CoverPayload> payload) {
 void PlaybackController::reloadCurrentQqLyrics(bool forceOnline, bool forceLocal,
                                                bool persistOrder) {
     const SmtcSnapshot snap = snapshot_();
-    if (snap.sourceAppUserModelId != currentSourceAppId_ || !snap.sessionAlive ||
+    if (!snap.sessionAlive || snap.sessionGeneration != currentSessionGeneration_ ||
+        snap.sourceAppUserModelId != currentSourceAppId_ ||
         snap.player != SmtcPlayerType::QQMusic || state_.currentKey.empty() ||
         snap.title.empty() || snap.timelineStale || makeTrackKey(snap) != state_.currentKey ||
         (forceOnline && !state_.currentLyricsFromLocal_) ||

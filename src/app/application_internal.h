@@ -591,7 +591,7 @@ private:
     // 把当前播放状态同步给某个宿主（新建宿主时避免显示“等待播放…”）
     void syncHost(ILyricHost* host);
 
-    void onControl(MediaControl c);
+    void onControl(MediaControl c, uint64_t sessionGeneration);
 
     // 读取当前音乐应用的会话音量并推送给各宿主；状态未变时跳过
     void pushAppVolume();

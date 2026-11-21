@@ -207,24 +207,24 @@ void App::syncHost(ILyricHost* host) {
     host->applyPresentationFrame(presentation_.frame());
 }
 
-void App::onControl(MediaControl c) {
+void App::onControl(MediaControl c, uint64_t sessionGeneration) {
     const wchar_t* name = L"unknown";
     switch (c) {
     case MediaControl::Prev:
         name = L"previous";
-        monitor.skipPrevious();
+        monitor.skipPrevious(sessionGeneration);
         break;
     case MediaControl::PlayPause:
         name = L"play-pause";
-        monitor.playPause();
+        monitor.playPause(sessionGeneration);
         break;
     case MediaControl::Next:
         name = L"next";
-        monitor.skipNext();
+        monitor.skipNext(sessionGeneration);
         break;
     case MediaControl::Repeat:
         name = L"repeat";
-        monitor.cycleRepeatMode();
+        monitor.cycleRepeatMode(sessionGeneration);
         break;
     case MediaControl::NextSource:
         name = L"next-source";

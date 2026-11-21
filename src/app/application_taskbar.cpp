@@ -399,7 +399,9 @@ void App::configureTaskbarHostCallbacks(TaskbarHost* host, bool primary) {
                     onTaskbarPlacementStatus(status);
             });
     }
-    host->setControlCallback([this](MediaControl c) { onControl(c); });
+    host->setControlCallback([this](MediaControl c, uint64_t sessionGeneration) {
+        onControl(c, sessionGeneration);
+    });
     host->setImmersiveExitCallback([this] { applyTaskbarViewMode(0); });
     host->setDockQuickAppsCallback([this](POINT pt) { showDockQuickApps(pt); });
     host->setImmersiveMenuCallback([this](POINT pt) { showTrayMenu(pt, false); });

@@ -16,6 +16,7 @@ enum class SmtcPlayerType { Unknown, QQMusic, NetEase, Soda, Spotify, SaltPlayer
 
 // SMTC 统一快照：锚点进度 + 本机时间，渲染侧据此插值
 struct SmtcSnapshot {
+    uint64_t sessionGeneration = 0; // 每次重新绑定会话递增，同一应用重启也会改变。
     SmtcPlayerType player = SmtcPlayerType::Unknown;
     std::wstring title;
     std::wstring artist;
@@ -94,11 +95,11 @@ public:
     SmtcSnapshot snapshot() const; // 当前快照（Playing 时进度已插值）
 
     // 播放控制（无会话或调用失败时不改变 UI，并记录诊断日志）
-    void playPause();
-    void skipNext();
-    void skipPrevious();
+    void playPause(uint64_t sessionGeneration);
+    void skipNext(uint64_t sessionGeneration);
+    void skipPrevious(uint64_t sessionGeneration);
     // 切换播放模式：顺序播放 → 单曲循环 → 随机播放 → 顺序播放（由播放器通过 SMTC 执行）。
-    void cycleRepeatMode();
+    void cycleRepeatMode(uint64_t sessionGeneration);
 
 private:
     struct Impl;

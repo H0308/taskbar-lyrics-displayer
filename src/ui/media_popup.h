@@ -21,7 +21,7 @@ public:
     bool create(HINSTANCE inst, HWND anchor);
     void destroy();
 
-    void setControlCallback(std::function<void(MediaControl)> cb);
+    void setControlCallback(std::function<void(MediaControl, uint64_t)> cb);
     void setSourceOpenCallback(std::function<void(const std::wstring&)> cb);
     void setIdleAppOpenCallback(std::function<void(const std::wstring&)> cb);
     void setIdleTaskOpenCallback(std::function<void(const IdleTaskInfo&)> cb);

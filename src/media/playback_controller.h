@@ -104,6 +104,7 @@ private:
 
     PlaybackState state_;
     std::wstring currentSourceAppId_;
+    uint64_t currentSessionGeneration_ = 0;
     DWORD mainThread_ = GetCurrentThreadId();
     HWND timerWindow_ = nullptr;
     std::function<SmtcSnapshot()> snapshot_;

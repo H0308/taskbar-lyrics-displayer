@@ -31,6 +31,7 @@ OverlayMediaInfo makeMediaInfo(const SmtcSnapshot& snap, const PlaybackState& pl
     OverlayMediaInfo mi;
     const bool retainPrevious = snap.sessionAlive && snap.title.empty() && snap.artist.empty() &&
                                 previous.frameRevision != 0 &&
+                                previous.media.sessionGeneration == snap.sessionGeneration &&
                                 previous.media.sourceAppUserModelId == snap.sourceAppUserModelId &&
                                 previous.trackKey == playback.currentKey;
     if (retainPrevious) {
@@ -46,6 +47,7 @@ OverlayMediaInfo makeMediaInfo(const SmtcSnapshot& snap, const PlaybackState& pl
         }
         mi.sourceAppUserModelId = snap.sourceAppUserModelId;
     }
+    mi.sessionGeneration = snap.sessionGeneration;
     if (snap.thumbnail && !snap.thumbnail->empty())
         mi.thumbnail = snap.thumbnail;
     else if (playback.lastSmtcThumbnail && !playback.lastSmtcThumbnail->empty())

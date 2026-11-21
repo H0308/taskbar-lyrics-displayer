@@ -23,6 +23,7 @@ enum class MediaControl { Prev = 0, PlayPause = 1, Next = 2, Repeat = 3,
 
 // 底部控制条显示的媒体信息
 struct OverlayMediaInfo {
+    uint64_t sessionGeneration = 0;
     std::wstring title;
     std::wstring artist;
     std::wstring sourceAppUserModelId; // SMTC 当前来源应用标识，用于平台图标和打开入口
@@ -97,7 +98,7 @@ public:
     virtual void applyPresentationFrame(const PresentationFrame& frame) = 0;
     virtual void applyPlaybackPatch(const PlaybackPatch& patch) = 0;
     virtual void applySpectrumPatch(const SpectrumPatch& patch) = 0;
-    virtual void setControlCallback(std::function<void(MediaControl)> cb) = 0;
+    virtual void setControlCallback(std::function<void(MediaControl, uint64_t)> cb) = 0;
 
     // 应用音量：state 由宿主缓存展示；用户请求携带版本，回写沿用该版本。
     virtual void setAppVolume(const AppVolumeState& state) = 0;

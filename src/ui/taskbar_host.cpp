@@ -509,7 +509,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
     // 交互
     std::function<void()> tick;
-    std::function<void(MediaControl)> onControl;
+    std::function<void(MediaControl, uint64_t)> onControl;
     std::function<void(const std::wstring&)> onSourceOpen;
     TaskbarTooltip hoverTip_;
     std::wstring pressedCoverSource_;
@@ -528,6 +528,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     bool inlineSourcePressed_ = false;
     int sourceWheelRemainder_ = 0;
     int immersiveControlPressed_ = -1;
+    uint64_t pressedControlSessionGeneration_ = 0;
     bool controlsOnHover_ = true;
     bool contextMenuEnabled_ = true;
     HoverControlStyle hoverControlStyle_ = HoverControlStyle::Inline;
@@ -948,6 +949,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                                info.repeatMode != media.repeatMode;
         bool playingChanged = info.playing != media.playing;
         bool platformChanged = info.sourceAppUserModelId != media.sourceAppUserModelId;
+        const bool sessionChanged = info.sessionGeneration != media.sessionGeneration;
         bool dominantColorChanged =
             info.hasDominantColor != media.hasDominantColor ||
             (info.hasDominantColor && info.dominantColor != media.dominantColor);
@@ -971,14 +973,14 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             if (inlineControlHover_ == kInlineSourceControl)
                 inlineControlHover_ = -1;
         }
-        if (!media.canRepeat) {
+        if (sessionChanged || !media.canRepeat) {
             if (hwnd && (repeatHintTarget_ >= 0 || repeatHintUntil_ != 0))
                 KillTimer(hwnd, kRepeatHintTimerId);
             repeatHintTarget_ = -1;
             repeatHintUntil_ = 0;
-            if (inlineControlHover_ == 3)
-                inlineControlHover_ = -1;
         }
+        if (!media.canRepeat && inlineControlHover_ == 3)
+            inlineControlHover_ = -1;
         if (thumbChanged)
             requestInvalidation(RenderInvalidation::Cover);
         if (platformChanged)
@@ -5125,7 +5127,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             if (index == kImmersiveControlRepeat)
                 armRepeatHint(SmtcSnapshot::nextPlayMode(media.repeatMode));
             if (onControl)
-                onControl(static_cast<MediaControl>(index));
+                onControl(static_cast<MediaControl>(index), media.sessionGeneration);
             break;
         case kImmersiveControlVolume:
             if (appVolume_.available) {
@@ -7802,7 +7804,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 const auto action =
                     steps > 0 ? MediaControl::PreviousSource : MediaControl::NextSource;
                 for (int i = 0; i < std::abs(steps); ++i)
-                    onControl(action);
+                    onControl(action, media.sessionGeneration);
             } else {
                 sourceWheelRemainder_ = 0;
             }
@@ -7810,6 +7812,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         }
         case WM_LBUTTONDOWN: {
             hoverTip_.hide();
+            pressedControlSessionGeneration_ = media.sessionGeneration;
             pressedCoverSource_ =
                 hitAlbumCover(static_cast<float>(GET_X_LPARAM(lp)),
                               static_cast<float>(GET_Y_LPARAM(lp)))
@@ -7839,6 +7842,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return 0;
         }
         case WM_LBUTTONUP: {
+            const auto pressedControlSession = std::exchange(pressedControlSessionGeneration_, 0);
             const bool sourceControlPressed = std::exchange(inlineSourcePressed_, false);
             const auto pressedSource = std::exchange(pressedCoverSource_, std::wstring{});
             if (isExpandedView()) {
@@ -7854,7 +7858,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                     hitAlbumCover(static_cast<float>(GET_X_LPARAM(lp)),
                                   static_cast<float>(GET_Y_LPARAM(lp))))
                     onSourceOpen(pressedSource);
-                else if (pressed >= 0 && pressed == released)
+                else if (pressed >= 0 && pressed == released &&
+                         (pressed > kImmersiveControlRepeat ||
+                          pressedControlSession == media.sessionGeneration))
                     activateImmersiveControl(pressed);
                 requestFrameAndFlush();
                 return 0;
@@ -7887,14 +7893,17 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             const int btn = hitInlineControl(mx, my);
             if (sourceControlPressed || btn == kInlineSourceControl) {
                 if (sourceControlPressed && hadPress && btn == kInlineSourceControl && onControl)
-                    onControl(MediaControl::NextSource);
+                    onControl(MediaControl::NextSource, media.sessionGeneration);
                 return 0;
             }
+            if (btn >= 0 && btn <= kImmersiveControlRepeat &&
+                (!hadPress || pressedControlSession != media.sessionGeneration))
+                return 0;
             // 循环按钮点击后先记下期望模式，等回读结果出来再显示提示词。
             if (btn == static_cast<int>(MediaControl::Repeat))
                 armRepeatHint(SmtcSnapshot::nextPlayMode(media.repeatMode));
             if (btn >= 0 && btn != kImmersiveControlVolume && onControl)
-                onControl(static_cast<MediaControl>(btn));
+                onControl(static_cast<MediaControl>(btn), media.sessionGeneration);
             // 卡片的当前页面自己判断是否为点击展开；这样无播放时的每日一言卡片
             // 可以独立于媒体控件样式使用点击展开。
             else if (!pointInPinnedControlsZone(mx, my) && !hitVolumeButton(mx, my) &&
@@ -8106,7 +8115,7 @@ void TaskbarHost::applySpectrumPatch(const SpectrumPatch& patch) {
     });
 }
 
-void TaskbarHost::setControlCallback(std::function<void(MediaControl)> cb) {
+void TaskbarHost::setControlCallback(std::function<void(MediaControl, uint64_t)> cb) {
     cb = callbacks_->callback(std::move(cb));
     thread_->invoke([=, this]() mutable {
         impl_->onControl = cb;

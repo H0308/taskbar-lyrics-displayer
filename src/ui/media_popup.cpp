@@ -143,6 +143,7 @@ struct MediaPopup::Impl {
 
     int hoverButton = -1;
     int pressedButton = -1;
+    uint64_t pressedControlSessionGeneration = 0;
     bool pressedSource = false;
     std::wstring pressedSourceAppUserModelId;
     bool hoverPageArrow = false;
@@ -150,7 +151,7 @@ struct MediaPopup::Impl {
     bool hoverCopy = false;
     bool pressedCopy = false;
     bool copySucceeded = false;
-    std::function<void(MediaControl)> onControl;
+    std::function<void(MediaControl, uint64_t)> onControl;
     std::function<void(const std::wstring&)> onSourceOpen;
     std::function<void(const std::wstring&)> onIdleAppOpen;
     std::function<void(const IdleTaskInfo&)> onIdleTaskOpen;
@@ -3017,6 +3018,7 @@ struct MediaPopup::Impl {
             const int button = pressedSource ? -1 : hitButton(x, y);
             if (pressedSource || button >= 0) {
                 pressedButton = button;
+                pressedControlSessionGeneration = media.sessionGeneration;
                 SetCapture(hwnd);
                 renderOrDefer();
             }
@@ -3144,6 +3146,7 @@ struct MediaPopup::Impl {
             const bool source = hitSource(x, y);
             const int button = source ? -1 : hitButton(x, y);
             const int pressed = pressedButton;
+            const auto pressedControlSession = pressedControlSessionGeneration;
             const bool sourcePressed = pressedSource;
             std::wstring sourceId = std::move(pressedSourceAppUserModelId);
             pressedButton = -1;
@@ -3156,8 +3159,9 @@ struct MediaPopup::Impl {
                 sourceId == media.sourceAppUserModelId && onSourceOpen) {
                 hideImmediate();
                 onSourceOpen(sourceId);
-            } else if (pressed >= 0 && pressed == button && onControl) {
-                onControl(static_cast<MediaControl>(pressed));
+            } else if (pressed >= 0 && pressed == button && onControl &&
+                       pressedControlSession == media.sessionGeneration) {
+                onControl(static_cast<MediaControl>(pressed), pressedControlSession);
             }
             return 0;
         }
@@ -3420,7 +3424,7 @@ void MediaPopup::destroy() {
     });
 }
 
-void MediaPopup::setControlCallback(std::function<void(MediaControl)> cb) {
+void MediaPopup::setControlCallback(std::function<void(MediaControl, uint64_t)> cb) {
     enqueue([=, this]() mutable {
         impl_->onControl = std::move(cb);
     });
