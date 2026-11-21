@@ -361,6 +361,12 @@ void SettingsSections::onCommand(int id, int option) {
         if (actions.onTaskbarViewMode)
             actions.onTaskbarViewMode(state.taskbarViewMode);
         break;
+    case kIdSongTransitionEnabled:
+        row->checked = !row->checked;
+        state.songTransitionEnabled = row->checked;
+        if (actions.onSongTransitionEnabled)
+            actions.onSongTransitionEnabled(row->checked);
+        break;
     case kIdTaskbarMonitor:
         if (actions.onChooseTaskbarMonitor)
             actions.onChooseTaskbarMonitor();

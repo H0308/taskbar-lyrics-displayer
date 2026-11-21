@@ -193,10 +193,10 @@ struct SettingsDialog::Impl {
     std::unique_ptr<ColorPickerDialog> colorPicker;
     std::array<std::wstring, kSettingsPageCount> navItems{
         L"显示", L"展示模式", L"性能", L"悬浮卡片", L"媒体控件", L"识别播放器", L"频谱", L"歌词",
-        L"切歌弹窗", L"每日一言与更多"};
+        L"切歌行为", L"每日一言与更多"};
     std::array<std::wstring, kSettingsPageCount> pageTitles{
         L"显示", L"展示模式", L"性能", L"悬浮卡片", L"媒体控件", L"识别播放器", L"频谱", L"歌词",
-        L"切歌弹窗", L"每日一言与更多"};
+        L"切歌行为", L"每日一言与更多"};
     D2D1_RECT_F navRect{};
     std::array<D2D1_RECT_F, kSettingsPageCount> navItemRects{};
     std::array<D2D1_RECT_F, kFooterItemCount> footerItemRects{};

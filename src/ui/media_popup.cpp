@@ -123,7 +123,9 @@ struct MediaPopup::Impl {
     bool scrollTimerRunning = false;
     UINT scrollTimerInterval = 0; // kScrollTimer 当前实际间隔，用于按驱动目的切换帧率
     bool clientAnimations = true;
+    bool songTransitionEnabled = true;
     bool songTransitionPending = false;
+    bool songRootAnimationInstalled = false;
     media_popup_detail::LayerTransition categoryTransition;
     media_popup_detail::PageSnapshot categorySnapshot;
     media_popup_detail::LayerTransition quickExpandTransition;
@@ -616,6 +618,7 @@ struct MediaPopup::Impl {
     }
 
     void releaseDeviceResources() {
+        songRootAnimationInstalled = false;
         idleScrollOffset = idleScrollView.offset();
         idleScrollView.stop();
         idleScrollView.setVisible(false);
@@ -1872,6 +1875,23 @@ struct MediaPopup::Impl {
         return true;
     }
 
+    void resetRootVisual() {
+        renderer.resetRoot();
+        songRootAnimationInstalled = false;
+    }
+
+    void setSongTransitionEnabled(bool on) {
+        songTransitionEnabled = on;
+        if (on)
+            return;
+        songTransitionPending = false;
+        if (songRootAnimationInstalled) {
+            resetRootVisual();
+            if (!renderer.commit())
+                releaseDrawingResources();
+        }
+    }
+
     bool render() {
         // 仅打开准备阶段和可见阶段允许创建设备，隐藏后的消息不能重建缓存。
         if (!hwnd || (!visibility.visible() && !visibility.opening()))
@@ -2013,11 +2033,13 @@ struct MediaPopup::Impl {
         }
         if (songTransitionPending) {
             songTransitionPending = false;
-            renderer.resetRoot();
+            resetRootVisual();
             const float travel = kSongTransitionTravelDip * scale();
-            if (!renderer.animateRoot(travel, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
-                                      kSongTransitionMs / 1000.0f))
-                renderer.resetRoot();
+            songRootAnimationInstalled =
+                renderer.animateRoot(travel, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
+                                     kSongTransitionMs / 1000.0f);
+            if (!songRootAnimationInstalled)
+                resetRootVisual();
         }
 
         if (!renderer.commit()) {
@@ -2356,7 +2378,7 @@ struct MediaPopup::Impl {
             KillTimer(hwnd, kCopyFeedbackTimer);
         resetPageInteractionState();
         idleMode = target != PopupPage::Media;
-        renderer.resetRoot();
+        resetRootVisual();
         // 两个页面的外层尺寸已经统一；切换时保持 HWND 的位置和大小，
         // 避免 SetWindowPos 在内容转场之外再触发一次窗口级重绘。
         if (categoryTransition.active() && hasFromCardRect) {
@@ -2685,7 +2707,7 @@ struct MediaPopup::Impl {
 
         // 窗口本身保持固定位置，只让 DirectComposition 根视觉做位移动画。
         // 透明度始终为 1，避免淡入淡出时出现第二层背板。
-        renderer.resetRoot();
+        resetRootVisual();
         const float fromX = sideAnchored
                                 ? (popupOnRightOfAnchor ? -animationTravelPx
                                                          : animationTravelPx)
@@ -2696,7 +2718,7 @@ struct MediaPopup::Impl {
         if (!renderer.animateRoot(fromX, 0.0f, fromY, 0.0f,
                                   1.0f, 1.0f,
                                   static_cast<float>(kOpenAnimationMs) / 1000.0f)) {
-            renderer.resetRoot();
+            resetRootVisual();
         }
         renderer.commit();
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
@@ -2749,6 +2771,7 @@ struct MediaPopup::Impl {
             hideImmediate();
             return;
         }
+        songRootAnimationInstalled = false;
         renderer.commit();
         SetTimer(hwnd, kCloseTimer, kCloseAnimationMs, nullptr);
     }
@@ -2828,7 +2851,7 @@ struct MediaPopup::Impl {
             return;
         killTimers();
         ShowWindow(hwnd, SW_HIDE);
-        renderer.resetRoot();
+        resetRootVisual();
         renderer.commit();
         // 关闭动画已经结束；先隐藏窗口并撤除转场，再回收卡片专属资源。
         releaseAll();
@@ -3569,6 +3592,10 @@ void MediaPopup::setAutoTextContrast(bool on) {
     });
 }
 
+void MediaPopup::setSongTransitionEnabled(bool on) {
+    enqueue([=, this] { impl_->setSongTransitionEnabled(on); });
+}
+
 void MediaPopup::refreshTheme() {
     enqueue([=, this]() mutable {
         impl_->releaseDrawingResources();
@@ -3627,10 +3654,10 @@ void MediaPopup::setMedia(const OverlayMediaInfo& info, bool available,
             impl_->hideImmediate();
             return;
         }
-        impl_->songTransitionPending = animateSongTransition && changed &&
-                                       impl_->visibility.visible() && !impl_->visibility.animating() &&
-                                       impl_->clientAnimations && !impl_->idleMode &&
-                                       !impl_->categoryTransition.active();
+        impl_->songTransitionPending =
+            impl_->songTransitionEnabled && animateSongTransition && changed &&
+            impl_->visibility.visible() && !impl_->visibility.animating() &&
+            impl_->clientAnimations && !impl_->idleMode && !impl_->categoryTransition.active();
         if (changed && impl_->visibility.visible() && !impl_->categoryTransition.active() &&
             !impl_->quickExpandTransition.active() && (!impl_->idleMode || dominantColorChanged)) {
             if (impl_->visibility.animating())

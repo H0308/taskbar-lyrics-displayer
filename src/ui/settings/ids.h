@@ -89,6 +89,7 @@ inline constexpr int kIdTickTickDisconnect = 465;
 inline constexpr int kIdTickTickEnabled = 466;
 inline constexpr int kIdTaskbarContextMenu = 467;
 inline constexpr int kIdTaskbarViewMode = 468;
+inline constexpr int kIdSongTransitionEnabled = 522;
 inline constexpr int kIdAppBarEdge = 469;
 inline constexpr int kIdTaskbarMonitor = 470;
 inline constexpr int kIdImmersiveBackgroundBlur = 471;

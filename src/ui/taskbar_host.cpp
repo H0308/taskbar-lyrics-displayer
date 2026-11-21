@@ -311,12 +311,16 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         hoverTip_.hide();
         sourceWheelRemainder_ = 0;
         const UpdateScope update(*this);
+        const bool disableSongTransition =
+            !value.songTransitionEnabled && (!appearance_ || appearance_->songTransitionEnabled);
         applyTextAppearance(value);
         applyPopupAppearance(value);
         applyPlaybackVisualAppearance(value);
         applyBackgroundAppearance(value);
         applyCoverAndFontAppearance(value);
         appearance_ = value;
+        if (disableSongTransition)
+            cancelSongTransition();
         refreshFrameTimer();
     }
 
@@ -340,6 +344,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     }
 
     void applyPopupAppearance(const TaskbarAppearance& value) {
+        if (!appearance_ || appearance_->songTransitionEnabled != value.songTransitionEnabled)
+            mediaPopup.setSongTransitionEnabled(value.songTransitionEnabled);
         if (!appearance_ || appearance_->controlsOnHover != value.controlsOnHover)
             setControlsOnHover(value.controlsOnHover);
         if (!appearance_ || appearance_->hoverControlStyle != value.hoverControlStyle)
@@ -693,8 +699,10 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         ULONGLONG startMs = 0;
         bool compositorLayer = false;
         bool pendingConsumed = false;
+        bool finishRequested = false;
     };
     std::optional<SongContentTransition> songContentTransition_;
+    bool songRootAnimationInstalled_ = false;
     int lastPxW_ = 0;
     int lastPxH_ = 0;
     int lastLogicalPxW_ = 0;
@@ -1753,7 +1761,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         SetCursor(LoadCursorW(nullptr, IDC_SIZEALL));
         cancelSceneWindowResize();
         setSongTransitionPending(false);
-        renderer.resetRoot();
+        resetRootVisual();
         clearImmersiveSongContentTransition();
         renderer.clearTransitionLayers();
         clearLyricDCompState();
@@ -1839,7 +1847,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             centerAlign_ = center;
             taskbarEdge_ = edge;
             if (edgeChanged)
-                renderer.resetRoot();
+                resetRootVisual();
             if (edgeChanged) {
                 // 左右侧的竖排文字方向相反；任务栏方向变化时必须重建逐字布局，
                 // 同时丢弃沿用自另一方向的滚动偏移。
@@ -2420,7 +2428,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         immersiveControlPressed_ = -1;
         if (hadImmersivePress && GetCapture() == hwnd)
             ReleaseCapture();
-        renderer.resetRoot();
+        resetRootVisual();
         clearImmersiveSongContentTransition();
         if (previousMode == TaskbarViewMode::AppBar)
             unregisterAppBar();
@@ -2906,7 +2914,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
         // 只对已有曲目之间的切换做入场动画；首次显示、同曲刷新和会话关闭保持即时提交。
         setSongTransitionPending(songChanged && frame.visible && !isMinimalMode() &&
-                                 !isStoppedMode() && clientAnimations_);
+                                 !isStoppedMode() && clientAnimations_ &&
+                                 (!appearance_ || appearance_->songTransitionEnabled));
 
         const bool sceneTransitionInProgress =
             transition_.kind() == LyricTransitionKind::Scene && isLyricTransitionInProgress();
@@ -3732,6 +3741,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         drawTargetOverride_ = nullptr;
         renderState_.setDeviceResourcePhase(RenderState::DeviceResourcePhase::Uninitialized);
         songContentTransition_.reset();
+        songRootAnimationInstalled_ = false;
         clearLyricDCompState();
         requestInvalidation(
             toMask(RenderInvalidation::Text) | toMask(RenderInvalidation::SongInfo) |
@@ -4538,10 +4548,13 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                      brushBtn_.Get(), stroke);
     }
 
-    void drawImmersiveControls() {
+    void drawImmersiveControls(float leftW, float h) {
         auto* rt = renderer.renderTarget();
         if (!rt)
             return;
+
+        if (songInfoVisible_)
+            drawSongInfoDivider(leftW, h);
 
         D2D1_POINT_2F centers[kExpandedControlCount]{};
         float cy = 0.0f;
@@ -5228,6 +5241,24 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return t * t * (3.0f - 2.0f * t);
     }
 
+    void resetRootVisual() {
+        renderer.resetRoot();
+        songRootAnimationInstalled_ = false;
+    }
+
+    void cancelSongTransition() {
+        setSongTransitionPending(false);
+        if (!songRootAnimationInstalled_ && !songContentTransition_)
+            return;
+        if (songRootAnimationInstalled_)
+            resetRootVisual();
+        if (immersiveSongContentLayerActive())
+            songContentTransition_->finishRequested = true;
+        else
+            songContentTransition_.reset();
+        requestFrameAndFlush();
+    }
+
     void beginImmersiveSongContentTransition() {
         if (!usesSongContentTransition() || isMinimalMode() || !isSongTransitionPending() ||
             songContentTransition_)
@@ -5242,7 +5273,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     }
 
     void finishImmersiveSongContentTransitionIfNeeded() {
-        if (!songContentTransition_ || !songContentTransition_->compositorLayer)
+        if (!immersiveSongContentLayerActive() || songContentTransition_->finishRequested)
             return;
         const ULONGLONG now = monotonicNowMs();
         if (now < songContentTransition_->startMs ||
@@ -6199,7 +6230,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         }
         if (!idleScene) {
             drawPinnedInlineControls(pinnedControls);
-            if (songInfoVisible_ || pinnedControls.active()) {
+            if (!isExpandedView() && (songInfoVisible_ || pinnedControls.active())) {
                 const float dividerStartX =
                     pinnedControls.active() ? pinnedControls.boundsRight : leftW;
                 const float dividerGap = songInfoVisible_ ? kSongInfoLyricGap : kTextPadding;
@@ -6442,19 +6473,25 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (SUCCEEDED(hr)) {
             const bool startSongTransition = isSongTransitionPending();
             const bool immersiveLayerActive = immersiveSongContentLayerActive();
-            if (startSongTransition) {
+            const bool finishSongContent =
+                immersiveLayerActive && songContentTransition_->finishRequested;
+            if (finishSongContent)
+                clearImmersiveSongContentTransition();
+            if (startSongTransition && !finishSongContent) {
                 // 展开视图的根视觉只承载沉浸模式显隐过渡，切歌不能把它复位。
                 if (!isExpandedView())
-                    renderer.resetRoot();
+                    resetRootVisual();
                 if (!isMinimalMode() && !usesSongContentTransition()) {
                     const float travel = kSongTransitionTravelDip * scale();
                     const bool vertical = isVerticalTaskbar();
                     const float fromX = vertical ? 0.0f : travel;
                     const float fromY =
                         vertical ? (taskbarEdge_ == ABE_LEFT ? -travel : travel) : 0.0f;
-                    if (!renderer.animateRoot(fromX, 0.0f, fromY, 0.0f, 0.0f, 1.0f,
-                                              kSongTransitionMs / 1000.0f))
-                        renderer.resetRoot();
+                    songRootAnimationInstalled_ =
+                        renderer.animateRoot(fromX, 0.0f, fromY, 0.0f, 0.0f, 1.0f,
+                                             kSongTransitionMs / 1000.0f);
+                    if (!songRootAnimationInstalled_)
+                        resetRootVisual();
                 }
             }
             // Present 失败（设备丢失/重置）时丢弃设备链，下一帧惰性重建
@@ -6465,7 +6502,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             runtime_log::recordTaskbarFrame(reinterpret_cast<uintptr_t>(hwnd), frameDisplayName_, displayRefreshHz_);
             // 只有真正 Present 成功后才消费该阶段；设备丢失时保留 Pending，
             // 下一次资源重建仍会以同一首歌的完整帧启动转场。
-            if (startSongTransition) {
+            if (finishSongContent && startSongTransition) {
+                requestFrame();
+            } else if (startSongTransition) {
                 // 合成层已经在运行时，新的切歌请求不能在本帧被旧动画消费；
                 // 等当前层收尾后再启动下一张快照。
                 if (immersiveLayerActive) {
@@ -6746,7 +6785,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
         beginImmersiveSongContentTransition();
         bool compositorSongContent =
-            songContentTransition_ && songContentTransition_->compositorLayer;
+            immersiveSongContentLayerActive() && !songContentTransition_->finishRequested;
         bool compositorSongContentPending = false;
         if (usesSongContentTransition() && songContentTransition_ &&
             !songContentTransition_->compositorLayer) {
@@ -6777,7 +6816,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         // 沉浸模式的操作组、频谱和时钟都属于固定遮罩层内容，必须在歌曲内容
         // 过渡变换之前绘制；切歌时只让封面、歌曲信息和歌词内容移动。
         if (isExpandedView()) {
-            drawImmersiveControls();
+            drawImmersiveControls(leftW, h);
             if (!idleScene)
                 drawDockPet(w, h, leftW);
             drawImmersiveRightSide(w, h, showSpectrum);
@@ -6840,7 +6879,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             }
             if (!idleScene) {
                 drawPinnedInlineControls(pinnedControls);
-                if (songInfoVisible_ || pinnedControls.active()) {
+                if (!isExpandedView() && (songInfoVisible_ || pinnedControls.active())) {
                     const float dividerStartX =
                         pinnedControls.active() ? pinnedControls.boundsRight : leftW;
                     const float dividerGap = songInfoVisible_ ? kSongInfoLyricGap : kTextPadding;
@@ -7026,7 +7065,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 if (bottomSpectrum)
                     drawBottomSpectrum(lyricAreaX, h, lyricAreaW);
                 if (isExpandedView()) {
-                    drawImmersiveControls();
+                    drawImmersiveControls(leftW, h);
                     if (!idleScene)
                         drawDockPet(w, h, leftW);
                     drawImmersiveRightSide(w, h, showSpectrum);
@@ -7275,7 +7314,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             // 切歌转场只改变合成器根视觉；进入极简时立即恢复到静止位置。
             setSongTransitionPending(false);
             clearImmersiveSongContentTransition();
-            renderer.resetRoot();
+            resetRootVisual();
         }
         if (mode == RenderMode::Stopped) {
             // 完全停止：隐藏窗口、停帧定时器、释放 GPU 设备链。此后 SMTC 事件仍更新

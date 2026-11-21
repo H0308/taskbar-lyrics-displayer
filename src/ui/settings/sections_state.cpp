@@ -412,6 +412,8 @@ void SettingsSections::syncFloatingCardRows(const SettingsState& s) {
 
 void SettingsSections::syncSongToastRows(const SettingsState& s) {
     const bool minimal = s.renderMode == kRenderModeMinimal;
+    if (auto* row = findRow(kIdSongTransitionEnabled))
+        row->checked = s.songTransitionEnabled;
     if (auto* row = findRow(kIdSongToast)) {
         row->checked = minimal ? false : s.songToastEnabled;
         row->enabled = !minimal;

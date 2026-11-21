@@ -59,6 +59,7 @@ TaskbarAppearance resolveTaskbarAppearance(const AppSettings& settings,
                                settings.dockResourceUpload_, settings.dockResourceGpuUsage_,
                                settings.dockResourceCpuFrequency_, settings.dockResourceSmallFont_};
     result.albumCoverVisible = settings.albumCoverVisible_;
+    result.songTransitionEnabled = settings.songTransitionEnabled_;
     result.platformIconVisible = settings.platformIconVisible_;
     result.contextMenuEnabled = settings.taskbarContextMenuEnabled_;
     result.fontColors = {context.playedColor, context.lyricAppearance.unplayed,

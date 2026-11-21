@@ -175,6 +175,12 @@ void App::applyTaskbarViewMode(int mode) {
     refreshSettingsDialog(true);
 }
 
+void App::applySongTransitionEnabled(bool on) {
+    settings_.songTransitionEnabled_ = on;
+    logSettingBool(L"song-transition", on);
+    commitAppearanceSettings();
+}
+
 void App::applyAppBarEdge(int edge) {
     settings_.appBarEdge_ = edge == 1 ? AppBarEdge::Bottom : AppBarEdge::Top;
     forEachHost([&](TaskbarHost* host) { host->setAppBarEdge(settings_.appBarEdge_); });
@@ -1257,6 +1263,7 @@ SettingsState App::currentSettingsState() const {
     st.tickTickStatus = idle_.state().tickTickStatus_;
     st.verticalTaskbar = vertical;
     st.taskbarViewMode = static_cast<int>(settings_.taskbarViewMode_);
+    st.songTransitionEnabled = settings_.songTransitionEnabled_;
     if (settings_.taskbarViewMode_ == TaskbarViewMode::Embedded)
         st.taskbarMonitorLabel = L"主显示器";
     else
@@ -1391,6 +1398,7 @@ SettingsActions App::buildSettingsActions() {
     act.onPlatformIconVisible = [this](bool on) { applyPlatformIconVisible(on); };
     act.onCoverEffectVinyl = [this](bool vinyl) { applyCoverEffect(vinyl); };
     act.onTaskbarViewMode = [this](int mode) { applyTaskbarViewMode(mode); };
+    act.onSongTransitionEnabled = [this](bool on) { applySongTransitionEnabled(on); };
     act.onChooseTaskbarMonitor = [this] { showTaskbarMonitorMenu(); };
     act.onAppBarEdge = [this](int edge) { applyAppBarEdge(edge); };
     act.onImmersiveBackgroundBlur = [this](int percent) { applyImmersiveBackgroundBlur(percent); };

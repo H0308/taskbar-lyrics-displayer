@@ -58,6 +58,7 @@ struct TaskbarAppearance {
     int dockBackgroundBlur{};
     DockResourceVisibility dockResourceVisibility{};
     bool albumCoverVisible{};
+    bool songTransitionEnabled = true;
     bool platformIconVisible{};
     bool contextMenuEnabled{};
     struct FontColors {

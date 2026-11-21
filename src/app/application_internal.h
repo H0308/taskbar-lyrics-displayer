@@ -389,6 +389,7 @@ private:
     void syncTaskbarView(const SmtcSnapshot& snap);
 
     void applyTaskbarViewMode(int mode);
+    void applySongTransitionEnabled(bool on);
 
     void applyAppBarEdge(int edge);
 

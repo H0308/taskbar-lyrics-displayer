@@ -329,7 +329,12 @@ void SettingsSections::createFloatingCardRows() {
 
 void SettingsSections::createSongToastRows() {
     const bool minimal = minimalModeActive();
-    addHeader(kSongToastPage, L"显示与时长");
+    addHeader(kSongToastPage, L"内容动画");
+    Row& songTransition = addRow(
+        kSongToastPage, kIdSongTransitionEnabled, ControlKind::Toggle, L"切歌动画",
+        L"切歌时在任务栏和媒体卡片中滑入新内容。关闭后直接显示。", 40.0f, kRowTallH);
+    songTransition.checked = state.songTransitionEnabled;
+    addHeader(kSongToastPage, L"切歌弹窗");
     Row& songToast =
         addRow(kSongToastPage, kIdSongToast, ControlKind::Toggle, L"切歌时弹出歌曲信息",
                L"在所选显示器短暂弹出封面、标题和艺术家；弹窗磨砂半透明，"

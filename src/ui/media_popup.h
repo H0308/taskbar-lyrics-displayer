@@ -40,6 +40,7 @@ public:
     // 媒体卡片与无播放组合面板共用的专辑色和文字对比度设置。
     void setFollowAlbumBackground(bool on);
     void setAutoTextContrast(bool on);
+    void setSongTransitionEnabled(bool on);
     void refreshTheme();
     // animateSongTransition 只由完整展示帧在确认切歌时传入；媒体字段异步补齐不触发转场。
     void setMedia(const OverlayMediaInfo& info, bool available,

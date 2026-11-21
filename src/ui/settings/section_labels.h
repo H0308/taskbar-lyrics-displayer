@@ -92,6 +92,7 @@ inline settings_icon::Kind iconForRow(int id) {
         return settings_icon::Kind::Refresh;
     case kIdTaskbarContextMenu:
     case kIdTaskbarViewMode:
+    case kIdSongTransitionEnabled:
     case kIdTaskbarMonitor:
     case kIdFullscreenRenderModeMonitor:
         return settings_icon::Kind::Display;

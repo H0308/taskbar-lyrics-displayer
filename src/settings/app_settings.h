@@ -51,6 +51,7 @@ struct AppSettings {
     double taskbarAnchorRatio_ = 1.0;
     TaskbarAnchorEdge taskbarAnchorEdge_ = TaskbarAnchorEdge::End;
     TaskbarViewMode taskbarViewMode_ = TaskbarViewMode::Embedded;
+    bool songTransitionEnabled_ = true;
     std::wstring taskbarMonitorId_;
     AppBarEdge appBarEdge_ = AppBarEdge::Top;
     int immersiveBackgroundBlur_ = 88;
