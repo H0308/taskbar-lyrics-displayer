@@ -145,8 +145,8 @@ void SettingsSections::createTaskbarModeRows() {
                L"示例：频率: 3.6GHz；系统未提供当前频率时显示“—”。", 40.0f, kRowTallH);
     dockResourceCpuFrequency.checked = state.dockResourceCpuFrequency;
     Row& dockResourceSmallFont =
-        addRow(kTaskbarModePage, kIdDockResourceSmallFont, ControlKind::Toggle, L"性能监测小字模式",
-               L"性能监测用更小一号字，各数据块之间更紧凑。", 40.0f, kRowTallH);
+        addRow(kTaskbarModePage, kIdDockResourceSmallFont, ControlKind::Toggle, L"紧凑显示",
+               L"缩小资源监视字号，收紧双行布局的行距。", 40.0f, kRowTallH);
     dockResourceSmallFont.checked = state.dockResourceSmallFont;
     const bool resourceExtrasEnabled =
         state.taskbarViewMode == 2 ||

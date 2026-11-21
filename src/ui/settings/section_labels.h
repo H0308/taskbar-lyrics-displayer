@@ -61,6 +61,7 @@ inline settings_icon::Kind iconForRow(int id) {
         return settings_icon::Kind::Theme;
     case kIdPickFont:
     case kIdPickUiFont:
+    case kIdDockResourceSmallFont:
         return settings_icon::Kind::Font;
     case kIdUiFontSource:
         return settings_icon::Kind::Follow;

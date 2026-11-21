@@ -7,16 +7,19 @@
 #include <cstdint>
 
 namespace {
-// CPU / 内存 / 上下行之间的横向间距：10 → 5 → 3 → 4 DIP。
-// 列宽改为按两位数（"CPU: 99%"）预留，所以这里保留 4 DIP 就够分开两块了；
-// 之前按三位数预留，两位数时右侧天然空一格，再加间距就显得很远。
 constexpr float kDockResourceZoneGap = 4.0f;
+constexpr float kCompactResourceZoneGap = 3.0f;
 constexpr float kResourceCellSafetyPadding = 0.0f;
 constexpr UINT kResourceSnapshotPollMs = 250;
 } // namespace
 using taskbar_detail::monotonicNowMs;
 
+float ResourcePanel::columnGap() const {
+    return dockResourceVisibility_.smallFont ? kCompactResourceZoneGap : kDockResourceZoneGap;
+}
+
 float ResourcePanel::width() const {
+    const float gap = columnGap();
     if (compact_) {
         float width = 0.0f;
         int count = 0;
@@ -26,10 +29,12 @@ float ResourcePanel::width() const {
                 ++count;
             }
         }
-        return width + std::max(0, count - 1) * kDockResourceZoneGap;
+        return width + std::max(0, count - 1) * gap;
     }
-    return resourceLeftColumnW_ +
-           (resourceRightColumnW_ > 0.0f ? kDockResourceZoneGap + resourceRightColumnW_ : 0.0f);
+    float width = 0.0f;
+    for (const auto& [left, right] : resourcePageColumnWidths_)
+        width = std::max(width, left + (right > 0.0f ? gap + right : 0.0f));
+    return width;
 }
 
 std::vector<ResourcePanel::DockResourceRow> ResourcePanel::rows() const {
@@ -149,6 +154,7 @@ void ResourcePanel::draw(ID2D1DeviceContext* rt, IDWriteTextFormat* format, ID2D
     const auto rows = ResourcePanel::rows();
     const size_t pageCount = compact_ ? rows.size() : rows.size() / 2;
     const size_t page = std::min(dockResourcePage_, pageCount - 1);
+    const float gap = columnGap();
 
     if (compact_) {
         const std::array<const std::wstring*, 2> cells{&rows[page].left, &rows[page].right};
@@ -163,7 +169,7 @@ void ResourcePanel::draw(ID2D1DeviceContext* rt, IDWriteTextFormat* format, ID2D
             rt->DrawTextW(cells[i]->c_str(), static_cast<UINT32>(cells[i]->size()), format,
                           D2D1::RectF(cellX, 0.0f, cellRight, h), brush,
                           D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
-            cellX += resourceSingleLineWidths_[i] + kDockResourceZoneGap;
+            cellX += resourceSingleLineWidths_[i] + gap;
         }
         rt->PopAxisAlignedClip();
         return;
@@ -172,14 +178,16 @@ void ResourcePanel::draw(ID2D1DeviceContext* rt, IDWriteTextFormat* format, ID2D
     std::array<DockResourceRow, 2> visibleRows{};
     visibleRows[0] = rows[page * 2];
     visibleRows[1] = rows[page * 2 + 1];
-    const float blockH = std::min(38.0f, std::max(1.0f, h - 2.0f));
+    const float maxBlockH = dockResourceVisibility_.smallFont ? 36.0f : 38.0f;
+    const float blockH = std::min(maxBlockH, std::max(1.0f, h - 2.0f));
     const float top = std::max(0.0f, (h - blockH) * 0.5f);
     const float rowH = blockH * 0.5f;
-    const float leftColumnW =
-        std::min(resourceLeftColumnW_, std::max(1.0f, width - kDockResourceZoneGap));
-    const float rightColumnX = x + leftColumnW + kDockResourceZoneGap;
-    const float rightColumnW = std::max(1.0f, width - leftColumnW - kDockResourceZoneGap);
-    const D2D1_DRAW_TEXT_OPTIONS drawOptions = width + 1.0f >= ResourcePanel::width()
+    const auto& columnWidths =
+        resourcePageColumnWidths_[std::min(page, resourcePageColumnWidths_.size() - 1)];
+    const float leftColumnW = std::min(columnWidths[0], width);
+    const float rightColumnX = x + leftColumnW + gap;
+    const float rightColumnW = width - leftColumnW - gap;
+    const D2D1_DRAW_TEXT_OPTIONS drawOptions = width >= ResourcePanel::width()
                                                    ? D2D1_DRAW_TEXT_OPTIONS_NONE
                                                    : D2D1_DRAW_TEXT_OPTIONS_CLIP;
 
@@ -243,12 +251,14 @@ bool ResourcePanel::updateColumnWidths(IDWriteFactory* dwrite, IDWriteTextFormat
     const std::wstring threeDigits = twoDigits + singleDigit;
     const std::wstring decimalDigits = twoDigits + L"." + singleDigit;
 
-    float leftMaxWidth = 0.0f;
-    float rightMaxWidth = 0.0f;
+    std::vector<std::array<float, 2>> pageColumnWidths;
     std::array<float, 2> singleLineWidths{};
     size_t cellIndex = 0;
     auto measureCell = [&](const std::vector<std::wstring>& samples) {
-        float& columnWidth = cellIndex % 4 < 2 ? leftMaxWidth : rightMaxWidth;
+        const size_t indexInPage = cellIndex % 4;
+        if (indexInPage == 0)
+            pageColumnWidths.push_back({});
+        float& columnWidth = pageColumnWidths.back()[indexInPage / 2];
         for (const auto& sample : samples) {
             const float measured = ResourcePanel::measureResourceTextWidth(dwrite, format, sample);
             columnWidth = std::max(columnWidth, measured);
@@ -256,10 +266,8 @@ bool ResourcePanel::updateColumnWidths(IDWriteFactory* dwrite, IDWriteTextFormat
         }
         ++cellIndex;
     };
-    // 按两位数预留列宽：CPU/内存 到 100% 的情况很少且瞬时，宁可那一刻挤一格，
-    // 也不让常态下的两位数在列尾留下一整格空白。
-    measureCell({L"CPU: " + twoDigits + L"%"});
-    measureCell({L"内存: " + twoDigits + L"%"});
+    measureCell({L"CPU: 100%", L"CPU: " + twoDigits + L"%"});
+    measureCell({L"内存: 100%", L"内存: " + twoDigits + L"%"});
     static constexpr const wchar_t* rateUnits[] = {L"B/s", L"KB/s", L"MB/s", L"GB/s", L"TB/s"};
     auto measureRate = [&](const wchar_t* prefixLabel) {
         std::vector<std::wstring> samples;
@@ -278,19 +286,18 @@ bool ResourcePanel::updateColumnWidths(IDWriteFactory* dwrite, IDWriteTextFormat
     if (dockResourceVisibility_.cpuFrequency)
         measureCell({L"频率: " + decimalDigits + L"GHz"});
 
-    const float nextLeftWidth =
-        std::max(1.0f, std::ceil(leftMaxWidth) + kResourceCellSafetyPadding);
-    const float nextRightWidth =
-        rightMaxWidth > 0.0f ? std::ceil(rightMaxWidth) + kResourceCellSafetyPadding : 0.0f;
+    for (auto& [left, right] : pageColumnWidths) {
+        left = std::max(1.0f, std::ceil(left) + kResourceCellSafetyPadding);
+        if (right > 0.0f)
+            right = std::ceil(right) + kResourceCellSafetyPadding;
+    }
     for (float& cellWidth : singleLineWidths)
         if (cellWidth > 0.0f)
             cellWidth = std::ceil(cellWidth) + kResourceCellSafetyPadding;
 
-    const bool changed = nextLeftWidth != resourceLeftColumnW_ ||
-                         nextRightWidth != resourceRightColumnW_ ||
+    const bool changed = pageColumnWidths != resourcePageColumnWidths_ ||
                          singleLineWidths != resourceSingleLineWidths_;
-    resourceLeftColumnW_ = nextLeftWidth;
-    resourceRightColumnW_ = nextRightWidth;
+    resourcePageColumnWidths_.swap(pageColumnWidths);
     resourceSingleLineWidths_ = singleLineWidths;
     return changed;
 }

@@ -39,6 +39,7 @@ private:
         std::wstring left, right;
     };
     std::vector<DockResourceRow> rows() const;
+    float columnGap() const;
     static std::wstring formatResourcePercent(double percent);
     static std::wstring formatNetworkRate(uint64_t bytesPerSecond);
     static std::wstring formatFrequency(bool available, double gigahertz);
@@ -55,8 +56,7 @@ private:
     std::wstring resourceCpuFrequencyText_ = L"—";
     DockResourceVisibility dockResourceVisibility_{};
     size_t dockResourcePage_ = 0;
-    float resourceLeftColumnW_ = 76.0f;
-    float resourceRightColumnW_ = 100.0f;
+    std::vector<std::array<float, 2>> resourcePageColumnWidths_{{76.0f, 100.0f}};
     std::array<float, 2> resourceSingleLineWidths_{};
     bool compact_ = false;
 };

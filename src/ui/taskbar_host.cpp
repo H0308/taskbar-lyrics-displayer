@@ -3563,10 +3563,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (!renderer.dwrite())
             renderer.initialize();
         typesetter_.setFactory(renderer.dwrite());
-        // 小字模式用更小的字号：字形更窄，列宽实测值随之变小，块与块自然收紧。
-        // 11.0f 比常规 resource(13.5f) 小一档，和 date 同号，紧凑但不至于难读。
         const float requested = resourcePanel_.visibility().smallFont
-                                    ? 11.0f
+                                    ? 12.0f
                                     : fluent::font_sizes::taskbar::resource;
         return typesetter_.ensureResourceFormat(
             fontFamily_, fontStyle_, fitCompactFontSize(requested, compactTaskbarHeight_ - 2.0f));
