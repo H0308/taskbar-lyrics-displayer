@@ -482,8 +482,16 @@ LyricTextMetrics LyricTypesetter::buildContent(const LyricTextInput& input) {
     };
     create(input.lyric, resources_.fmtLyric_.Get(), resources_.lyricLayout_, metrics.width,
            metrics.height);
-    if (input.vertical && !input.lyric.empty())
+    if (input.vertical && !input.lyric.empty()) {
         buildVerticalContent(input, metrics);
+        metrics.verticalColumns.primaryScrollUp = input.verticalPrimaryScrollUp;
+        // 单段和混排的前奏文案共用分段绘制器的向上滚动、渐显和循环副本。
+        if (input.verticalPrimaryScrollUp && resources_.verticalLyricLayout_) {
+            resources_.verticalLyricParts_.push_back(
+                {std::move(resources_.verticalLyricLayout_), metrics.verticalWidth,
+                 metrics.verticalHeight, metrics.verticalRotated});
+        }
+    }
     if (!input.vertical && !input.doubleLine)
         create(input.secondary, resources_.fmtSecondary_.Get(), resources_.secondaryLayout_,
                metrics.secondaryWidth, metrics.secondaryHeight);

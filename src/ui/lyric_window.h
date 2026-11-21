@@ -72,6 +72,7 @@ struct PresentationFrame {
     IdlePresentation idle;
     std::vector<LyricLine> lyrics;
     std::wstring statusText;
+    bool statusTextIsTrackInfo = false;
 
     // 真实播放位置用于逐字高亮；行选择位置单独包含提前量。
     int64_t actualPositionMs = 0;

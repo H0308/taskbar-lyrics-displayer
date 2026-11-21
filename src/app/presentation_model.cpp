@@ -103,6 +103,7 @@ void fillPresentationFrame(PresentationFrame& frame, const SmtcSnapshot& snap,
     const bool showStartupTaskLoading = idle.summaryPending && idle.tasksEnabled &&
                                         !snap.sessionAlive && frame.scene == DisplayScene::Idle;
     frame.statusTextOneShot = showStartupTaskSummary;
+    frame.statusTextIsTrackInfo = false;
     if (showStartupTaskSummary) {
         frame.statusText = idle.summaryText;
         frame.statusTextOneShot = true;
@@ -129,6 +130,7 @@ void fillPresentationFrame(PresentationFrame& frame, const SmtcSnapshot& snap,
         const auto& artist = snap.artist.empty() ? playback.currentArtist : snap.artist;
         if (!artist.empty())
             frame.statusText += L" - " + artist;
+        frame.statusTextIsTrackInfo = !frame.statusText.empty();
         if (frame.statusText.empty())
             frame.statusText = L"等待播放…";
     } else if (playback.currentLyrics_.empty()) {

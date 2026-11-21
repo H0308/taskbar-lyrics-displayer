@@ -20,6 +20,7 @@ struct LyricTextInput {
     float verticalWidth = 0.0f;
     float verticalPrimaryEffectPadding = 0.0f;
     float preferredVerticalSecondaryWidth = 0.0f;
+    bool verticalPrimaryScrollUp = false;
 };
 struct VerticalLyricColumns {
     float primaryX = 0.0f;
@@ -27,6 +28,7 @@ struct VerticalLyricColumns {
     float secondaryX = 0.0f;
     float secondaryWidth = 0.0f;
     float secondaryHeight = 0.0f;
+    bool primaryScrollUp = false;
     bool hasSecondary() const { return secondaryWidth > 0.0f; }
 };
 struct LyricFontSizes {

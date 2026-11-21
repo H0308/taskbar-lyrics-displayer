@@ -479,6 +479,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     std::vector<LyricLine> sourceLines_;
     std::vector<LyricLine> lines;
     std::wstring statusText = L"等待播放…";
+    bool statusTextIsTrackInfo = false;
     std::function<void()> onStatusTextCycleCompleted_;
     int currentLine = -1;
     int64_t positionMs_ = 0; // 播放进度（每帧更新），驱动逐字高亮
@@ -2805,7 +2806,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const int64_t previousDurationMs = media.durationMs;
         const bool lyricsChanged = !sameLyrics(sourceLines_, frame.lyrics);
         const bool lineChanged = frame.currentLine != currentLine;
-        const bool statusChanged = frame.statusText != statusText;
+        const bool statusChanged = frame.statusText != statusText ||
+                                   frame.statusTextIsTrackInfo != statusTextIsTrackInfo;
         const bool statusOneShotChanged = frame.statusTextOneShot != scroll_.oneShot();
         const DisplayScene previousScene = scene_;
         const bool sceneChanged = frame.scene != scene_;
@@ -2899,6 +2901,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         scene_ = frame.scene;
         // 窗口目标宽度依赖空闲文案是否为空，必须用新帧的状态计算转场终点。
         statusText = frame.statusText;
+        statusTextIsTrackInfo = frame.statusTextIsTrackInfo;
         if (sceneWidthChanged) {
             if (shouldAnimateScene) {
                 // 与内容转场使用同一段平滑时间曲线，窗口宽度/锚点连续变化，避免
@@ -4163,6 +4166,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         input.doubleLine = doubleLineLyrics;
         input.vertical = isVerticalTaskbar();
         if (input.vertical) {
+            input.verticalPrimaryScrollUp = displayLine < 0 && statusTextIsTrackInfo;
             int width = 0, height = 0;
             clientPixelSize(width, height);
             input.verticalWidth = dip(width);
@@ -5680,7 +5684,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 drawVerticalLyricParts(*parts, textH, areaH, railW, y, offset, brush, outline,
                                        glow, karaokeBrush, karaokeProgress, opacity, singleCopy,
                                        extension, extension, constantFade,
-                                       layout.lyricY, columns.primaryX);
+                                       layout.lyricY, columns.primaryX, columns.primaryScrollUp);
                 return;
             }
             // 旋转英文的实际横向宽度通常小于任务栏槽宽，单独居中，避免整句贴在
