@@ -157,7 +157,8 @@ LayoutMetrics horizontalLayout(const HorizontalLayoutInput& input) {
 }
 
 VerticalLayout verticalLayout(float width, float height, DisplayScene scene, bool albumCoverVisible,
-                              bool showControls, bool canSwitchSource, float resourceHeight) {
+                              bool showControls, bool canSwitchSource, float resourceHeight,
+                              bool songInfoVisible) {
 
     VerticalLayout layout;
     layout.w = width;
@@ -165,19 +166,30 @@ VerticalLayout verticalLayout(float width, float height, DisplayScene scene, boo
     if (layout.w <= 0.0f || layout.h <= 0.0f)
         return layout;
 
-    const float pad = std::min(kVerticalRailPadding, layout.w * 0.18f);
-    const float contentW = std::max(1.0f, layout.w - pad * 2.0f);
     const bool playbackScene = scene != DisplayScene::Idle && scene != DisplayScene::NoPlayback;
     if (albumCoverVisible && playbackScene) {
-        layout.coverSize = contentW;
+        layout.coverSize = std::max(0.0f, width - 2.0f * kCoverPadding);
         layout.coverX = (layout.w - layout.coverSize) * 0.5f;
-        layout.coverY = pad;
+        layout.coverY = kCoverPadding;
     }
 
-    layout.lyricY =
-        layout.coverSize > 0.0f ? layout.coverY + layout.coverSize + kVerticalCoverGap : pad;
-    const float contentBottom = layout.h - pad;
-    layout.lyricBottom = std::max(layout.lyricY + 1.0f, contentBottom);
+    const bool hasInfo = playbackScene && songInfoVisible;
+    const float coverEnd = layout.coverY + layout.coverSize;
+    // 放置器先保留原有封面和歌词长度，歌曲信息只消费实际取得的额外空间。
+    float leadingEnd = coverEnd;
+    if (hasInfo) {
+        const float extra = std::clamp(height - kVerticalBaseLengthDip, 0.0f,
+                                       kVerticalSongInfoLengthDip);
+        const float start = songInfoStart(layout.coverSize > 0.0f, layout.coverSize);
+        const float end = coverEnd + extra - kTextPadding;
+        if (end > start) {
+            layout.songInfo = D2D1::RectF(0.0f, start, width, end);
+            leadingEnd += extra;
+        }
+    }
+    layout.lyricY = leadingEnd + (hasInfo ? kSongInfoLyricGap : kTextPadding);
+    const float contentBottom = height - kTextPadding;
+    layout.lyricBottom = contentBottom;
     const float resourceTop = contentBottom - resourceHeight;
     const float resourceContentBottom = resourceTop - kVerticalLyricGap;
     const auto reserveResourceArea = [&] {

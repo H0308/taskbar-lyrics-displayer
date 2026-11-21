@@ -284,12 +284,9 @@ void SettingsSections::syncIdleRows(const SettingsState& s) {
 }
 
 void SettingsSections::syncDisplayRows(const SettingsState& s) {
-    const bool vertical = s.verticalTaskbar;
     const bool minimal = s.renderMode == kRenderModeMinimal;
-    if (auto* row = findRow(kIdSongInfo)) {
-        row->checked = vertical ? false : s.songInfoVisible;
-        row->enabled = !vertical;
-    }
+    if (auto* row = findRow(kIdSongInfo))
+        row->checked = s.songInfoVisible;
     if (auto* row = findRow(kIdAlbumCover))
         row->checked = s.albumCoverVisible;
     if (auto* row = findRow(kIdPlatformIcon)) {

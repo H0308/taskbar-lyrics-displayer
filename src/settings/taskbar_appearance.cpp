@@ -19,7 +19,7 @@ TaskbarAppearance resolveTaskbarAppearance(const AppSettings& settings,
     result.simulateWordByWordLyrics = minimal ? false : settings.simulateWordByWordLyrics_;
     result.lyricAlignment = vertical ? LyricAlignment::Left : settings.lyricAlignment_;
     result.idleQuoteAlignment = vertical ? LyricAlignment::Left : settings.idleQuoteAlignment_;
-    result.songInfoVisible = vertical ? false : settings.songInfoVisible_;
+    result.songInfoVisible = settings.songInfoVisible_;
     result.controlsOnHover = settings.hoverPlaybackControls_;
     result.hoverControlStyle = minimal ? HoverControlStyle::Inline : settings.hoverControlStyle_;
     result.inlineControlDisplayMode =

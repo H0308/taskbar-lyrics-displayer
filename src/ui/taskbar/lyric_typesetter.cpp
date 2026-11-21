@@ -554,12 +554,27 @@ bool LyricTypesetter::ensureResourceFormat(const std::wstring& family, LyricFont
 }
 
 SongTextMetrics LyricTypesetter::buildSongInfo(const std::wstring& title,
-                                               const std::wstring& artist, bool visible) {
+                                               const std::wstring& artist, bool visible,
+                                               float verticalColumnWidth) {
     resources_.titleLayout_.Reset();
     resources_.artistLayout_.Reset();
+    resources_.verticalTitleParts_.clear();
+    resources_.verticalArtistParts_.clear();
     SongTextMetrics result;
     if (!factory_ || !visible)
         return result;
+    if (verticalColumnWidth > 0.0f) {
+        float layoutWidth = 0.0f;
+        createMixedVerticalLyricLayout(title, resources_.fmtTitle_.Get(), verticalColumnWidth,
+                                       resources_.verticalTitleParts_, layoutWidth,
+                                       result.titleHeight, result.titleWidth);
+        createMixedVerticalLyricLayout(artist, resources_.fmtArtist_.Get(), verticalColumnWidth,
+                                       resources_.verticalArtistParts_, layoutWidth,
+                                       result.artistHeight, result.artistWidth);
+        result.titleWidth = std::min(result.titleWidth, verticalColumnWidth);
+        result.artistWidth = std::min(result.artistWidth, verticalColumnWidth);
+        return result;
+    }
     auto build = [&](const std::wstring& text, IDWriteTextFormat* format,
                      Microsoft::WRL::ComPtr<IDWriteTextLayout>& layout, float& width,
                      float& height) {

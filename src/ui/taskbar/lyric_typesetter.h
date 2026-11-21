@@ -69,6 +69,8 @@ public:
         Microsoft::WRL::ComPtr<IDWriteTextLayout> outgoingSecondaryLayout_;
         Microsoft::WRL::ComPtr<IDWriteTextLayout> outgoingNextLyricLayout_;
         std::vector<VerticalLyricPart> verticalLyricParts_;
+        std::vector<VerticalLyricPart> verticalTitleParts_;
+        std::vector<VerticalLyricPart> verticalArtistParts_;
         std::vector<VerticalLyricPart> outgoingVerticalLyricParts_;
         std::vector<VerticalLyricPart> verticalSecondaryParts_;
         std::vector<VerticalLyricPart> outgoingVerticalSecondaryParts_;
@@ -83,7 +85,7 @@ public:
     bool ensureResourceFormat(const std::wstring& family, LyricFontStyle style, float size);
     void resetResourceFormat() { resources_.fmtResource_.Reset(); }
     SongTextMetrics buildSongInfo(const std::wstring& title, const std::wstring& artist,
-                                  bool visible);
+                                  bool visible, float verticalColumnWidth);
     void clearCurrentContent();
     void clearNextContent() { resources_.nextLyricLayout_.Reset(); }
     LyricTextMetrics buildContent(const LyricTextInput& input);

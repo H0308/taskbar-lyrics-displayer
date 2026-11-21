@@ -75,7 +75,7 @@ private:
     ID2D1LinearGradientBrush* ensureLyricRightFadeBrush(const LyricTextDrawContext& context);
     ID2D1LinearGradientBrush* lyricRightFadeBrush(const LyricTextDrawContext& context,
                                                   float rightEdge, float extend);
-    VerticalEdgeFades verticalEdgeFades(const LyricTextDrawContext& context, float offset,
+    VerticalEdgeFades verticalEdgeFades(bool outAtTop, float offset,
                                         float contentH, float areaH, bool karaoke,
                                         bool constantEdgeFade) const;
     ID2D1LinearGradientBrush* verticalOutFadeBrush(const LyricTextDrawContext& context, float edgeY,

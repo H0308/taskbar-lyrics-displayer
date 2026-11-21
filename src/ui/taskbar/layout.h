@@ -9,8 +9,12 @@ inline constexpr float kCoverPadding = 4.0f;
 inline constexpr float kTextPadding = 8.0f;
 inline constexpr float kSongInfoLyricGap = 8.0f;
 inline constexpr float kLeftRatio = 0.38f;
-inline constexpr float kVerticalRailPadding = 4.0f;
-inline constexpr float kVerticalCoverGap = 6.0f;
+inline constexpr float kVerticalBaseLengthDip = 320.0f;
+inline constexpr float kVerticalSongInfoLengthDip = kVerticalBaseLengthDip * kLeftRatio;
+inline constexpr float kSongInfoLineGap = 2.0f;
+inline float songInfoStart(bool coverVisible, float coverSize) {
+    return coverVisible ? 2.0f * kCoverPadding + coverSize : kTextPadding;
+}
 inline constexpr float kVerticalControlsGap = 4.0f;
 inline constexpr float kVerticalLyricGap = 6.0f;
 inline constexpr int kInlineSourceControl = static_cast<int>(MediaControl::NextSource);
@@ -61,6 +65,7 @@ struct VerticalLayout {
     float coverX = 0.0f;
     float coverY = 0.0f;
     float coverSize = 0.0f;
+    D2D1_RECT_F songInfo{};
     float lyricY = 0.0f;
     float lyricBottom = 0.0f;
     D2D1_RECT_F resources{};
@@ -115,5 +120,5 @@ void layoutInlineHoverControls(float left, float width, float height, bool canRe
 LayoutMetrics horizontalLayout(const HorizontalLayoutInput& input);
 VerticalLayout verticalLayout(float width, float height, DisplayScene scene, bool albumCoverVisible,
                               bool showControls, bool canSwitchSource = false,
-                              float resourceHeight = 0.0f);
+                              float resourceHeight = 0.0f, bool songInfoVisible = true);
 } // namespace taskbar_detail

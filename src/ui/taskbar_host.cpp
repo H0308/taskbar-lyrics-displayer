@@ -44,9 +44,7 @@ using taskbar_detail::kLeftRatio;
 using taskbar_detail::kSongInfoLyricGap;
 using taskbar_detail::kTextPadding;
 using taskbar_detail::kVerticalControlsGap;
-using taskbar_detail::kVerticalCoverGap;
 using taskbar_detail::kVerticalLyricGap;
-using taskbar_detail::kVerticalRailPadding;
 using taskbar_detail::LayoutMetrics;
 using taskbar_detail::queryKugouTaskbarWindows;
 using taskbar_detail::queryTaskbarButtonsUia;
@@ -137,7 +135,6 @@ constexpr float kSongInfoDividerWidth = 1.0f;
 constexpr float kSongInfoDividerInset = 5.0f;
 constexpr float kCornerRadius = 8.0f;
 constexpr float kVerticalMinLengthDip = 220.0f;
-constexpr float kVerticalMaxLengthDip = 320.0f;
 
 constexpr float kLyricTransitionMs = 280.0f;         // 相邻歌词上下切换时长
 constexpr float kSceneTransitionMs = taskbar_detail::SceneTransition::kDurationMs;
@@ -1397,19 +1394,22 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
         int gap = std::max(4, (int)std::lround(4.0f * scale()));
         float minWidthDip = vertical ? kVerticalMinLengthDip : kMinWidthDip;
-        float maxWidthDip = vertical ? kVerticalMaxLengthDip : kMaxWidthDip;
+        float maxWidthDip = vertical ? taskbar_detail::kVerticalBaseLengthDip : kMaxWidthDip;
         float compressedMinWidthDip = minWidthDip * kCompressedMinWidthRatio;
         if (embeddedResourceOnly()) {
             minWidthDip = 0.0f;
             compressedMinWidthDip = 0.0f;
             maxWidthDip = 0.0f;
-        } else if (!vertical && !songInfoVisible_ && scene_ != DisplayScene::Idle) {
+        } else if (vertical) {
+            if (songInfoVisible_ && isTaskbarMediaScene(scene_))
+                maxWidthDip += taskbar_detail::kVerticalSongInfoLengthDip;
+        } else if (!songInfoVisible_ && scene_ != DisplayScene::Idle) {
             // 保留原歌词区宽度，只扣除歌曲信息区；左侧压缩为可见的封面区域。
             const float compactLeftDip = albumCoverVisible_ ? coverSlotWidth(dip(crossPx)) : 0.0f;
-            const float flexibleMinDip = kMinWidthDip * (1.0f - kLeftRatio);
+            const float flexibleMinDip = minWidthDip * (1.0f - kLeftRatio);
             minWidthDip = flexibleMinDip + compactLeftDip;
             compressedMinWidthDip = flexibleMinDip * kCompressedMinWidthRatio + compactLeftDip;
-            maxWidthDip = kMaxWidthDip * (1.0f - kLeftRatio) + compactLeftDip;
+            maxWidthDip = maxWidthDip * (1.0f - kLeftRatio) + compactLeftDip;
         }
         int minW = (int)std::lround(minWidthDip * scale());
         int compressedMinW = (int)std::lround(compressedMinWidthDip * scale());
@@ -1858,6 +1858,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 // 左右侧的竖排文字方向相反；任务栏方向变化时必须重建逐字布局，
                 // 同时丢弃沿用自另一方向的滚动偏移。
                 requestInvalidation(RenderInvalidation::Text);
+                requestInvalidation(RenderInvalidation::SongInfo);
+                scroll_.resetTitle();
+                scroll_.resetArtist();
                 scroll_.resetLyric();
             }
             rcTaskbar_ = rcTaskbar;
@@ -3104,11 +3107,13 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     }
 
     bool sceneUsesCompactWidth(DisplayScene scene) const {
-        return !isVerticalTaskbar() && !songInfoVisible_ && scene != DisplayScene::Idle;
+        return !songInfoVisible_ && scene != DisplayScene::Idle;
     }
 
     bool sceneWidthPolicyDiffers(DisplayScene from, DisplayScene to) const {
-        if (isVerticalTaskbar() || isExpandedView())
+        if (isVerticalTaskbar())
+            return songInfoVisible_ && isTaskbarMediaScene(from) != isTaskbarMediaScene(to);
+        if (isExpandedView())
             return false;
         return sceneUsesCompactWidth(from) != sceneUsesCompactWidth(to) ||
                pinnedInlineControlsForScene(from) != pinnedInlineControlsForScene(to) ||
@@ -3343,6 +3348,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             const auto layout = verticalLayout();
             if (!idleScene && layout.coverSize > 0.0f)
                 playback[0] = D2D1::RectF(0.0f, 0.0f, w, layout.coverY + layout.coverSize);
+            playback[1] = layout.songInfo;
             const auto text = D2D1::RectF(0.0f, layout.lyricY, w, layout.lyricBottom);
             if (scene_ == DisplayScene::Lyrics && !layout.showControls)
                 playback[2] = text;
@@ -4066,8 +4072,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         // 歌曲信息变化也不触碰歌词布局与行过渡状态
         if (isInvalidated(RenderInvalidation::SongInfo)) {
             typesetter_.setFactory(dwrite);
+            const float columnWidth = isVerticalTaskbar()
+                ? std::max(1.0f, (dip(lastPxW_) - taskbar_detail::kSongInfoLineGap) * 0.5f)
+                : 0.0f;
             const auto metrics =
-                typesetter_.buildSongInfo(media.title, media.artist, songInfoVisible_);
+                typesetter_.buildSongInfo(media.title, media.artist, songInfoVisible_, columnWidth);
             titleWidth_ = metrics.titleWidth;
             titleHeight_ = metrics.titleHeight;
             artistWidth_ = metrics.artistWidth;
@@ -4262,7 +4271,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     }
 
     float infoStartX() const {
-        return albumCoverVisible_ ? kCoverPadding + coverSize() + kCoverPadding : kTextPadding;
+        return taskbar_detail::songInfoStart(albumCoverVisible_, albumCoverVisible_ ? coverSize() : 0.0f);
     }
 
     float lyricStartPadding() const {
@@ -4296,7 +4305,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return taskbar_detail::verticalLayout(widthDip, dip(height), scene_, albumCoverVisible_,
                                               hovered && controlsOnHover_ &&
                                                   hoverControlStyle_ == HoverControlStyle::Inline,
-                                              media.canSwitchSource, resourceHeight);
+                                              media.canSwitchSource, resourceHeight, songInfoVisible_);
     }
 
     bool pinnedInlineControlsConfigured() const {
@@ -5426,7 +5435,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return FAILED(hr) ? nullptr : songInfoDividerBrush_.Get();
     }
 
-    void drawSongInfoDivider(float dividerStartX, float h, float gapWidth = kSongInfoLyricGap) {
+    void drawSongInfoDivider(float dividerStartX, float h, float gapWidth = kSongInfoLyricGap,
+                             bool vertical = false) {
         auto* rt = drawTarget();
         if (!rt || scene_ == DisplayScene::Idle || h <= 2.0f || gapWidth <= kSongInfoDividerWidth)
             return;
@@ -5439,10 +5449,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (!brush)
             return;
 
-        brush->SetStartPoint(D2D1::Point2F(0.0f, top));
-        brush->SetEndPoint(D2D1::Point2F(0.0f, bottom));
+        brush->SetStartPoint(vertical ? D2D1::Point2F(top, 0.0f) : D2D1::Point2F(0.0f, top));
+        brush->SetEndPoint(vertical ? D2D1::Point2F(bottom, 0.0f) : D2D1::Point2F(0.0f, bottom));
         const float x = dividerStartX + (gapWidth - kSongInfoDividerWidth) * 0.5f;
-        const D2D1_RECT_F rect = D2D1::RectF(x, top, x + kSongInfoDividerWidth, bottom);
+        const auto rect = vertical ? D2D1::RectF(top, x, bottom, x + kSongInfoDividerWidth)
+                                   : D2D1::RectF(x, top, x + kSongInfoDividerWidth, bottom);
         rt->FillRoundedRectangle(
             D2D1::RoundedRect(rect, kSongInfoDividerWidth * 0.5f, kSongInfoDividerWidth * 0.5f),
             brush);
@@ -6278,7 +6289,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             // 左右边缘都保留渐隐，右缘在分隔线前收束，避免标题/歌手撞到歌词区
             const float infoX = infoStartX();
             const float infoW = std::max(1.0f, leftW - infoX - kTextPadding);
-            const float infoGap = 2.0f;
+            const float infoGap = taskbar_detail::kSongInfoLineGap;
             const float totalInfoH = titleHeight_ + infoGap + artistHeight_;
             const float infoY = (h - totalInfoH) * 0.5f;
             drawScrollingText(typesetter_.resources().titleLayout_.Get(), titleWidth_, titleHeight_,
@@ -6621,6 +6632,25 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             drawPlatformIcon(layout.coverX, layout.coverY, layout.coverSize);
         }
 
+        const float infoHeight = layout.songInfo.bottom - layout.songInfo.top;
+        if (infoHeight > 0.0f) {
+            const float gap = taskbar_detail::kSongInfoLineGap;
+            const float left = (layout.w - titleWidth_ - gap - artistWidth_) * 0.5f;
+            const auto drawColumn = [&](const auto& parts, float width, float height, float x, float offset,
+                                        ID2D1Brush* brush) {
+                const float y = layout.songInfo.top + std::max(0.0f, infoHeight - height) * 0.5f;
+                drawVerticalLyricParts(parts, height, infoHeight, width, y,
+                                      offset, brush, nullptr, nullptr, nullptr, 0.0f, 1.0f, false,
+                                      0.0f, kTextPadding, true, layout.songInfo.top, x, true);
+            };
+            const auto& text = typesetter_.resources();
+            drawColumn(text.verticalTitleParts_, titleWidth_, titleHeight_, left + artistWidth_ + gap, scroll_.title(),
+                       brushText_.Get());
+            drawColumn(text.verticalArtistParts_, artistWidth_, artistHeight_, left, scroll_.artist(),
+                       brushDim_.Get());
+            drawSongInfoDivider(layout.lyricY - kSongInfoLyricGap, layout.w, kSongInfoLyricGap, true);
+        }
+
         if (layout.showControls) {
             for (int i = 0; i < 3; ++i)
                 drawButton(i, layout.controlCenters[i], layout.controlRadius);
@@ -6727,6 +6757,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 requestLyricDCompEnd();
             if (songContentTransition_ && songContentTransition_->compositorLayer)
                 clearImmersiveSongContentTransition();
+            if (vertical && pxW != lastPxW_)
+                requestInvalidation(RenderInvalidation::SongInfo);
             lastPxW_ = pxW;
             lastPxH_ = pxH;
             requestInvalidation(RenderInvalidation::Geometry);
@@ -6930,7 +6962,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 // 左右边缘都保留渐隐，右缘在分隔线前收束，避免标题/歌手撞到歌词区
                 float infoX = infoStartX();
                 float infoW = std::max(1.0f, leftW - infoX - kTextPadding);
-                float infoGap = 2.0f;
+                const float infoGap = taskbar_detail::kSongInfoLineGap;
                 float totalInfoH = titleHeight_ + infoGap + artistHeight_;
                 float infoY = (h - totalInfoH) * 0.5f;
                 drawScrollingText(typesetter_.resources().titleLayout_.Get(), titleWidth_,
@@ -7199,6 +7231,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         input.secondaryWidth = secondaryWidth_;
         if (input.vertical) {
             const auto layout = verticalLayout();
+            input.infoWidth = layout.songInfo.bottom - layout.songInfo.top;
+            input.titleWidth = titleHeight_;
+            input.artistWidth = artistHeight_;
             input.area = layout.lyricBottom - layout.lyricY;
             input.verticalExtent = verticalLyricHeight_ > 0.0f ? verticalLyricHeight_ : lyricWidth_;
             input.verticalSecondaryExtent = verticalLyricColumns_.secondaryHeight;

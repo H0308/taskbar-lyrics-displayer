@@ -50,7 +50,6 @@ Row& SettingsSections::addHeader(int page, const wchar_t* text) {
 
 void SettingsSections::createDisplayRows() {
     const bool minimal = minimalModeActive();
-    const bool vertical = state.verticalTaskbar;
     addHeader(0, L"主题");
     addRadio(0, kIdTaskbarTheme, L"任务栏内容主题",
              L"“系统”和“应用”分别跟随 Windows 的系统模式与应用模式。",
@@ -71,9 +70,7 @@ void SettingsSections::createDisplayRows() {
     uiFont.valueText = state.uiFontDesc;
     uiFont.enabled = state.uiFontSource == UiFontSource::Independent;
     addHeader(0, L"歌曲信息与封面");
-    Row& songInfo =
-        addToggle(0, kIdSongInfo, L"显示歌曲信息", vertical ? false : state.songInfoVisible);
-    songInfo.enabled = !vertical;
+    addToggle(0, kIdSongInfo, L"显示歌曲信息", state.songInfoVisible);
     Row& albumCover = addRow(0, kIdAlbumCover, ControlKind::Toggle, L"显示专辑封面",
                              L"点击专辑封面可以打开当前音乐播放器。", 40.0f, kRowTallH);
     albumCover.checked = state.albumCoverVisible;

@@ -69,6 +69,12 @@ void TextScroll::advance(const TextScrollInput& input) {
     };
 
     if (input.vertical) {
+        if (input.infoWidth > 0.0f) {
+            marquee(input.titleWidth, input.infoWidth, kInfoScrollSpeed, titleScrollOffset_,
+                    kVerticalLyricGap);
+            marquee(input.artistWidth, input.infoWidth, kInfoScrollSpeed, artistScrollOffset_,
+                    kVerticalLyricGap);
+        }
         const float lyricAreaH = input.area;
         if (lyricAreaH <= 0.0f) {
             scrollAnimating_ = animating;
