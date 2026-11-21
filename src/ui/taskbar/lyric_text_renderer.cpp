@@ -586,7 +586,8 @@ void LyricTextRenderer::drawVerticalLyricParts(
     const LyricTextDrawContext& context, const std::vector<VerticalLyricPart>& parts, float blockH,
     float areaH, float railW, float y, float offset, ID2D1Brush* brush, ID2D1Brush* outline,
     ID2D1Brush* glow, ID2D1Brush* karaokeBrush, float karaokeProgress, float opacity,
-    bool singleCopy, float topExtend, float bottomExtend, bool constantEdgeFade, float slotY) {
+    bool singleCopy, float topExtend, float bottomExtend, bool constantEdgeFade, float slotY,
+    float railX, bool scrollUp) {
     auto* rt = context.target;
     if (!rt || parts.empty() || blockH <= 0.0f || areaH <= 0.0f)
         return;
@@ -595,7 +596,9 @@ void LyricTextRenderer::drawVerticalLyricParts(
     // 分段内部不再单独裁剪，裁剪由此处的图层/裁剪范围承担。
     // 裁剪与渐隐锚定歌词槽（slotY），转场期间文字随动画移动但槽不动
     const float slotTop = slotY >= 0.0f ? slotY : y;
-    const VerticalEdgeFades fades = verticalEdgeFades(context, offset, blockH, areaH,
+    const float direction = scrollUp ? -1.0f : 1.0f;
+    const float signedOffset = offset * direction;
+    const VerticalEdgeFades fades = verticalEdgeFades(context, signedOffset, blockH, areaH,
                                                       karaokeBrush != nullptr, constantEdgeFade);
     const float topExt = fades.borrow && fades.borrowAtTop ? topExtend : 0.0f;
     const float bottomExt = fades.borrow && !fades.borrowAtTop ? bottomExtend : 0.0f;
@@ -609,7 +612,7 @@ void LyricTextRenderer::drawVerticalLyricParts(
             ? verticalOutFadeBrush(context, fades.outAtTop ? slotTop : slotTop + areaH,
                                    fades.outBand, fades.outAtTop)
             : nullptr;
-    const D2D1_RECT_F clip{0.0f, slotTop - topExt, railW, slotTop + areaH + bottomExt};
+    const D2D1_RECT_F clip{railX, slotTop - topExt, railX + railW, slotTop + areaH + bottomExt};
     bool pushedBorrow = false;
     bool pushedOut = false;
     bool pushedClip = false;
@@ -634,13 +637,13 @@ void LyricTextRenderer::drawVerticalLyricParts(
     const float sungExtent = blockH * progress;
     const float loopH = blockH + kVerticalLyricGap;
     const int copyCount = karaokeBrush || singleCopy || blockH <= areaH ? 1 : 2;
-    const float base = y + offset;
+    const float base = y + signedOffset;
     const int effectLine = &parts == &(*context.resources).verticalLyricParts_ ? context.currentLine
                            : &parts == &(*context.resources).outgoingVerticalLyricParts_
                                ? context.outgoingLine
                                : -1;
     for (int copy = 0; copy < copyCount; ++copy) {
-        float partTop = base - copy * loopH;
+        float partTop = base - direction * copy * loopH;
         float partOffset = 0.0f;
         for (const auto& part : parts) {
             if (!part.layout.Get() || part.width <= 0.0f || part.height <= 0.0f)
@@ -651,7 +654,7 @@ void LyricTextRenderer::drawVerticalLyricParts(
                 partProgress = std::clamp((sungExtent - partOffset) / part.height, 0.0f, 1.0f);
             }
             ID2D1Brush* partKaraoke = karaokeBrush && partProgress > 0.0f ? karaokeBrush : nullptr;
-            const float partX = part.rotated ? (railW - part.width) * 0.5f : 0.0f;
+            const float partX = railX + (part.rotated ? (railW - part.width) * 0.5f : 0.0f);
             drawVerticalScrollingText(
                 context, part.layout.Get(), part.width, part.height, areaH, partX, partTop, 0.0f,
                 brush, outline, glow, partKaraoke, partProgress, opacity, LyricAlignment::Center,

@@ -59,7 +59,8 @@ public:
                                 ID2D1Brush* karaokeBrush = nullptr, float karaokeProgress = 0.0f,
                                 float opacity = 1.0f, bool singleCopy = false,
                                 float topExtend = 0.0f, float bottomExtend = 0.0f,
-                                bool constantEdgeFade = false, float slotY = -1.0f);
+                                bool constantEdgeFade = false, float slotY = -1.0f,
+                                float railX = 0.0f, bool scrollUp = false);
 
     void createDeviceResources(ID2D1DeviceContext* target);
     void discardDeviceResources();

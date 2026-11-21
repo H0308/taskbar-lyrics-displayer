@@ -11,8 +11,8 @@ TaskbarAppearance resolveTaskbarAppearance(const AppSettings& settings,
     TaskbarAppearance result;
     result.frameRate = settings.frameRate_;
     result.secondaryLyricMode = {
-        vertical ? false : (settings.secondaryLyricEnabled_ && !settings.preferRomanization_),
-        vertical ? false : (settings.secondaryLyricEnabled_ && settings.preferRomanization_)};
+        settings.secondaryLyricEnabled_ && !settings.preferRomanization_,
+        settings.secondaryLyricEnabled_ && settings.preferRomanization_};
     result.doubleLineLyrics = vertical ? false : settings.doubleLineLyricsEnabled_;
     result.lyricEffects = settings.lyricEffects_;
     result.lyricPlayedGradient = settings.lyricPlayedGradient_;

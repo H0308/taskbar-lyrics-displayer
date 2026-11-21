@@ -18,6 +18,16 @@ struct LyricTextInput {
     bool doubleLine = false;
     bool vertical = false;
     float verticalWidth = 0.0f;
+    float verticalPrimaryEffectPadding = 0.0f;
+    float preferredVerticalSecondaryWidth = 0.0f;
+};
+struct VerticalLyricColumns {
+    float primaryX = 0.0f;
+    float primaryWidth = 0.0f;
+    float secondaryX = 0.0f;
+    float secondaryWidth = 0.0f;
+    float secondaryHeight = 0.0f;
+    bool hasSecondary() const { return secondaryWidth > 0.0f; }
 };
 struct LyricFontSizes {
     float title{}, artist{}, lyric{}, next{}, secondary{};
@@ -29,6 +39,7 @@ struct LyricTextMetrics {
     float width = 0, height = 0;
     float verticalWidth = 0, verticalHeight = 0;
     bool verticalRotated = false;
+    VerticalLyricColumns verticalColumns;
     float secondaryWidth = 0, secondaryHeight = 0;
     float nextWidth = 0, nextHeight = 0;
 };
@@ -59,6 +70,8 @@ public:
         Microsoft::WRL::ComPtr<IDWriteTextLayout> outgoingNextLyricLayout_;
         std::vector<VerticalLyricPart> verticalLyricParts_;
         std::vector<VerticalLyricPart> outgoingVerticalLyricParts_;
+        std::vector<VerticalLyricPart> verticalSecondaryParts_;
+        std::vector<VerticalLyricPart> outgoingVerticalSecondaryParts_;
     };
     // 绘制侧只借用资源；创建、替换和释放统一由排版组件执行。
     const Resources& resources() const { return resources_; }
@@ -89,16 +102,16 @@ public:
     static wchar_t verticalPunctuationGlyph(wchar_t ch);
     std::wstring makeVerticalLyricText(const std::wstring& text, bool topToBottom) const;
     bool useRotatedVerticalLyric(const std::wstring& text) const;
-    bool createVerticalLyricLayout(const std::wstring& text, float layoutWidth,
-                                   IDWriteTextLayout** out, float& width, float& height,
-                                   bool& rotated);
-    void releaseVerticalLyricParts(std::vector<VerticalLyricPart>& parts);
     bool hasMixedVerticalLyric(const std::wstring& text) const;
-    bool createMixedVerticalLyricLayout(const std::wstring& text, float layoutWidth,
-                                        std::vector<VerticalLyricPart>& parts, float& width,
-                                        float& height);
 
 private:
+    bool createVerticalLyricLayout(const std::wstring& text, IDWriteTextFormat* format,
+                                   float layoutWidth, IDWriteTextLayout** out, float& width,
+                                   float& height, bool& rotated, float& inkWidth);
+    bool createMixedVerticalLyricLayout(const std::wstring& text, IDWriteTextFormat* format,
+                                        float layoutWidth, std::vector<VerticalLyricPart>& parts,
+                                        float& width, float& height, float& inkWidth);
+    void buildVerticalContent(const LyricTextInput& input, LyricTextMetrics& metrics);
     void createFormat(Microsoft::WRL::ComPtr<IDWriteTextFormat>& format, const std::wstring& family,
                       LyricFontStyle style, float size, DWRITE_FONT_WEIGHT weight,
                       DWRITE_TEXT_ALIGNMENT alignment, const wchar_t* locale = L"zh-cn");

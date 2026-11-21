@@ -137,16 +137,18 @@ bool LyricTypesetter::useRotatedVerticalLyric(const std::wstring& text) const {
     return hasLatin;
 }
 
-bool LyricTypesetter::createVerticalLyricLayout(const std::wstring& text, float layoutWidth,
-                                                IDWriteTextLayout** out, float& width,
-                                                float& height, bool& rotated) {
+bool LyricTypesetter::createVerticalLyricLayout(const std::wstring& text, IDWriteTextFormat* format,
+                                                float layoutWidth, IDWriteTextLayout** out,
+                                                float& width, float& height, bool& rotated,
+                                                float& inkWidth) {
     width = 0.0f;
     height = 0.0f;
     rotated = false;
+    inkWidth = 0.0f;
     if (!out)
         return false;
     *out = nullptr;
-    if (!factory_ || !resources_.fmtLyric_.Get() || text.empty() || layoutWidth <= 0.0f)
+    if (!factory_ || !format || text.empty() || layoutWidth <= 0.0f)
         return false;
 
     const bool rotateText = useRotatedVerticalLyric(text);
@@ -155,7 +157,7 @@ bool LyricTypesetter::createVerticalLyricLayout(const std::wstring& text, float 
     const std::wstring layoutText = rotateText ? text : makeVerticalLyricText(text, true);
     if (layoutText.empty() ||
         FAILED(factory_->CreateTextLayout(
-            layoutText.c_str(), static_cast<UINT32>(layoutText.size()), resources_.fmtLyric_.Get(),
+            layoutText.c_str(), static_cast<UINT32>(layoutText.size()), format,
             rotateText ? 100000.0f : layoutWidth, 100000.0f, out)) ||
         !*out) {
         return false;
@@ -171,6 +173,7 @@ bool LyricTypesetter::createVerticalLyricLayout(const std::wstring& text, float 
         *out = nullptr;
         return false;
     }
+    inkWidth = rotateText ? metrics.height : metrics.width;
     if (rotateText) {
         // 横向整句旋转 90° 后，原文本高度成为竖栏宽度，原文本宽度成为滚动长度。
         width = metrics.height;
@@ -183,10 +186,6 @@ bool LyricTypesetter::createVerticalLyricLayout(const std::wstring& text, float 
         height = metrics.height;
     }
     return height > 0.0f;
-}
-
-void LyricTypesetter::releaseVerticalLyricParts(std::vector<VerticalLyricPart>& parts) {
-    parts.clear();
 }
 
 bool LyricTypesetter::hasMixedVerticalLyric(const std::wstring& text) const {
@@ -215,13 +214,15 @@ bool LyricTypesetter::hasMixedVerticalLyric(const std::wstring& text) const {
     return false;
 }
 
-bool LyricTypesetter::createMixedVerticalLyricLayout(const std::wstring& text, float layoutWidth,
+bool LyricTypesetter::createMixedVerticalLyricLayout(const std::wstring& text,
+                                                     IDWriteTextFormat* format, float layoutWidth,
                                                      std::vector<VerticalLyricPart>& parts,
-                                                     float& width, float& height) {
-    releaseVerticalLyricParts(parts);
+                                                     float& width, float& height, float& inkWidth) {
+    parts.clear();
     width = layoutWidth;
     height = 0.0f;
-    if (!factory_ || !resources_.fmtLyric_.Get() || text.empty() || layoutWidth <= 0.0f)
+    inkWidth = 0.0f;
+    if (!factory_ || !format || text.empty() || layoutWidth <= 0.0f)
         return false;
 
     IDWriteFactory* dwrite = factory_;
@@ -231,7 +232,7 @@ bool LyricTypesetter::createMixedVerticalLyricLayout(const std::wstring& text, f
 
         Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
         const HRESULT hr = dwrite->CreateTextLayout(
-            partText.c_str(), static_cast<UINT32>(partText.size()), resources_.fmtLyric_.Get(),
+            partText.c_str(), static_cast<UINT32>(partText.size()), format,
             rotated ? 100000.0f : layoutWidth, 100000.0f, layout.GetAddressOf());
         if (FAILED(hr) || !layout) {
             if (layout)
@@ -255,6 +256,7 @@ bool LyricTypesetter::createMixedVerticalLyricLayout(const std::wstring& text, f
             return true;
         }
         parts.push_back({layout, partWidth, partHeight, rotated});
+        inkWidth = std::max(inkWidth, rotated ? metrics.height : metrics.width);
         height += partHeight;
         return true;
     };
@@ -306,7 +308,7 @@ bool LyricTypesetter::createMixedVerticalLyricLayout(const std::wstring& text, f
     }
 
     if (!created || parts.empty() || height <= 0.0f) {
-        releaseVerticalLyricParts(parts);
+        parts.clear();
         width = 0.0f;
         height = 0.0f;
         return false;
@@ -353,6 +355,7 @@ void LyricTypesetter::releaseOutgoing() {
     resources_.outgoingLyricLayout_.Reset();
     resources_.outgoingVerticalLyricLayout_.Reset();
     resources_.outgoingVerticalLyricParts_.clear();
+    resources_.outgoingVerticalSecondaryParts_.clear();
     resources_.outgoingSecondaryLayout_.Reset();
     resources_.outgoingNextLyricLayout_.Reset();
 }
@@ -361,6 +364,7 @@ void LyricTypesetter::retainCurrentForTransition(bool doubleLine) {
     resources_.outgoingLyricLayout_ = std::move(resources_.lyricLayout_);
     resources_.outgoingVerticalLyricLayout_ = std::move(resources_.verticalLyricLayout_);
     resources_.outgoingVerticalLyricParts_.swap(resources_.verticalLyricParts_);
+    resources_.outgoingVerticalSecondaryParts_.swap(resources_.verticalSecondaryParts_);
     if (doubleLine) {
         resources_.outgoingNextLyricLayout_ = std::move(resources_.nextLyricLayout_);
         resources_.secondaryLayout_.Reset();
@@ -370,11 +374,85 @@ void LyricTypesetter::retainCurrentForTransition(bool doubleLine) {
     }
 }
 
+void LyricTypesetter::buildVerticalContent(const LyricTextInput& input, LyricTextMetrics& metrics) {
+    auto* primaryFormat = resources_.fmtLyric_.Get();
+    auto* secondaryFormat = resources_.fmtSecondary_.Get();
+    const bool primaryMixed = hasMixedVerticalLyric(input.lyric);
+    float primaryInkWidth = 0.0f;
+    const auto buildPrimary = [&](float width) {
+        if (primaryMixed)
+            return createMixedVerticalLyricLayout(
+                input.lyric, primaryFormat, width, resources_.verticalLyricParts_,
+                metrics.verticalWidth, metrics.verticalHeight, primaryInkWidth);
+        return createVerticalLyricLayout(
+            input.lyric, primaryFormat, width, resources_.verticalLyricLayout_.ReleaseAndGetAddressOf(),
+            metrics.verticalWidth, metrics.verticalHeight, metrics.verticalRotated, primaryInkWidth);
+    };
+
+    if (!input.secondary.empty() && primaryFormat && secondaryFormat) {
+        constexpr float inset = 1.0f;
+        constexpr float columnGap = 3.0f;
+        const float available = input.verticalWidth - 2.0f * inset - columnGap;
+        const float minimumPrimary = primaryFormat->GetFontSize() + input.verticalPrimaryEffectPadding;
+        const float minimumSecondary = secondaryFormat->GetFontSize() + 1.0f;
+        if (available >= minimumPrimary + minimumSecondary) {
+            const float preferredSecondary = input.preferredVerticalSecondaryWidth > 0.0f
+                                                 ? input.preferredVerticalSecondaryWidth
+                                                 : available * 0.46f;
+            const float initialSecondary =
+                std::clamp(preferredSecondary, minimumSecondary, available - minimumPrimary);
+            auto& parts = resources_.verticalSecondaryParts_;
+            float secondaryInkWidth = 0.0f;
+            float secondaryHeight = 0.0f;
+            const bool secondaryMixed = hasMixedVerticalLyric(input.secondary);
+            const auto buildSecondary = [&](float width) {
+                parts.clear();
+                if (secondaryMixed) {
+                    float slotWidth = 0.0f;
+                    return createMixedVerticalLyricLayout(
+                        input.secondary, secondaryFormat, width, parts, slotWidth, secondaryHeight,
+                        secondaryInkWidth);
+                }
+                VerticalLyricPart part;
+                if (!createVerticalLyricLayout(
+                        input.secondary, secondaryFormat, width, part.layout.GetAddressOf(),
+                        part.width, part.height, part.rotated, secondaryInkWidth))
+                    return false;
+                secondaryHeight = part.height;
+                parts.push_back(std::move(part));
+                return true;
+            };
+            if (buildPrimary(available - initialSecondary) && buildSecondary(initialSecondary)) {
+                const float primaryRequired =
+                    std::max(minimumPrimary, primaryInkWidth + input.verticalPrimaryEffectPadding);
+                const float secondaryRequired = std::max(minimumSecondary, secondaryInkWidth);
+                if (available >= primaryRequired + secondaryRequired) {
+                    const float secondaryWidth =
+                        std::clamp(preferredSecondary, secondaryRequired, available - primaryRequired);
+                    const float primaryWidth = available - secondaryWidth;
+                    if (secondaryWidth == initialSecondary ||
+                        (buildPrimary(primaryWidth) && buildSecondary(secondaryWidth))) {
+                        metrics.verticalColumns =
+                            {inset + secondaryWidth + columnGap, primaryWidth,
+                             inset, secondaryWidth, secondaryHeight};
+                        return;
+                    }
+                }
+            }
+            parts.clear();
+        }
+    }
+
+    metrics.verticalColumns.primaryWidth = input.verticalWidth;
+    buildPrimary(input.verticalWidth);
+}
+
 LyricTextMetrics LyricTypesetter::buildContent(const LyricTextInput& input) {
     LyricTextMetrics metrics;
     resources_.lyricLayout_.Reset();
     resources_.verticalLyricLayout_.Reset();
     resources_.verticalLyricParts_.clear();
+    resources_.verticalSecondaryParts_.clear();
     resources_.secondaryLayout_.Reset();
     resources_.nextLyricLayout_.Reset();
     if (!factory_)
@@ -396,21 +474,12 @@ LyricTextMetrics LyricTypesetter::buildContent(const LyricTextInput& input) {
     };
     create(input.lyric, resources_.fmtLyric_.Get(), resources_.lyricLayout_, metrics.width,
            metrics.height);
-    if (input.vertical && !input.lyric.empty()) {
-        if (hasMixedVerticalLyric(input.lyric))
-            createMixedVerticalLyricLayout(input.lyric, input.verticalWidth,
-                                           resources_.verticalLyricParts_, metrics.verticalWidth,
-                                           metrics.verticalHeight);
-        else
-            createVerticalLyricLayout(input.lyric, input.verticalWidth,
-                                      resources_.verticalLyricLayout_.ReleaseAndGetAddressOf(),
-                                      metrics.verticalWidth, metrics.verticalHeight,
-                                      metrics.verticalRotated);
-    }
-    if (!input.doubleLine)
+    if (input.vertical && !input.lyric.empty())
+        buildVerticalContent(input, metrics);
+    if (!input.vertical && !input.doubleLine)
         create(input.secondary, resources_.fmtSecondary_.Get(), resources_.secondaryLayout_,
                metrics.secondaryWidth, metrics.secondaryHeight);
-    else
+    else if (input.doubleLine)
         create(input.next, resources_.fmtNextLyric_.Get(), resources_.nextLyricLayout_,
                metrics.nextWidth, metrics.nextHeight);
     return metrics;
@@ -516,6 +585,7 @@ void LyricTypesetter::clearCurrentContent() {
     resources_.lyricLayout_.Reset();
     resources_.verticalLyricLayout_.Reset();
     resources_.verticalLyricParts_.clear();
+    resources_.verticalSecondaryParts_.clear();
     resources_.secondaryLayout_.Reset();
     clearNextContent();
 }

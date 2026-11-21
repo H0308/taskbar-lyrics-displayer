@@ -82,6 +82,10 @@ void TextScroll::advance(const TextScrollInput& input) {
             scrollAnimating_ = animating;
             return;
         }
+        if (!holdLyricScroll && (input.playing || !input.animations)) {
+            marquee(input.verticalSecondaryExtent, lyricAreaH, kLyricScrollSpeed,
+                    secondaryScrollOffset_, kVerticalLyricGap);
+        }
         if (input.karaoke && input.animations) {
             const float before = lyricScrollOffset_;
             if (!holdLyricScroll) {

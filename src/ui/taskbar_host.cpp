@@ -95,6 +95,7 @@ using taskbar_detail::VerticalLayout;
 #include <optional>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -595,9 +596,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     float verticalLyricWidth_ = 0.0f;
     float verticalLyricHeight_ = 0.0f;
     bool verticalLyricRotated_ = false;
+    VerticalLyricColumns verticalLyricColumns_;
     float outgoingVerticalLyricWidth_ = 0.0f;
     float outgoingVerticalLyricHeight_ = 0.0f;
     bool outgoingVerticalLyricRotated_ = false;
+    VerticalLyricColumns outgoingVerticalLyricColumns_;
     float outgoingLyricBlockHeight_ = 0.0f;
     float outgoingLyricScrollOffset_ = 0.0f;
     float outgoingSecondaryWidth_ = 0.0f;
@@ -2027,6 +2030,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         lyricGlow_ = on;
         if (compactTaskbarHeight_ > 0.0f)
             recreateFormats();
+        else if (isVerticalTaskbar() && (translationEnabled_ || romanizationEnabled_))
+            requestInvalidation(RenderInvalidation::Text);
         lyricTextRenderer_.invalidate(); // 效果组合变化，不能复用旧的离屏缓存
         requestFrameAndFlush();
     }
@@ -2037,6 +2042,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         lyricOutline_ = on;
         if (compactTaskbarHeight_ > 0.0f)
             recreateFormats();
+        else if (isVerticalTaskbar() && (translationEnabled_ || romanizationEnabled_))
+            requestInvalidation(RenderInvalidation::Text);
         lyricTextRenderer_.invalidate(); // 效果组合变化，不能复用旧的离屏缓存
         requestFrameAndFlush();
     }
@@ -2050,6 +2057,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         translationEnabled_ = translation;
         romanizationEnabled_ = romanization;
         resetLyricTransition();
+        verticalLyricColumns_ = {};
         requestInvalidation(RenderInvalidation::Text);
         requestFrameAndFlush();
     }
@@ -3910,7 +3918,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return lines.empty() ? -1 : 0;
     }
 
-    std::wstring selectedSecondary(const LyricLine& line) const {
+    std::wstring_view selectedSecondary(const LyricLine& line) const {
         if (compactTaskbarHeight_ > 0.0f)
             return {};
         if (translationEnabled_)
@@ -3942,6 +3950,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         outgoingVerticalLyricWidth_ = 0.0f;
         outgoingVerticalLyricHeight_ = 0.0f;
         outgoingVerticalLyricRotated_ = false;
+        outgoingVerticalLyricColumns_ = {};
         outgoingSecondaryWidth_ = 0.0f;
         outgoingSecondaryHeight_ = 0.0f;
         outgoingLyricBlockHeight_ = 0.0f;
@@ -4097,6 +4106,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             outgoingVerticalLyricWidth_ = verticalLyricWidth_;
             outgoingVerticalLyricHeight_ = verticalLyricHeight_;
             outgoingVerticalLyricRotated_ = verticalLyricRotated_;
+            outgoingVerticalLyricColumns_ = verticalLyricColumns_;
             outgoingLyricScrollOffset_ = outgoingLyricOffset;
             transition_.setOutgoingDoubleLine(outgoingDoubleLine);
             outgoingSecondaryWidth_ = outgoingDoubleLine ? 0.0f : secondaryWidth_;
@@ -4125,6 +4135,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         nextLyricHeight_ = 0.0f;
 
         int displayLine = displayLyricLine();
+        const int previousDisplayLine = lyricEffectLayoutLine_;
+        const float previousVerticalSecondaryHeight = verticalLyricColumns_.secondaryHeight;
         lyricEffectLayoutLine_ = displayLine;
         std::wstring lyric;
         std::wstring secondary;
@@ -4143,6 +4155,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             int width = 0, height = 0;
             clientPixelSize(width, height);
             input.verticalWidth = dip(width);
+            if (verticalLyricColumns_.hasSecondary() &&
+                std::abs(verticalLyricColumns_.primaryX + verticalLyricColumns_.primaryWidth +
+                             verticalLyricColumns_.secondaryX - input.verticalWidth) < 0.5f)
+                input.preferredVerticalSecondaryWidth = verticalLyricColumns_.secondaryWidth;
+            input.verticalPrimaryEffectPadding = lyricGlow_ ? 4.8f : lyricOutline_ ? 2.4f : 0.0f;
         }
         if (doubleLineLyrics && displayLine >= 0 &&
             static_cast<size_t>(displayLine + 1) < lines.size())
@@ -4154,6 +4171,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         verticalLyricWidth_ = metrics.verticalWidth;
         verticalLyricHeight_ = metrics.verticalHeight;
         verticalLyricRotated_ = metrics.verticalRotated;
+        verticalLyricColumns_ = metrics.verticalColumns;
         secondaryWidth_ = metrics.secondaryWidth;
         secondaryHeight_ = metrics.secondaryHeight;
         nextLyricWidth_ = metrics.nextWidth;
@@ -4185,7 +4203,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         scroll_.setLineTiming(lines, currentLine, extent,
                               isVerticalTaskbar() ? kVerticalLyricGap : kTextPadding * 2.0f);
         bool lyricChanged = lyric != lastLyric_;
-        bool secondaryChanged = secondary != lastSecondary_;
+        const bool verticalSecondaryChanged =
+            input.vertical && (preparedTransition || displayLine != previousDisplayLine ||
+                               previousVerticalSecondaryHeight !=
+                                   verticalLyricColumns_.secondaryHeight);
+        const bool secondaryChanged = secondary != lastSecondary_ || verticalSecondaryChanged;
         if (lyricChanged) {
             scroll_.resetLyric();
             lastLyric_ = lyric;
@@ -5591,12 +5613,14 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                                 ID2D1Brush* karaokeBrush = nullptr, float karaokeProgress = 0.0f,
                                 float opacity = 1.0f, bool singleCopy = false,
                                 float topExtend = 0.0f, float bottomExtend = 0.0f,
-                                bool constantEdgeFade = false, float slotY = -1.0f) {
+                                bool constantEdgeFade = false, float slotY = -1.0f,
+                                float railX = 0.0f, bool scrollUp = false) {
         const auto context = lyricTextContext(nullptr);
         lyricEffectsRenderer_.setContext(lyricEffectsContext(drawTarget()));
         lyricTextRenderer_.drawVerticalLyricParts(
             context, parts, blockH, areaH, railW, y, offset, brush, outline, glow, karaokeBrush,
-            karaokeProgress, opacity, singleCopy, topExtend, bottomExtend, constantEdgeFade, slotY);
+            karaokeProgress, opacity, singleCopy, topExtend, bottomExtend, constantEdgeFade, slotY,
+            railX, scrollUp);
         if (lyricEffectsRenderer_.consumeRedraw())
             requestFrame();
     }
@@ -5630,26 +5654,40 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
         auto drawLine = [&](IDWriteTextLayout* textLayout,
                             const std::vector<VerticalLyricPart>* parts, float textW, float textH,
+                            const VerticalLyricColumns& columns,
                             float y, float offset, ID2D1Brush* brush, float opacity,
                             bool singleCopy, bool rotated, ID2D1Brush* outline, ID2D1Brush* glow,
                             ID2D1Brush* karaokeBrush, float karaokeProgress, bool constantFade) {
             // 滚入侧借位宽度：与竖排各区间距一致（封面与歌词间、歌词与底部/控件间
             // 均为 6 dip 或窗口边缘内边距），渐隐带不外溢到封面/控件上。
             // slotY 始终传歌词槽顶：转场期间 y 随动画移动，但裁剪/渐隐锚定歌词槽
+            const float railW = columns.hasSecondary() ? columns.primaryWidth : layout.w;
+            const float extension = columns.hasSecondary() ? 0.0f : kVerticalLyricGap;
             if (parts && !parts->empty()) {
-                drawVerticalLyricParts(*parts, textH, areaH, layout.w, y, offset, brush, outline,
+                drawVerticalLyricParts(*parts, textH, areaH, railW, y, offset, brush, outline,
                                        glow, karaokeBrush, karaokeProgress, opacity, singleCopy,
-                                       kVerticalLyricGap, kVerticalLyricGap, constantFade,
-                                       layout.lyricY);
+                                       extension, extension, constantFade,
+                                       layout.lyricY, columns.primaryX);
                 return;
             }
             // 旋转英文的实际横向宽度通常小于任务栏槽宽，单独居中，避免整句贴在
             // 侧边栏外沿；中文逐字布局本身已经使用完整槽宽。
-            const float textX = rotated ? (layout.w - textW) * 0.5f : 0.0f;
+            const float textX = columns.primaryX + (rotated ? (railW - textW) * 0.5f : 0.0f);
             drawVerticalScrollingText(textLayout, textW, textH, areaH, textX, y, offset, brush,
                                       outline, glow, karaokeBrush, karaokeProgress, opacity,
-                                      alignment, singleCopy, rotated, kVerticalLyricGap,
-                                      kVerticalLyricGap, constantFade, false, layout.lyricY);
+                                      alignment, singleCopy, rotated, extension,
+                                      extension, constantFade, false, layout.lyricY);
+        };
+
+        const auto drawSecondary = [&](const std::vector<VerticalLyricPart>& parts,
+                                       const VerticalLyricColumns& columns, float y, float offset,
+                                       float opacity, bool singleCopy) {
+            if (parts.empty())
+                return;
+            drawVerticalLyricParts(parts, columns.secondaryHeight, areaH, columns.secondaryWidth,
+                                   y, offset, brushDim_.Get(), nullptr, nullptr, nullptr, 0.0f,
+                                   opacity, singleCopy, 0.0f, 0.0f, false, layout.lyricY,
+                                   columns.secondaryX, true);
         };
 
         auto verticalKaraokeProgress = [&](float karaokeX) {
@@ -5668,10 +5706,14 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             const float newY = layout.lyricY + direction * travel * (1.0f - transition.movement);
             drawLine(typesetter_.resources().outgoingVerticalLyricLayout_.Get(),
                      &typesetter_.resources().outgoingVerticalLyricParts_,
-                     outgoingVerticalLyricWidth_, outgoingVerticalLyricHeight_, oldY,
+                     outgoingVerticalLyricWidth_, outgoingVerticalLyricHeight_,
+                     outgoingVerticalLyricColumns_, oldY,
                      outgoingLyricScrollOffset_, outgoingBrush, 1.0f - transition.fadeOut, true,
                      outgoingVerticalLyricRotated_, outgoingOutline, outgoingGlow, nullptr, 0.0f,
                      outgoingIdleScene);
+            drawSecondary(typesetter_.resources().outgoingVerticalSecondaryParts_,
+                          outgoingVerticalLyricColumns_, oldY, outgoingSecondaryScrollOffset_,
+                          1.0f - transition.fadeOut, false);
 
             const LyricLine* incomingLine = !idleScene ? karaokeLine() : nullptr;
             const bool incomingKaraoke = incomingLine && brushLyric_.Get() && brushLyricDim_.Get();
@@ -5679,12 +5721,14 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 incomingKaraoke ? karaokeSmoothStep(*incomingLine) : 0.0f;
             drawLine(typesetter_.resources().verticalLyricLayout_.Get(),
                      &typesetter_.resources().verticalLyricParts_, verticalLyricWidth_,
-                     verticalLyricHeight_, newY, scroll_.lyric(),
+                     verticalLyricHeight_, verticalLyricColumns_, newY, scroll_.lyric(),
                      incomingKaraoke ? static_cast<ID2D1Brush*>(brushLyricDim_.Get())
                                      : primaryBrush,
                      transition.fadeIn, true, verticalLyricRotated_, effectOutline, effectGlow,
                      incomingKaraoke ? static_cast<ID2D1Brush*>(brushLyric_.Get()) : nullptr,
                      verticalKaraokeProgress(incomingKaraokeX), idleScene);
+            drawSecondary(typesetter_.resources().verticalSecondaryParts_, verticalLyricColumns_,
+                          newY, scroll_.secondary(), transition.fadeIn, true);
         } else if (typesetter_.resources().verticalLyricLayout_.Get() ||
                    !typesetter_.resources().verticalLyricParts_.empty()) {
             const LyricLine* currentLine = !idleScene ? karaokeLine() : nullptr;
@@ -5692,11 +5736,13 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             const float karaokeX = karaoke ? karaokeSmoothStep(*currentLine) : 0.0f;
             drawLine(typesetter_.resources().verticalLyricLayout_.Get(),
                      &typesetter_.resources().verticalLyricParts_, verticalLyricWidth_,
-                     verticalLyricHeight_, layout.lyricY, scroll_.lyric(),
+                     verticalLyricHeight_, verticalLyricColumns_, layout.lyricY, scroll_.lyric(),
                      karaoke ? static_cast<ID2D1Brush*>(brushLyricDim_.Get()) : primaryBrush, 1.0f,
                      false, verticalLyricRotated_, effectOutline, effectGlow,
                      karaoke ? static_cast<ID2D1Brush*>(brushLyric_.Get()) : nullptr,
                      verticalKaraokeProgress(karaokeX), idleScene);
+            drawSecondary(typesetter_.resources().verticalSecondaryParts_, verticalLyricColumns_,
+                          layout.lyricY, scroll_.secondary(), 1.0f, false);
         }
     }
 
@@ -7153,6 +7199,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             const auto layout = verticalLayout();
             input.area = layout.lyricBottom - layout.lyricY;
             input.verticalExtent = verticalLyricHeight_ > 0.0f ? verticalLyricHeight_ : lyricWidth_;
+            input.verticalSecondaryExtent = verticalLyricColumns_.secondaryHeight;
             input.showControls = layout.showControls;
         } else {
             const auto layout = layoutMetrics(width, height);

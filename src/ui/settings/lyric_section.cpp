@@ -48,8 +48,7 @@ std::vector<Row> createLyricRows(const SettingsState& state) {
             effect.enabled = !minimal && !vertical && !state.compactTaskbar;
     }
     builder.addHeader(L"翻译与罗马音");
-    builder.addToggle(kIdSecondaryOn, L"开启翻译/罗马音", vertical ? false : state.secondaryEnabled)
-        .enabled = !vertical;
+    builder.addToggle(kIdSecondaryOn, L"开启翻译/罗马音", state.secondaryEnabled);
     const wchar_t* secondaryHint =
         state.secondaryAvailability == SecondaryLyricAvailability::Loading
             ? L"正在检查翻译和罗马音…"
@@ -57,8 +56,8 @@ std::vector<Row> createLyricRows(const SettingsState& state) {
             ? L"当前歌曲无翻译或罗马音"
             : L"";
     builder.addRadio(kIdSecondaryType, L"辅助歌词类型", secondaryHint, {L"翻译", L"罗马音"},
-                     vertical ? 0 : (state.preferRomanization ? 1 : 0),
-                     !vertical && state.secondaryEnabled &&
+                     state.preferRomanization ? 1 : 0,
+                     state.secondaryEnabled &&
                          state.secondaryAvailability == SecondaryLyricAvailability::Available,
                      *secondaryHint ? kRowTallH : kRowH);
     builder.addHeader(L"本地歌词");
@@ -107,10 +106,8 @@ void updateLyricRows(std::vector<Row>& rows, const SettingsState& s) {
         row->selected = vertical ? 0 : s.lyricAlignment;
         row->enabled = !vertical && s.taskbarViewMode == 0;
     }
-    if (auto* row = findRow(kIdSecondaryOn)) {
-        row->checked = vertical ? false : s.secondaryEnabled;
-        row->enabled = !vertical;
-    }
+    if (auto* row = findRow(kIdSecondaryOn))
+        row->checked = s.secondaryEnabled;
     if (auto* row = findRow(kIdSecondaryType)) {
         row->hint = s.secondaryAvailability == SecondaryLyricAvailability::Loading
                         ? L"正在检查翻译和罗马音…"
@@ -120,8 +117,8 @@ void updateLyricRows(std::vector<Row>& rows, const SettingsState& s) {
         row->showHint = !row->hint.empty();
         row->minHeight = row->showHint ? kRowTallH : kRowH;
         row->height = row->minHeight;
-        row->selected = vertical ? 0 : (s.preferRomanization ? 1 : 0);
-        row->enabled = !vertical && s.secondaryEnabled &&
+        row->selected = s.preferRomanization ? 1 : 0;
+        row->enabled = s.secondaryEnabled &&
                        s.secondaryAvailability == SecondaryLyricAvailability::Available;
     }
     if (auto* row = findRow(kIdQqLocalLyricsEnabled))

@@ -1335,7 +1335,7 @@ SettingsState App::currentSettingsState() const {
     st.idleQuoteAlignment = static_cast<int>(view.idleQuoteAlignment);
     st.secondaryEnabled =
         view.secondaryLyricMode.translation || view.secondaryLyricMode.romanization;
-    st.preferRomanization = vertical ? false : settings_.preferRomanization_;
+    st.preferRomanization = settings_.preferRomanization_;
     st.secondaryAvailability =
         playback_.state().lyricLoading_ ? SecondaryLyricAvailability::Loading
         : (!playback_.state().currentHasTranslation_ && !playback_.state().currentHasRomanization_)

@@ -112,7 +112,7 @@ TEST_CASE("taskbar_appearance.temporary_restrictions_preserve_user_preferences")
     context.vertical = true;
     const auto vertical = resolveTaskbarAppearance(settings, context);
     EXPECT_FALSE(vertical.secondaryLyricMode.translation);
-    EXPECT_FALSE(vertical.secondaryLyricMode.romanization);
+    EXPECT_TRUE(vertical.secondaryLyricMode.romanization);
     EXPECT_FALSE(vertical.doubleLineLyrics);
     EXPECT_EQ(vertical.lyricAlignment, LyricAlignment::Left);
     EXPECT_EQ(vertical.idleQuoteAlignment, LyricAlignment::Left);

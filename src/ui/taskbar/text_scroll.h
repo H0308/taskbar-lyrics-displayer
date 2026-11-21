@@ -9,7 +9,7 @@ struct TextScrollInput {
     bool animations{}, wasTransitioning{}, hold{}, vertical{}, showControls{};
     bool playing{}, idle{}, karaoke{}, songInfoVisible{}, showInlineControls{}, areaValid{};
     float area{}, infoWidth{}, titleWidth{}, artistWidth{}, lyricWidth{}, secondaryWidth{};
-    float verticalExtent{}, karaokeProgress{};
+    float verticalExtent{}, verticalSecondaryExtent{}, karaokeProgress{};
 };
 
 // 保留各文本独立的偏移和一次性文案计数；几何只从本帧输入读取。
