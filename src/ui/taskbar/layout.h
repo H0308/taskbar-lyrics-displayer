@@ -123,5 +123,6 @@ LayoutMetrics horizontalLayout(const HorizontalLayoutInput& input);
 VerticalLayout verticalLayout(float width, float height, DisplayScene scene, bool albumCoverVisible,
                               bool showControls, bool canSwitchSource = false,
                               float resourceHeight = 0.0f, bool songInfoVisible = true,
-                              ResourcePlacement resourcePlacement = ResourcePlacement::End);
+                              ResourcePlacement resourcePlacement = ResourcePlacement::End,
+                              bool resourceOnly = false);
 } // namespace taskbar_detail

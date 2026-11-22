@@ -828,6 +828,15 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return embeddedResourceVisible() && scene_ == DisplayScene::Idle && statusText.empty();
     }
 
+    bool verticalResourceVisible() const {
+        return viewMode_ == TaskbarViewMode::Embedded &&
+               resourcePanel_.visibility().embeddedEnabled && isVerticalTaskbar();
+    }
+
+    bool verticalResourceOnly() const {
+        return verticalResourceVisible() && scene_ == DisplayScene::Idle && statusText.empty();
+    }
+
     float resourceZoneWidth() const { return resourcePanel_.width(); }
 
     float embeddedResourceExtra() const {
@@ -1416,8 +1425,19 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             compressedMinWidthDip = 0.0f;
             maxWidthDip = 0.0f;
         } else if (vertical) {
-            if (songInfoVisible_ && isTaskbarMediaScene(scene_))
+            if (verticalResourceOnly()) {
+                if (!typesetter_.resources().fmtResource_)
+                    updateResourceColumnWidths();
+                const float resourceHeight = resourcePanel_.verticalHeight(dip(crossPx));
+                if (resourceHeight > 0.0f) {
+                    const float resourceOnlyHeight = resourceHeight + 2.0f * kTextPadding;
+                    minWidthDip = resourceOnlyHeight;
+                    compressedMinWidthDip = resourceOnlyHeight;
+                    maxWidthDip = resourceOnlyHeight;
+                }
+            } else if (songInfoVisible_ && isTaskbarMediaScene(scene_)) {
                 maxWidthDip += taskbar_detail::kVerticalSongInfoLengthDip;
+            }
         } else if (!songInfoVisible_ && scene_ != DisplayScene::Idle) {
             // 保留原歌词区宽度，只扣除歌曲信息区；左侧压缩为可见的封面区域。
             const float compactLeftDip = albumCoverVisible_ ? coverSlotWidth(dip(crossPx)) : 0.0f;
@@ -2914,7 +2934,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             }
         }
         const bool resourceOnlyChanged =
-            embeddedResourceVisible() &&
+            (embeddedResourceVisible() || verticalResourceVisible()) &&
             ((previousScene == DisplayScene::Idle && statusText.empty()) !=
              (frame.scene == DisplayScene::Idle && frame.statusText.empty()));
         scene_ = frame.scene;
@@ -2922,7 +2942,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         statusText = frame.statusText;
         statusTextIsTrackInfo = frame.statusTextIsTrackInfo;
         if (sceneWidthChanged) {
-            if (shouldAnimateScene) {
+            if (shouldAnimateScene && !embeddedResourceOnly() && !verticalResourceOnly()) {
                 // 与内容转场使用同一段平滑时间曲线，窗口宽度/锚点连续变化，避免
                 // 在转场开始或结束时一次性收窄/撑开并触发位图重绑闪烁。
                 if (beginSceneWindowResize()) {
@@ -4379,7 +4399,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             widthDip, dip(height), scene_, albumCoverVisible_,
             hovered && controlsOnHover_ && hoverControlStyle_ == HoverControlStyle::Inline,
             media.canSwitchSource, resourceHeight, songInfoVisible_,
-            resourcePanel_.visibility().placement);
+            resourcePanel_.visibility().placement, verticalResourceOnly());
     }
 
     bool pinnedInlineControlsConfigured() const {
@@ -5749,11 +5769,10 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             // 均为 6 dip 或窗口边缘内边距），渐隐带不外溢到封面/控件上。
             // slotY 始终传歌词槽顶：转场期间 y 随动画移动，但裁剪/渐隐锚定歌词槽
             const float railW = columns.hasSecondary() ? columns.primaryWidth : layout.w;
-            const float extension = columns.hasSecondary() ? 0.0f : kVerticalLyricGap;
             if (parts && !parts->empty()) {
                 drawVerticalLyricParts(*parts, textH, areaH, railW, y, offset, brush, outline,
                                        glow, karaokeBrush, karaokeProgress, opacity, singleCopy,
-                                       extension, extension, constantFade,
+                                       kVerticalLyricGap, kVerticalLyricGap, constantFade,
                                        layout.lyricY, columns.primaryX, columns.primaryScrollUp);
                 return;
             }
@@ -5762,8 +5781,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             const float textX = columns.primaryX + (rotated ? (railW - textW) * 0.5f : 0.0f);
             drawVerticalScrollingText(textLayout, textW, textH, areaH, textX, y, offset, brush,
                                       outline, glow, karaokeBrush, karaokeProgress, opacity,
-                                      alignment, singleCopy, rotated, extension,
-                                      extension, constantFade, false, layout.lyricY);
+                                      alignment, singleCopy, rotated, kVerticalLyricGap,
+                                      kVerticalLyricGap, constantFade, false, layout.lyricY);
         };
 
         const auto drawSecondary = [&](const std::vector<VerticalLyricPart>& parts,
@@ -5773,8 +5792,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 return;
             drawVerticalLyricParts(parts, columns.secondaryHeight, areaH, columns.secondaryWidth,
                                    y, offset, brushDim_.Get(), nullptr, nullptr, nullptr, 0.0f,
-                                   opacity, singleCopy, 0.0f, 0.0f, false, layout.lyricY,
-                                   columns.secondaryX, true);
+                                   opacity, singleCopy, kVerticalLyricGap, kVerticalLyricGap, false,
+                                   layout.lyricY, columns.secondaryX, true);
         };
 
         auto verticalKaraokeProgress = [&](float karaokeX) {

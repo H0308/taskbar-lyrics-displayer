@@ -159,7 +159,8 @@ LayoutMetrics horizontalLayout(const HorizontalLayoutInput& input) {
 
 VerticalLayout verticalLayout(float width, float height, DisplayScene scene, bool albumCoverVisible,
                               bool showControls, bool canSwitchSource, float resourceHeight,
-                              bool songInfoVisible, ResourcePlacement resourcePlacement) {
+                              bool songInfoVisible, ResourcePlacement resourcePlacement,
+                              bool resourceOnly) {
 
     VerticalLayout layout;
     layout.w = width;
@@ -168,6 +169,25 @@ VerticalLayout verticalLayout(float width, float height, DisplayScene scene, boo
         return layout;
 
     const bool playbackScene = scene != DisplayScene::Idle && scene != DisplayScene::NoPlayback;
+    if (resourceOnly && !playbackScene && resourceHeight > 0.0f) {
+        layout.lyricY = kTextPadding;
+        layout.lyricBottom = layout.lyricY;
+        const float contentBottom = height - kTextPadding;
+        if (height >= resourceHeight + 2.0f * kTextPadding) {
+            if (resourcePlacement == ResourcePlacement::Start) {
+                layout.resources =
+                    D2D1::RectF(0.0f, kTextPadding, layout.w, kTextPadding + resourceHeight);
+            } else {
+                layout.resources =
+                    D2D1::RectF(0.0f, contentBottom - resourceHeight, layout.w, contentBottom);
+            }
+        } else {
+            const float top = std::max(0.0f, (height - resourceHeight) * 0.5f);
+            layout.resources =
+                D2D1::RectF(0.0f, top, layout.w, std::min(height, top + resourceHeight));
+        }
+        return layout;
+    }
     if (albumCoverVisible && playbackScene) {
         layout.coverSize = std::max(0.0f, width - 2.0f * kCoverPadding);
         layout.coverX = (layout.w - layout.coverSize) * 0.5f;
