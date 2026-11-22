@@ -128,7 +128,7 @@ LayoutMetrics horizontalLayout(const HorizontalLayoutInput& input) {
     const bool immersiveControls = input.immersiveControls;
     m.immersiveControlsW = input.controlsWidth;
     if (input.scene == DisplayScene::Idle) {
-        m.leftW = 0.0f;
+        m.leftW = input.leadingOffset;
         m.rightW = std::max(1.0f, m.w - m.immersiveControlsW - input.spectrumWidth);
         return m;
     }
@@ -150,7 +150,8 @@ LayoutMetrics horizontalLayout(const HorizontalLayoutInput& input) {
         // 这样切换封面不会改变歌词的中心锚点，也不会给控件留下无意义的空洞。
         m.leftW = input.albumCoverVisible ? input.coverSlotWidth : 0.0f;
     } else {
-        m.leftW = input.songInfoVisible ? contentW * kLeftRatio : input.coverSlotWidth;
+        m.leftW = input.leadingOffset +
+                  (input.songInfoVisible ? contentW * kLeftRatio : input.coverSlotWidth);
     }
     m.rightW = std::max(1.0f, m.w - m.leftW - m.immersiveControlsW);
     return m;
@@ -158,7 +159,7 @@ LayoutMetrics horizontalLayout(const HorizontalLayoutInput& input) {
 
 VerticalLayout verticalLayout(float width, float height, DisplayScene scene, bool albumCoverVisible,
                               bool showControls, bool canSwitchSource, float resourceHeight,
-                              bool songInfoVisible) {
+                              bool songInfoVisible, ResourcePlacement resourcePlacement) {
 
     VerticalLayout layout;
     layout.w = width;
@@ -193,8 +194,21 @@ VerticalLayout verticalLayout(float width, float height, DisplayScene scene, boo
     const float resourceTop = contentBottom - resourceHeight;
     const float resourceContentBottom = resourceTop - kVerticalLyricGap;
     const auto reserveResourceArea = [&] {
-        layout.resources = D2D1::RectF(0.0f, resourceTop, layout.w, contentBottom);
-        layout.lyricBottom = resourceContentBottom;
+        if (resourcePlacement == ResourcePlacement::Start) {
+            const float topInset = layout.coverSize > 0.0f ? kCoverPadding : kTextPadding;
+            const float shift = resourceHeight + kVerticalLyricGap;
+            layout.resources = D2D1::RectF(0.0f, topInset, layout.w, topInset + resourceHeight);
+            if (layout.coverSize > 0.0f)
+                layout.coverY += shift;
+            if (layout.songInfo.bottom > layout.songInfo.top) {
+                layout.songInfo.top += shift;
+                layout.songInfo.bottom += shift;
+            }
+            layout.lyricY += shift;
+        } else {
+            layout.resources = D2D1::RectF(0.0f, resourceTop, layout.w, contentBottom);
+            layout.lyricBottom = resourceContentBottom;
+        }
     };
     layout.showControls = showControls && playbackScene;
     if (layout.showControls) {
@@ -208,12 +222,11 @@ VerticalLayout verticalLayout(float width, float height, DisplayScene scene, boo
         const float sourcePitch = diameter + transportGap;
         const float blockH = diameter * 4.0f + transportGap * 2.0f + volumeGap +
                              (canSwitchSource ? sourcePitch : 0.0f);
-        const float controlsTop = layout.lyricY;
         if (resourceHeight > 0.0f &&
-            resourceContentBottom - controlsTop > blockH + 2.0f * kVerticalLyricGap)
+            resourceContentBottom - layout.lyricY > blockH + 2.0f * kVerticalLyricGap)
             reserveResourceArea();
-        const float controlsBottom =
-            layout.resources.bottom > layout.resources.top ? resourceContentBottom : contentBottom;
+        const float controlsTop = layout.lyricY;
+        const float controlsBottom = layout.lyricBottom;
         const float freeSpace = controlsBottom - controlsTop - blockH;
         const float groupTop = controlsTop + std::max(0.0f, freeSpace) * 0.5f;
         const float firstY = groupTop + layout.controlRadius;
@@ -231,8 +244,8 @@ VerticalLayout verticalLayout(float width, float height, DisplayScene scene, boo
             layout.showControls = false;
         }
     }
-    if (!layout.showControls && resourceHeight > 0.0f &&
-        resourceContentBottom - layout.lyricY >= 48.0f)
+    if (!layout.showControls && layout.resources.bottom <= layout.resources.top &&
+        resourceHeight > 0.0f && resourceContentBottom - layout.lyricY >= 48.0f)
         reserveResourceArea();
     return layout;
 }
@@ -307,7 +320,7 @@ PinnedInlineControlsLayout planPinnedInlineControls(const PinnedInlineControlsIn
     const LayoutMetrics metrics = horizontalLayout(
         {input.width, input.height, input.scene, false, true, input.songInfoVisible,
          input.albumCoverVisible, chosen.slotWidth, input.spectrumWidth, 0.0f,
-         input.coverSlotWidth});
+         input.coverSlotWidth, input.leadingOffset});
     result.tier = chosen.tier;
     result.slotWidth = chosen.slotWidth;
     result.radius = chosen.radius;

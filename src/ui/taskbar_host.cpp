@@ -819,6 +819,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                resourcePanel_.visibility().embeddedEnabled && !isVerticalTaskbar();
     }
 
+    bool embeddedResourceAtStart() const {
+        return embeddedResourceVisible() &&
+               resourcePanel_.visibility().placement == ResourcePlacement::Start;
+    }
+
     bool embeddedResourceOnly() const {
         return embeddedResourceVisible() && scene_ == DisplayScene::Idle && statusText.empty();
     }
@@ -829,6 +834,15 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (embeddedResourceOnly())
             return resourceZoneWidth() + kDockResourceRightPadding;
         return embeddedResourceVisible() ? resourceZoneWidth() + kDockResourceZoneGap : 0.0f;
+    }
+
+    float embeddedResourceLeftOffset() const {
+        return embeddedResourceAtStart() ? embeddedResourceExtra() : 0.0f;
+    }
+
+    float embeddedResourceRightExtra() const {
+        return embeddedResourceVisible() && !embeddedResourceAtStart() ? embeddedResourceExtra()
+                                                                       : 0.0f;
     }
 
     bool expandedControlVisible(int index) const {
@@ -2603,17 +2617,17 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     }
 
     void setDockResourceVisibility(const DockResourceVisibility& visibility) {
-        if (resourcePanel_.visibility().embeddedEnabled == visibility.embeddedEnabled &&
-            resourcePanel_.visibility().download == visibility.download &&
-            resourcePanel_.visibility().upload == visibility.upload &&
-            resourcePanel_.visibility().gpuUsage == visibility.gpuUsage &&
-            resourcePanel_.visibility().cpuFrequency == visibility.cpuFrequency &&
-            resourcePanel_.visibility().smallFont == visibility.smallFont)
+        if (resourcePanel_.visibility() == visibility)
             return;
         const bool embeddedChanged =
             resourcePanel_.visibility().embeddedEnabled != visibility.embeddedEnabled;
         const bool fontChanged = resourcePanel_.visibility().smallFont != visibility.smallFont;
+        const bool placementChanged = resourcePanel_.visibility().placement != visibility.placement;
         resourcePanel_.setVisibility(visibility);
+        if (placementChanged) {
+            resetLyricTransition();
+            clearImmersiveSongContentTransition();
+        }
         if (fontChanged)
             recreateResourceFormat(); // 字号变了必须清缓存，否则 ensureResourceFormat 会沿用旧字号
         else
@@ -3042,6 +3056,19 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return std::min(resourceZoneWidth(), std::max(1.0f, hostW - kDockResourceRightPadding));
     }
 
+    D2D1_RECT_F horizontalResourceRect(float hostW, float hostH) const {
+        if (hostW <= 0.0f || hostH <= 0.0f)
+            return {};
+        const float resourceW =
+            embeddedResourceVisible()
+                ? std::min(resourceZoneWidth(), std::max(1.0f, hostW - kDockResourceRightPadding))
+                : dockResourceZoneW(hostW);
+        const float resourceX = embeddedResourceAtStart()
+                                    ? kDockResourceRightPadding
+                                    : hostW - resourceW - kDockResourceRightPadding;
+        return D2D1::RectF(resourceX, 0.0f, resourceX + resourceW, hostH);
+    }
+
     bool hitDockResourceArea(float clientX, float clientY) const {
         if (!resourceMonitoringEnabled() || !dockResourceExtrasVisible())
             return false;
@@ -3056,14 +3083,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         int pxW = 0;
         int pxH = 0;
         logicalClientPixelSize(pxW, pxH);
-        const float width = dip(pxW);
-        const float height = dip(pxH);
-        const float resourceW =
-            embeddedResourceVisible()
-                ? std::min(resourceZoneWidth(), std::max(1.0f, width - kDockResourceRightPadding))
-                : dockResourceZoneW(width);
-        const float resourceX = width - resourceW - kDockResourceRightPadding;
-        return x >= resourceX && x <= width - kDockResourceRightPadding && y >= 0.0f && y <= height;
+        const auto area = horizontalResourceRect(dip(pxW), dip(pxH));
+        return x >= area.left && x <= area.right && y >= area.top && y <= area.bottom;
     }
 
     void advanceDockResourcePage(int steps) {
@@ -3107,6 +3128,10 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             integratedSpectrum())
             return embeddedResourceExtra();
         return spectrumContentWForScene(scene, hostW) + kTextPadding + embeddedResourceExtra();
+    }
+
+    float rightSideExtraForScene(DisplayScene scene, float hostW = -1.0f) const {
+        return spectrumExtraForScene(scene, hostW) - embeddedResourceLeftOffset();
     }
 
     bool sceneUsesCompactWidth(DisplayScene scene) const {
@@ -3327,7 +3352,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
     float backgroundWaveRight(float w) const {
         if (!horizontalImmersiveMode())
-            return w - kTextPadding - embeddedResourceExtra();
+            return w - kTextPadding - embeddedResourceRightExtra();
         if (isAppBarView()) {
             return w - dockResourceZoneW(w) - kDockResourceRightPadding - kDockResourceZoneGap;
         }
@@ -3350,13 +3375,16 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (isVerticalTaskbar()) {
             const auto layout = verticalLayout();
             if (!idleScene && layout.coverSize > 0.0f)
-                playback[0] = D2D1::RectF(0.0f, 0.0f, w, layout.coverY + layout.coverSize);
+                playback[0] = D2D1::RectF(0.0f, std::max(0.0f, layout.coverY - kCoverPadding), w,
+                                          layout.coverY + layout.coverSize);
             playback[1] = layout.songInfo;
             const auto text = D2D1::RectF(0.0f, layout.lyricY, w, layout.lyricBottom);
             if (scene_ == DisplayScene::Lyrics && !layout.showControls)
                 playback[2] = text;
             if (showQuote)
                 idleRegions[0] = text;
+            if (layout.resources.bottom > layout.resources.top)
+                idleRegions[1] = layout.resources;
         } else {
             const int pxW = static_cast<int>(std::lround(w * scale()));
             const int pxH = static_cast<int>(std::lround(h * scale()));
@@ -3372,7 +3400,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                                         isTaskbarSceneTransition(sceneTransition_.outgoingScene(),
                                                                  scene_));
             if (!idleScene && albumCoverVisible_)
-                playback[0] = D2D1::RectF(0.0f, 0.0f, infoStartX(), h);
+                playback[0] = D2D1::RectF(embeddedResourceLeftOffset(), 0.0f, infoStartX(), h);
             if (!idleScene && songInfoVisible_)
                 playback[1] = D2D1::RectF(infoStartX(), 0.0f, layout.leftW, h);
             if (!idleScene && pinned.active())
@@ -3390,19 +3418,15 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                     playback[3] = D2D1::RectF(side.zoneX, 0.0f, side.spectrumRight, h);
                 } else if (!showControls) {
                     const float spectrumW = spectrumContentWForScene(scene_, w);
-                    const float right = w - embeddedResourceExtra() - kTextPadding;
+                    const float right = w - embeddedResourceRightExtra() - kTextPadding;
                     playback[3] = D2D1::RectF(right - spectrumW, 0.0f, right, h);
                 }
             }
             if (showQuote)
                 idleRegions[0] = text;
             // 资源区独立于播放场景，播放期间也遵守“待机内容”范围选择。
-            if (resourceMonitoringEnabled()) {
-                const float resourceW = std::min(
-                    resourceZoneWidth(), std::max(1.0f, w - kDockResourceRightPadding));
-                idleRegions[1] = D2D1::RectF(w - resourceW - kDockResourceRightPadding, 0.0f,
-                                            w - kDockResourceRightPadding, h);
-            }
+            if (resourceMonitoringEnabled())
+                idleRegions[1] = horizontalResourceRect(w, h);
         }
         return taskbar_detail::dynamicBackgroundRegions(w, h, idleQuoteBackgroundScope_, playback,
                                                         idleRegions);
@@ -4255,7 +4279,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             media.sourceAppUserModelId.empty() || scene_ == DisplayScene::Idle ||
             scene_ == DisplayScene::NoPlayback || drag_.dragging())
             return false;
-        float x = kCoverPadding;
+        float x = embeddedResourceLeftOffset() + kCoverPadding;
         float y = kCoverPadding;
         float size = coverSize();
         if (isVerticalTaskbar()) {
@@ -4275,7 +4299,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     }
 
     float infoStartX() const {
-        return taskbar_detail::songInfoStart(albumCoverVisible_, albumCoverVisible_ ? coverSize() : 0.0f);
+        return embeddedResourceLeftOffset() +
+               taskbar_detail::songInfoStart(albumCoverVisible_,
+                                             albumCoverVisible_ ? coverSize() : 0.0f);
     }
 
     float lyricStartPadding() const {
@@ -4306,10 +4332,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const float widthDip = dip(width);
         const float resourceHeight =
             resourceMonitoringEnabled() ? resourcePanel_.verticalHeight(widthDip) : 0.0f;
-        return taskbar_detail::verticalLayout(widthDip, dip(height), scene_, albumCoverVisible_,
-                                              hovered && controlsOnHover_ &&
-                                                  hoverControlStyle_ == HoverControlStyle::Inline,
-                                              media.canSwitchSource, resourceHeight, songInfoVisible_);
+        return taskbar_detail::verticalLayout(
+            widthDip, dip(height), scene_, albumCoverVisible_,
+            hovered && controlsOnHover_ && hoverControlStyle_ == HoverControlStyle::Inline,
+            media.canSwitchSource, resourceHeight, songInfoVisible_,
+            resourcePanel_.visibility().placement);
     }
 
     bool pinnedInlineControlsConfigured() const {
@@ -4338,7 +4365,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return taskbar_detail::planPinnedInlineControls(
             {width, height, scene, songInfoVisible_, albumCoverVisible_, media.canRepeat,
              spectrumExtraForScene(scene, width), coverSlotWidth(height),
-             pinnedInlineLyricFontSize(), media.canSwitchSource});
+             pinnedInlineLyricFontSize(), media.canSwitchSource, embeddedResourceLeftOffset()});
     }
 
     taskbar_detail::PinnedInlineControlsLayout pinnedInlineControlsLayout() const {
@@ -4365,7 +4392,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             {width, height, scene, isExpandedView(), hasSlotControls, songInfoVisible_,
              albumCoverVisible_, controlsW, spectrumExtraForScene(scene, width),
              isExpandedView() && songInfoVisible_ && albumCoverVisible_ ? coverSize() : 0.0f,
-             coverSlotWidth(height)});
+             coverSlotWidth(height), embeddedResourceLeftOffset()});
     }
 
     LayoutMetrics layoutMetrics(int pxW, int pxH) const {
@@ -4387,7 +4414,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (horizontalImmersiveMode() && scene != DisplayScene::Idle && isSessionVisible() &&
             !isMinimalMode() && !isStoppedMode())
             left += kDockPetSeatW;
-        const float right = layout.w - spectrumExtraForScene(scene, layout.w) - kTextPadding;
+        const float right = layout.w - rightSideExtraForScene(scene, layout.w) - kTextPadding;
         return {left, std::max(1.0f, right - left)};
     }
 
@@ -4478,7 +4505,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         LayoutMetrics layout = layoutMetrics(pxW, pxH);
         if (layout.w <= 0.0f || layout.h <= 0.0f)
             return false;
-        const float controlsW = std::max(1.0f, layout.rightW - embeddedResourceExtra());
+        const float controlsW = std::max(1.0f, layout.rightW - embeddedResourceRightExtra());
         taskbar_detail::layoutInlineHoverControls(layout.leftW, controlsW, layout.h, media.canRepeat,
                                                   media.canSwitchSource, centers, cy, r);
         return r > 0.0f;
@@ -5272,7 +5299,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                    logicalX < backgroundWaveRight(hostWidth);
         }
         const float spectrumWidth = spectrumContentWForScene(scene_, hostWidth);
-        const float spectrumRight = hostWidth - embeddedResourceExtra() - kTextPadding;
+        const float spectrumRight = hostWidth - embeddedResourceRightExtra() - kTextPadding;
         return spectrumWidth > 0.0f && logicalX >= spectrumRight - spectrumWidth &&
                logicalX < spectrumRight;
     }
@@ -6264,7 +6291,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
         // 左侧封面
         const float s = coverSize();
-        const float coverX = kCoverPadding;
+        const float coverX = embeddedResourceLeftOffset() + kCoverPadding;
         const float coverY = (h - s) * 0.5f;
         if (albumCoverVisible_ && !idleScene) {
             if (albumCoverEffect_ == AlbumCoverEffect::Vinyl) {
@@ -6317,7 +6344,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         } else {
             if (showSpectrum && !isExpandedView()) {
                 const float spectrumW = spectrumContentWForScene(scene_, w);
-                drawSpectrum(w - embeddedResourceExtra() - spectrumW - kTextPadding, h, spectrumW);
+                drawSpectrum(w - embeddedResourceRightExtra() - spectrumW - kTextPadding, h,
+                             spectrumW);
             }
             lyricEffectsRenderer_.setContext(lyricEffectsContext(drawTarget()));
             lyricEffectsRenderer_.drawEasterEggs(
@@ -6919,15 +6947,15 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 drawDockPet(w, h, leftW);
             drawImmersiveRightSide(w, h, showSpectrum);
         } else if (embeddedResourceVisible()) {
-            const float resourceWidth =
-                std::min(resourceZoneWidth(), std::max(1.0f, w - kDockResourceRightPadding));
-            drawDockResourceStatus(w - resourceWidth - kDockResourceRightPadding, h, resourceWidth);
+            const auto resourceRect = horizontalResourceRect(w, h);
+            drawDockResourceStatus(resourceRect.left, h, resourceRect.right - resourceRect.left);
         }
 
         const bool clipSongContent = embeddedResourceVisible();
-        const float songContentRight = w - embeddedResourceExtra();
+        const float songContentLeft = embeddedResourceLeftOffset();
+        const float songContentRight = w - embeddedResourceRightExtra();
         if (clipSongContent)
-            rt->PushAxisAlignedClip(D2D1::RectF(0.0f, 0.0f, songContentRight, h),
+            rt->PushAxisAlignedClip(D2D1::RectF(songContentLeft, 0.0f, songContentRight, h),
                                     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         bool contentTransitionActive = false;
         if (!compositorSongContent) {
@@ -6937,7 +6965,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         // 左侧封面
         if (!compositorSongContent) {
             float s = coverSize();
-            float coverX = kCoverPadding;
+            float coverX = songContentLeft + kCoverPadding;
             float coverY = (h - s) * 0.5f;
             if (albumCoverVisible_ && !idleScene) {
                 if (albumCoverEffect_ == AlbumCoverEffect::Vinyl) {
@@ -6990,7 +7018,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             } else {
                 if (showSpectrum && !isExpandedView()) {
                     const float spectrumW = spectrumContentWForScene(scene_, w);
-                    drawSpectrum(w - embeddedResourceExtra() - spectrumW - kTextPadding, h,
+                    drawSpectrum(w - embeddedResourceRightExtra() - spectrumW - kTextPadding, h,
                                  spectrumW);
                 }
                 lyricEffectsRenderer_.setContext(lyricEffectsContext(drawTarget()));
@@ -7140,7 +7168,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 const float travelPx = kSongTransitionTravelDip * scale();
                 layerReady = renderer.animateTransitionLayerX(
                     0, travelPx, 0.0f, 0.0f, 1.0f, 1.0f, kSongTransitionMs / 1000.0f,
-                    clipSongContent ? songContentRight * scale() : 0.0f);
+                    clipSongContent && !embeddedResourceAtStart() ? songContentRight * scale()
+                                                                  : 0.0f);
             }
             if (layerReady && songContentTransition_) {
                 songContentTransition_->compositorLayer = true;
@@ -7168,13 +7197,12 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                         drawDockPet(w, h, leftW);
                     drawImmersiveRightSide(w, h, showSpectrum);
                 } else if (embeddedResourceVisible()) {
-                    const float resourceWidth = std::min(
-                        resourceZoneWidth(), std::max(1.0f, w - kDockResourceRightPadding));
-                    drawDockResourceStatus(w - resourceWidth - kDockResourceRightPadding, h,
-                                           resourceWidth);
+                    const auto resourceRect = horizontalResourceRect(w, h);
+                    drawDockResourceStatus(resourceRect.left, h,
+                                           resourceRect.right - resourceRect.left);
                 }
                 if (clipSongContent)
-                    rt->PushAxisAlignedClip(D2D1::RectF(0.0f, 0.0f, songContentRight, h),
+                    rt->PushAxisAlignedClip(D2D1::RectF(songContentLeft, 0.0f, songContentRight, h),
                                             D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
                 contentTransitionActive = applyImmersiveSongContentTransform(rt);
                 // 失败回退时仍需绘制歌曲内容；这里复用与快照相同的绘制入口，

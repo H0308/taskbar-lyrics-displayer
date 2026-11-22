@@ -57,7 +57,8 @@ TaskbarAppearance resolveTaskbarAppearance(const AppSettings& settings,
     result.dockResourceVisibility =
         DockResourceVisibility{settings.embeddedResourceMonitor_, settings.dockResourceDownload_,
                                settings.dockResourceUpload_, settings.dockResourceGpuUsage_,
-                               settings.dockResourceCpuFrequency_, settings.dockResourceSmallFont_};
+                               settings.dockResourceCpuFrequency_, settings.dockResourceSmallFont_,
+                               settings.dockResourcePlacement_};
     result.albumCoverVisible = settings.albumCoverVisible_;
     result.songTransitionEnabled = settings.songTransitionEnabled_;
     result.platformIconVisible = settings.platformIconVisible_;

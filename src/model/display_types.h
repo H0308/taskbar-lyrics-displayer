@@ -119,6 +119,12 @@ struct TaskbarAnchorOption {
     bool operator==(const TaskbarAnchorOption&) const = default;
 };
 
+// 内嵌模式资源区所在端：Start 对应横向左侧/竖向顶部，End 对应横向右侧/竖向底部。
+enum class ResourcePlacement {
+    Start,
+    End,
+};
+
 // 复用 Dock 资源区；CPU、内存为基础指标，其余指标按开关紧凑排列。
 struct DockResourceVisibility {
     bool embeddedEnabled = false;
@@ -127,6 +133,7 @@ struct DockResourceVisibility {
     bool gpuUsage = false;
     bool cpuFrequency = false;
     bool smallFont = false; // 性能监测用小一号字，块与块之间更紧凑
+    ResourcePlacement placement = ResourcePlacement::End; // 仅内嵌模式生效，Dock 固定在右侧
     bool operator==(const DockResourceVisibility&) const = default;
 };
 

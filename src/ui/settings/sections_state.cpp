@@ -123,6 +123,8 @@ void SettingsSections::updateImmersiveRowsEnabled() {
     const bool embeddedResources = selectedMode == 0;
     if (auto* row = findRow(kIdEmbeddedResourceMonitor))
         row->enabled = embeddedResources;
+    if (auto* row = findRow(kIdDockResourcePlacement))
+        row->enabled = embeddedResources && state.embeddedResourceMonitor;
     const bool resourceExtrasEnabled =
         appBarEnabled || (embeddedResources && state.embeddedResourceMonitor);
     if (auto* row = findRow(kIdDockResourceDownload))
@@ -337,6 +339,12 @@ void SettingsSections::syncTaskbarModeRows(const SettingsState& s) {
     if (auto* row = findRow(kIdEmbeddedResourceMonitor)) {
         row->checked = s.embeddedResourceMonitor;
         row->enabled = s.taskbarViewMode == 0;
+    }
+    if (auto* row = findRow(kIdDockResourcePlacement)) {
+        row->options = vertical ? std::vector<std::wstring>{L"顶部", L"底部"}
+                                : std::vector<std::wstring>{L"左侧", L"右侧"};
+        row->selected = std::clamp(s.dockResourcePlacement, 0, 1);
+        row->enabled = s.taskbarViewMode == 0 && s.embeddedResourceMonitor;
     }
     const bool resourceExtrasEnabled =
         s.taskbarViewMode == 2 ||

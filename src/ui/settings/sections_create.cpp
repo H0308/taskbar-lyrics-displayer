@@ -122,10 +122,15 @@ void SettingsSections::createTaskbarModeRows() {
     addHeader(kTaskbarModePage, L"资源监视");
     Row& embeddedResources = addRow(
         kTaskbarModePage, kIdEmbeddedResourceMonitor, ControlKind::Toggle, L"内嵌模式显示资源监视",
-        L"横向任务栏在右侧显示，竖向在底部显示。首页优先显示 CPU 和内存，多页可用滚轮切换。",
+        L"仅内嵌模式生效。首页优先显示 CPU 和内存，多页可用滚轮切换。",
         40.0f, kRowTallH);
     embeddedResources.checked = state.embeddedResourceMonitor;
     embeddedResources.enabled = state.taskbarViewMode == 0;
+    addRadio(kTaskbarModePage, kIdDockResourcePlacement, L"资源监视位置", nullptr,
+             vertical ? std::vector<std::wstring>{L"顶部", L"底部"}
+                      : std::vector<std::wstring>{L"左侧", L"右侧"},
+             std::clamp(state.dockResourcePlacement, 0, 1),
+             state.taskbarViewMode == 0 && state.embeddedResourceMonitor, kRowH);
     Row& download =
         addRow(kTaskbarModePage, kIdDockResourceDownload, ControlKind::Toggle, L"显示下行速度",
                nullptr, 40.0f, kRowTallH);

@@ -98,6 +98,7 @@ inline settings_icon::Kind iconForRow(int id) {
     case kIdFullscreenRenderModeMonitor:
         return settings_icon::Kind::Display;
     case kIdAppBarEdge:
+    case kIdDockResourcePlacement:
         return settings_icon::Kind::Position;
     case kIdImmersiveBackgroundBlur:
     case kIdDockBackgroundBlur:

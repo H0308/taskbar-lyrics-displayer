@@ -44,6 +44,7 @@ struct PinnedInlineControlsInput {
     float coverSlotWidth = 0.0f;
     float lyricFontSize = 0.0f;
     bool canSwitchSource = false;
+    float leadingOffset = 0.0f;
 };
 
 struct PinnedInlineControlsLayout {
@@ -86,6 +87,7 @@ struct HorizontalLayoutInput {
     float spectrumWidth;
     float coverSize;
     float coverSlotWidth;
+    float leadingOffset = 0.0f;
 };
 
 // 沉浸模式与 Dock 右侧区域的纯几何结果。
@@ -120,5 +122,6 @@ void layoutInlineHoverControls(float left, float width, float height, bool canRe
 LayoutMetrics horizontalLayout(const HorizontalLayoutInput& input);
 VerticalLayout verticalLayout(float width, float height, DisplayScene scene, bool albumCoverVisible,
                               bool showControls, bool canSwitchSource = false,
-                              float resourceHeight = 0.0f, bool songInfoVisible = true);
+                              float resourceHeight = 0.0f, bool songInfoVisible = true,
+                              ResourcePlacement resourcePlacement = ResourcePlacement::End);
 } // namespace taskbar_detail

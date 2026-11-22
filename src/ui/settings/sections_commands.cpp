@@ -409,6 +409,11 @@ void SettingsSections::onCommand(int id, int option) {
         if (actions.onDockResourceGpuUsage)
             actions.onDockResourceGpuUsage(row->checked);
         break;
+    case kIdDockResourcePlacement:
+        state.dockResourcePlacement = std::clamp(row->selected, 0, 1);
+        if (actions.onDockResourcePlacement)
+            actions.onDockResourcePlacement(state.dockResourcePlacement);
+        break;
     case kIdDockResourceSmallFont:
         row->checked = !row->checked;
         state.dockResourceSmallFont = row->checked;
