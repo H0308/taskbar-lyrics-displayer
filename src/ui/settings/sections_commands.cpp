@@ -372,7 +372,7 @@ void SettingsSections::onCommand(int id, int option) {
             actions.onChooseTaskbarMonitor();
         break;
     case kIdAppBarEdge:
-        state.appBarEdge = std::clamp(row->selected, 0, 1);
+        state.appBarEdge = std::clamp(row->selected, 0, 3);
         if (actions.onAppBarEdge)
             actions.onAppBarEdge(state.appBarEdge);
         break;

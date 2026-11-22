@@ -59,6 +59,10 @@ const wchar_t* trayCommandName(int command) {
         return L"taskbar-mode-immersive";
     case kCmdTaskbarModeAppBar:
         return L"taskbar-mode-appbar";
+    case kCmdAppBarLeft:
+        return L"appbar-left";
+    case kCmdAppBarRight:
+        return L"appbar-right";
     case kCmdAppBarTop:
         return L"appbar-top";
     case kCmdAppBarBottom:

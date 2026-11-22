@@ -312,7 +312,7 @@ void SettingsSections::syncTaskbarModeRows(const SettingsState& s) {
         row->enabled = s.taskbarViewMode != 0;
     }
     if (auto* row = findRow(kIdAppBarEdge)) {
-        row->selected = std::clamp(s.appBarEdge, 0, 1);
+        row->selected = std::clamp(s.appBarEdge, 0, 3);
         row->enabled = s.taskbarViewMode == 2;
     }
     if (auto* row = findRow(kIdImmersiveBackgroundAdjustment)) {

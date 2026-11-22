@@ -154,7 +154,7 @@ constexpr int kImmersiveControlExit = 6;
 constexpr int kDockControlQuickApps = 7;
 constexpr int kImmersiveControlMenu = 8;
 constexpr int kExpandedControlCount = 9;
-constexpr float kAppBarHeightDip = 48.0f;
+constexpr float kAppBarThicknessDip = 48.0f;
 constexpr float kImmersiveControlRadiusFactor = 0.24f;
 constexpr float kImmersiveControlMinRadius = 8.0f;
 constexpr float kImmersiveControlMaxRadius = 12.0f;
@@ -830,8 +830,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     }
 
     bool verticalResourceVisible() const {
-        return viewMode_ == TaskbarViewMode::Embedded &&
-               resourcePanel_.visibility().embeddedEnabled && isVerticalTaskbar();
+        return resourceMonitoringEnabled() && isVerticalTaskbar();
     }
 
     bool verticalResourceOnly() const {
@@ -932,7 +931,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     float dip(int px) const { return static_cast<float>(px) / scale(); }
 
     bool isVerticalTaskbar() const {
-        return !isAppBarView() && isVerticalTaskbarEdge(taskbarEdge_);
+        if (isAppBarView())
+            return appBarEdge_ == AppBarEdge::Left || appBarEdge_ == AppBarEdge::Right;
+        return isVerticalTaskbarEdge(taskbarEdge_);
     }
 
     void clientPixelSize(int& width, int& height) const {
@@ -1117,7 +1118,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         }
 
         const LONG height =
-            std::max<LONG>(1, static_cast<LONG>(std::lround(kAppBarHeightDip * dpi_ / 96.0f)));
+            std::max<LONG>(1, static_cast<LONG>(std::lround(kAppBarThicknessDip * dpi_ / 96.0f)));
         const HWND window = hwnd;
         if (!appBar_.positionWindow(window, appBarMonitor(), appBarEdge_, height))
             return false;
@@ -1144,8 +1145,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             unregisterAppBar();
             return false;
         }
-        runtime_log::writef(L"[appbar] registered edge=%s",
-                            appBarEdge_ == AppBarEdge::Top ? L"top" : L"bottom");
+        runtime_log::writef(L"[appbar] registered edge=%d", static_cast<int>(appBarEdge_));
         return true;
     }
 
@@ -3644,6 +3644,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     float verticalResourceWidthDip() const {
         if (!isVerticalTaskbar())
             return 0.0f;
+        if (isAppBarView())
+            return kAppBarThicknessDip;
         const int taskbarCross = taskbarCrossPixels(rcTaskbar_, taskbarEdge_);
         if (taskbarCross > 0) {
             const int crossMargin = std::max(2, (int)std::lround(2.0f * scale()));
@@ -4617,6 +4619,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
     // includeDisabled：让出任务栏的判定把暂不可用的按钮也算作控件区域。
     int hitImmersiveControl(float x, float y, bool includeDisabled = false) const {
+        if (isAppBarView() && isVerticalTaskbar())
+            return hitInlineControl(x, y);
         D2D1_POINT_2F centers[kExpandedControlCount]{};
         float cy = 0.0f;
         float r = 0.0f;
@@ -5244,7 +5248,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         case kImmersiveControlVolume:
             if (appVolume_.available) {
                 volumePopup_.onAnchorEnter();
-                volumePopup_.showNear(volumeButtonScreenRect(), false, taskbarEdge_ == ABE_LEFT);
+                volumePopup_.showNear(volumeButtonScreenRect(), isVerticalTaskbar(),
+                                      isAppBarView() ? appBarEdge_ == AppBarEdge::Left
+                                                     : taskbarEdge_ == ABE_LEFT);
             }
             break;
         case kImmersiveControlExit:
@@ -5290,7 +5296,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     }
 
     int hitInlineControl(float x, float y) const {
-        if (isExpandedView())
+        if (horizontalImmersiveMode())
             return -1;
         if (!isVerticalTaskbar() && pinnedInlineControlsLayout().active())
             return hitPinnedInlineControl(x, y);
@@ -6574,9 +6580,14 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             brushBackground_->SetColor(appDark ? D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.12f)
                                                : D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.16f));
             const float pixel = 1.0f / std::max(scale(), 1.0f);
-            const float top = appBarEdge_ == AppBarEdge::Top ? std::max(0.0f, h - pixel) : 0.0f;
-            rt->FillRectangle(D2D1::RectF(0.0f, top, w, std::min(h, top + pixel)),
-                              brushBackground_.Get());
+            D2D1_RECT_F border = D2D1::RectF(0.0f, 0.0f, w, h);
+            switch (appBarEdge_) {
+            case AppBarEdge::Top: border.top = std::max(0.0f, h - pixel); break;
+            case AppBarEdge::Bottom: border.bottom = std::min(h, pixel); break;
+            case AppBarEdge::Left: border.left = std::max(0.0f, w - pixel); break;
+            case AppBarEdge::Right: border.right = std::min(w, pixel); break;
+            }
+            rt->FillRectangle(border, brushBackground_.Get());
         }
         if (isExpandedView()) {
             // 主背景由 Composition 模糊层绘制；动态装饰仍需绘制到透明宿主上。
@@ -7895,7 +7906,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                     mediaPopup.hideImmediate();
                 volumePopup_.onAnchorEnter();
                 volumePopup_.showNear(volumeButtonScreenRect(), isVerticalTaskbar(),
-                                      taskbarEdge_ == ABE_LEFT);
+                                      isAppBarView() ? appBarEdge_ == AppBarEdge::Left
+                                                     : taskbarEdge_ == ABE_LEFT);
             }
             return 0;
         }

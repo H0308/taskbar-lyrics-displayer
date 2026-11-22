@@ -182,9 +182,10 @@ void App::applySongTransitionEnabled(bool on) {
 }
 
 void App::applyAppBarEdge(int edge) {
-    settings_.appBarEdge_ = edge == 1 ? AppBarEdge::Bottom : AppBarEdge::Top;
+    settings_.appBarEdge_ = appBarEdgeFromInt(edge);
     forEachHost([&](TaskbarHost* host) { host->setAppBarEdge(settings_.appBarEdge_); });
-    logSettingInt(L"appbar-edge", settings_.appBarEdge_ == AppBarEdge::Bottom ? 1 : 0);
+    syncTaskbarOrientation();
+    logSettingInt(L"appbar-edge", static_cast<int>(settings_.appBarEdge_));
     saveSettings();
     refreshSettingsDialog(true);
 }
@@ -1285,7 +1286,7 @@ SettingsState App::currentSettingsState() const {
     else
         st.taskbarMonitorLabel = taskbarMonitorLabel();
     st.mediaSessionAlive = monitor.snapshot().sessionAlive;
-    st.appBarEdge = settings_.appBarEdge_ == AppBarEdge::Bottom ? 1 : 0;
+    st.appBarEdge = static_cast<int>(settings_.appBarEdge_);
     st.immersiveBackgroundBlur = settings_.immersiveBackgroundBlur_;
     st.dockBackgroundBlur = settings_.dockBackgroundBlur_;
     st.immersiveBackgroundAdjustment = settings_.immersiveBackgroundAdjustment_;

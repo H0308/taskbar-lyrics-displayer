@@ -11,7 +11,7 @@ public:
     void forget() { registered_ = false; }
     bool registerWindow(HWND window, UINT callbackMessage);
     void unregisterWindow(HWND window);
-    bool positionWindow(HWND window, HMONITOR monitor, AppBarEdge edge, LONG height);
+    bool positionWindow(HWND window, HMONITOR monitor, AppBarEdge edge, LONG thickness);
     void updateZOrder(HWND window);
 
 private:

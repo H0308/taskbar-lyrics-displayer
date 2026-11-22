@@ -166,7 +166,14 @@ enum class TaskbarViewMode {
 enum class AppBarEdge {
     Top,
     Bottom,
+    Left,
+    Right,
 };
+
+constexpr AppBarEdge appBarEdgeFromInt(int value) {
+    return value >= 0 && value <= static_cast<int>(AppBarEdge::Right)
+               ? static_cast<AppBarEdge>(value) : AppBarEdge::Top;
+}
 
 enum class RenderMode {
     Normal = 0,

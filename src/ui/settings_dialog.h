@@ -40,7 +40,7 @@ struct SettingsState {
     bool songTransitionEnabled = true;
     std::wstring taskbarMonitorLabel;
     bool mediaSessionAlive = false; // 有活动媒体会话时才允许选择沉浸模式
-    int appBarEdge = 0; // 0 顶部 1 底部
+    int appBarEdge = 0; // 0 顶部 1 底部 2 左侧 3 右侧
     int immersiveBackgroundBlur = 88;
     int dockBackgroundBlur = 88;
     int immersiveBackgroundAdjustment = 0; // 0 模糊程度 1 不透明度

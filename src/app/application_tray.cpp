@@ -182,6 +182,14 @@ std::vector<fluent::FluentMenuItem> App::buildMenuItems(bool fullTrayMenu,
             sub.text = L"底部";
             sub.checked = settings_.appBarEdge_ == AppBarEdge::Bottom;
             edge.submenu.push_back(sub);
+            sub.id = kCmdAppBarLeft;
+            sub.text = L"左侧";
+            sub.checked = settings_.appBarEdge_ == AppBarEdge::Left;
+            edge.submenu.push_back(sub);
+            sub.id = kCmdAppBarRight;
+            sub.text = L"右侧";
+            sub.checked = settings_.appBarEdge_ == AppBarEdge::Right;
+            edge.submenu.push_back(sub);
             items.push_back(std::move(edge));
         }
     }
@@ -415,6 +423,12 @@ void App::onMenuCommand(int cmd, const wchar_t* source) {
         break;
     case kCmdTaskbarModeAppBar:
         applyTaskbarViewMode(2);
+        break;
+    case kCmdAppBarLeft:
+        applyAppBarEdge(2);
+        break;
+    case kCmdAppBarRight:
+        applyAppBarEdge(3);
         break;
     case kCmdAppBarTop:
         applyAppBarEdge(0);

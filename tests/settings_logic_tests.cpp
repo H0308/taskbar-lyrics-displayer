@@ -31,12 +31,20 @@ TEST_CASE("display_rules.constraints_and_lyric_conflict_resolution") {
     EXPECT_FALSE(normalVertical.spectrumAllowed);
     EXPECT_FALSE(display_rules::spectrumRequested(settings, RenderMode::Normal, true));
 
-    // AppBar 模式固定水平，不受原任务栏竖向影响
+    // Dock 方向由停靠边决定
     settings.taskbarViewMode_ = TaskbarViewMode::AppBar;
     const auto appBarOnVertical =
         display_rules::resolveConstraints(settings, RenderMode::Normal, true);
     EXPECT_FALSE(appBarOnVertical.vertical);
     EXPECT_TRUE(appBarOnVertical.spectrumAllowed);
+
+    for (auto edge : {AppBarEdge::Left, AppBarEdge::Right}) {
+        settings.appBarEdge_ = edge;
+        const auto side = display_rules::resolveConstraints(settings, RenderMode::Normal, false);
+        EXPECT_TRUE(side.vertical);
+        EXPECT_FALSE(side.spectrumAllowed);
+    }
+    settings.appBarEdge_ = AppBarEdge::Top;
 
     const auto minimalMode =
         display_rules::resolveConstraints(settings, RenderMode::Minimal, false);

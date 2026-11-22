@@ -343,7 +343,7 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
     taskbarViewMode_ = static_cast<TaskbarViewMode>(std::clamp(savedViewMode, 0, 2));
     songTransitionEnabled_ = j.value("songTransitionEnabled", true);
     taskbarMonitorId_ = wideOf(j.value("taskbarMonitor", std::string()));
-    appBarEdge_ = j.value("appBarEdge", 0) == 1 ? AppBarEdge::Bottom : AppBarEdge::Top;
+    appBarEdge_ = appBarEdgeFromInt(j.value("appBarEdge", 0));
     const int legacyImmersiveMaskOpacity = std::clamp(j.value("immersiveMaskOpacity", 88), 0, 100);
     const int legacyDockMaskOpacity =
         std::clamp(j.value("dockMaskOpacity", legacyImmersiveMaskOpacity), 0, 100);
@@ -623,7 +623,7 @@ nlohmann::json AppSettings::toJson() const {
     j["taskbarViewMode"] = static_cast<int>(taskbarViewMode_);
     j["songTransitionEnabled"] = songTransitionEnabled_;
     j["taskbarMonitor"] = utf8Of(taskbarMonitorId_);
-    j["appBarEdge"] = appBarEdge_ == AppBarEdge::Bottom ? 1 : 0;
+    j["appBarEdge"] = static_cast<int>(appBarEdge_);
     j.erase("taskbarImmersive");
     j["immersiveBackgroundBlur"] = immersiveBackgroundBlur_;
     j["dockBackgroundBlurLevel"] = dockBackgroundBlur_;

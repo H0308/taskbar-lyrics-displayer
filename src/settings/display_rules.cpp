@@ -4,7 +4,8 @@
 
 namespace display_rules {
 DisplayConstraints resolveConstraints(const AppSettings& settings, RenderMode mode, bool vertical) {
-    vertical = vertical && settings.taskbarViewMode_ != TaskbarViewMode::AppBar;
+    if (settings.taskbarViewMode_ == TaskbarViewMode::AppBar)
+        vertical = settings.appBarEdge_ == AppBarEdge::Left || settings.appBarEdge_ == AppBarEdge::Right;
     return {vertical, mode == RenderMode::Minimal, !vertical && mode == RenderMode::Normal};
 }
 

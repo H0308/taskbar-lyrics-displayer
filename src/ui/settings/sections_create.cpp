@@ -97,7 +97,7 @@ void SettingsSections::createTaskbarModeRows() {
         state.taskbarMonitorLabel.c_str(), kRowTallH);
     taskbarMonitor.enabled = state.taskbarViewMode != 0;
     addRadio(kTaskbarModePage, kIdAppBarEdge, L"Dock 位置", nullptr,
-             {L"顶部", L"底部"}, std::clamp(state.appBarEdge, 0, 1), state.taskbarViewMode == 2,
+             {L"顶部", L"底部", L"左侧", L"右侧"}, std::clamp(state.appBarEdge, 0, 3), state.taskbarViewMode == 2,
              kRowH);
     addHeader(kTaskbarModePage, L"沉浸模式背景");
     addRadio(kTaskbarModePage, kIdImmersiveBackgroundAdjustment, L"调整方式", nullptr,

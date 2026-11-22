@@ -31,7 +31,7 @@ void AppBarRegistration::updateZOrder(HWND window) {
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
 }
 bool AppBarRegistration::positionWindow(HWND window, HMONITOR monitor, AppBarEdge edge,
-                                        LONG height) {
+                                        LONG thickness) {
     if (!window || !registered_ || positioning_)
         return false;
     struct PositionScope {
@@ -46,21 +46,28 @@ bool AppBarRegistration::positionWindow(HWND window, HMONITOR monitor, AppBarEdg
     APPBARDATA data{};
     data.cbSize = sizeof(data);
     data.hWnd = window;
-    data.uEdge = edge == AppBarEdge::Top ? ABE_TOP : ABE_BOTTOM;
+    switch (edge) {
+    case AppBarEdge::Top: data.uEdge = ABE_TOP; break;
+    case AppBarEdge::Bottom: data.uEdge = ABE_BOTTOM; break;
+    case AppBarEdge::Left: data.uEdge = ABE_LEFT; break;
+    case AppBarEdge::Right: data.uEdge = ABE_RIGHT; break;
+    }
     data.rc = monitorInfo.rcMonitor;
+    const auto applyThickness = [&] {
+        switch (edge) {
+        case AppBarEdge::Top: data.rc.bottom = data.rc.top + thickness; break;
+        case AppBarEdge::Bottom: data.rc.top = data.rc.bottom - thickness; break;
+        case AppBarEdge::Left: data.rc.right = data.rc.left + thickness; break;
+        case AppBarEdge::Right: data.rc.left = data.rc.right - thickness; break;
+        }
+    };
 
-    if (data.uEdge == ABE_TOP)
-        data.rc.bottom = data.rc.top + height;
-    else
-        data.rc.top = data.rc.bottom - height;
+    applyThickness();
     SHAppBarMessage(ABM_QUERYPOS, &data);
     if (!registered_)
         return false;
 
-    if (data.uEdge == ABE_TOP)
-        data.rc.bottom = data.rc.top + height;
-    else
-        data.rc.top = data.rc.bottom - height;
+    applyThickness();
     SHAppBarMessage(ABM_SETPOS, &data);
     if (!registered_)
         return false;
