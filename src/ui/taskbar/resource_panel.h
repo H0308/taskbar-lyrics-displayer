@@ -32,6 +32,8 @@ public:
     size_t pageCount() const;
     bool advancePage(int steps);
     bool updateColumnWidths(IDWriteFactory* dwrite, IDWriteTextFormat* format);
+    float measureVerticalStackedWidth(IDWriteFactory* dwrite, IDWriteTextFormat* format) const;
+    static float verticalAvailableWidth(float width);
     float verticalHeight(float width) const;
     void drawVertical(ID2D1DeviceContext* target, IDWriteTextFormat* format, ID2D1Brush* brush,
                       const D2D1_RECT_F& area) const;
@@ -46,8 +48,17 @@ private:
     struct DockResourceRow {
         std::wstring left, right;
     };
+    struct ColumnMetrics {
+        std::vector<std::array<float, 2>> pageColumnWidths;
+        std::array<float, 2> singleLineWidths{};
+        float verticalInlineWidth = 0.0f;
+        float verticalStackedWidth = 0.0f;
+        float verticalMinWidth = 0.0f;
+        float verticalLineHeight = 0.0f;
+    };
     std::vector<Reading> readings() const;
     std::vector<DockResourceRow> rows() const;
+    ColumnMetrics measureColumnMetrics(IDWriteFactory* dwrite, IDWriteTextFormat* format) const;
     static std::wstring_view shortVerticalValue(std::wstring_view value);
     float columnGap() const;
     static std::wstring formatResourcePercent(double percent);
@@ -70,6 +81,7 @@ private:
     std::array<float, 2> resourceSingleLineWidths_{};
     float verticalInlineWidth_ = 0.0f;
     float verticalStackedWidth_ = 0.0f;
+    float verticalMinWidth_ = 0.0f;
     float verticalLineHeight_ = 0.0f;
     bool compact_ = false;
     bool vertical_ = false;

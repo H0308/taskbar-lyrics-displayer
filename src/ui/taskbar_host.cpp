@@ -1861,8 +1861,10 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                        !EqualRect(&rcStart, &rcStart_);
         if (changed) {
             // 封面位图按显示尺寸解码（decodeCover），DPI/任务栏厚度或方向变化时按新尺寸重解码
-            if (dpi != dpi_ || edge != taskbarEdge_ ||
-                taskbarCrossPixels(rcTaskbar, edge) != taskbarCrossPixels(rcTaskbar_, taskbarEdge_))
+            const bool crossMetricsChanged =
+                dpi != dpi_ || edge != taskbarEdge_ ||
+                taskbarCrossPixels(rcTaskbar, edge) != taskbarCrossPixels(rcTaskbar_, taskbarEdge_);
+            if (crossMetricsChanged)
                 requestInvalidation(RenderInvalidation::Cover);
             dpi_ = dpi;
             centerAlign_ = center;
@@ -1882,6 +1884,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             rcNotify_ = rcNotify;
             rcStart_ = rcStart;
             renderer.setDpi(dpi_);
+            if (crossMetricsChanged)
+                recreateResourceFormat();
             requestInvalidation(RenderInvalidation::Layout);
             if (themeChanged) {
                 lightTheme_ = light;
@@ -2506,6 +2510,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             stopPlacementTimer();
         else if (mode != TaskbarViewMode::AppBar && !isStoppedMode())
             startPlacementTimer();
+        recreateResourceFormat();
         requestInvalidation(toMask(RenderInvalidation::Layout) | toMask(RenderInvalidation::Paint) |
                             toMask(RenderInvalidation::Text));
         adjustPosition();
@@ -2628,8 +2633,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             resetLyricTransition();
             clearImmersiveSongContentTransition();
         }
-        if (fontChanged)
-            recreateResourceFormat(); // 字号变了必须清缓存，否则 ensureResourceFormat 会沿用旧字号
+        if (fontChanged || isVerticalTaskbar())
+            recreateResourceFormat(); // 字号或竖向窄栏拟合依赖已启用指标，必须清缓存重建
         else
             updateResourceColumnWidths();
         if (embeddedChanged && viewMode_ == TaskbarViewMode::Embedded && hwnd) {
@@ -3607,15 +3612,53 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                                (compactTaskbarHeight_ - 2.0f) * 0.44f));
     }
 
+    float verticalResourceWidthDip() const {
+        if (!isVerticalTaskbar())
+            return 0.0f;
+        const int taskbarCross = taskbarCrossPixels(rcTaskbar_, taskbarEdge_);
+        if (taskbarCross > 0) {
+            const int crossMargin = std::max(2, (int)std::lround(2.0f * scale()));
+            int crossPx = taskbarCross - crossMargin * 2;
+            if (crossPx < 16)
+                crossPx = taskbarCross;
+            if (crossPx > 0)
+                return dip(crossPx);
+        }
+        int width = 0;
+        int height = 0;
+        clientPixelSize(width, height);
+        return width > 1 ? dip(width) : 0.0f;
+    }
+
     bool ensureResourceFormat() {
         if (!renderer.dwrite())
             renderer.initialize();
         typesetter_.setFactory(renderer.dwrite());
+        if (typesetter_.resources().fmtResource_)
+            return true;
         const float requested = resourcePanel_.visibility().smallFont
                                     ? 12.0f
                                     : fluent::font_sizes::taskbar::resource;
-        return typesetter_.ensureResourceFormat(
-            fontFamily_, fontStyle_, fitCompactFontSize(requested, compactTaskbarHeight_ - 2.0f));
+        const float fitted = fitCompactFontSize(requested, compactTaskbarHeight_ - 2.0f);
+        if (!typesetter_.ensureResourceFormat(fontFamily_, fontStyle_, fitted))
+            return false;
+        const float verticalAvailable =
+            ResourcePanel::verticalAvailableWidth(verticalResourceWidthDip());
+        if (verticalAvailable > 0.0f) {
+            const float needed = resourcePanel_.measureVerticalStackedWidth(
+                renderer.dwrite(), typesetter_.resources().fmtResource_.Get());
+            if (needed > verticalAvailable) {
+                const float shrunk = std::clamp(
+                    fitted * (verticalAvailable / needed),
+                    fluent::font_sizes::taskbar::minimum, fitted);
+                if (shrunk + 0.05f < fitted) {
+                    typesetter_.resetResourceFormat();
+                    if (!typesetter_.ensureResourceFormat(fontFamily_, fontStyle_, shrunk))
+                        return false;
+                }
+            }
+        }
+        return true;
     }
 
     bool updateResourceColumnWidths() {
@@ -6789,8 +6832,10 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 requestLyricDCompEnd();
             if (songContentTransition_ && songContentTransition_->compositorLayer)
                 clearImmersiveSongContentTransition();
-            if (vertical && pxW != lastPxW_)
+            if (vertical && pxW != lastPxW_) {
                 requestInvalidation(RenderInvalidation::SongInfo);
+                recreateResourceFormat();
+            }
             lastPxW_ = pxW;
             lastPxH_ = pxH;
             requestInvalidation(RenderInvalidation::Geometry);

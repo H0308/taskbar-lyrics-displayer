@@ -83,9 +83,13 @@ std::wstring_view ResourcePanel::shortVerticalValue(std::wstring_view value) {
     return value;
 }
 
+float ResourcePanel::verticalAvailableWidth(float width) {
+    return width - 2.0f * kVerticalResourceInset;
+}
+
 float ResourcePanel::verticalHeight(float width) const {
-    const float available = width - 2.0f * kVerticalResourceInset;
-    if (verticalLineHeight_ <= 0.0f || available < verticalStackedWidth_)
+    const float available = verticalAvailableWidth(width);
+    if (verticalLineHeight_ <= 0.0f || available < verticalMinWidth_)
         return 0.0f;
     if (available < verticalInlineWidth_)
         return 2.0f * (2.0f * verticalLineHeight_ + kVerticalResourceLabelGap) +
@@ -100,15 +104,16 @@ void ResourcePanel::drawVertical(ID2D1DeviceContext* rt, IDWriteTextFormat* form
 
     const auto values = readings();
     const size_t first = std::min(dockResourcePage_, (values.size() - 1) / 2) * 2;
-    const bool stacked = area.right - area.left - 2.0f * kVerticalResourceInset <
-                         verticalInlineWidth_;
+    const bool stacked = verticalAvailableWidth(area.right - area.left) < verticalInlineWidth_;
     float top = area.top;
     const auto previousAlignment = format->GetTextAlignment();
     format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    // 堆叠模式文本已水平居中且窗口外侧已有任务栏边距，不再二次内缩裁剪，避免窄栏边缘裁字。
+    const float inset = stacked ? 0.0f : kVerticalResourceInset;
     const auto drawLine = [&](std::wstring_view text) {
         rt->DrawTextW(text.data(), static_cast<UINT32>(text.size()), format,
-                      D2D1::RectF(area.left + kVerticalResourceInset, top,
-                                  area.right - kVerticalResourceInset, top + verticalLineHeight_),
+                      D2D1::RectF(area.left + inset, top,
+                                  area.right - inset, top + verticalLineHeight_),
                       brush, D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
         top += verticalLineHeight_;
     };
@@ -294,9 +299,11 @@ float ResourcePanel::measureResourceTextWidth(IDWriteFactory* dwrite, IDWriteTex
     return measuredWidth;
 }
 
-bool ResourcePanel::updateColumnWidths(IDWriteFactory* dwrite, IDWriteTextFormat* format) {
+ResourcePanel::ColumnMetrics ResourcePanel::measureColumnMetrics(IDWriteFactory* dwrite,
+                                                                 IDWriteTextFormat* format) const {
+    ColumnMetrics result;
     if (!dwrite || !format)
-        return false;
+        return result;
 
     wchar_t widestDigit = L'8';
     float widestDigitWidth = -1.0f;
@@ -314,27 +321,28 @@ bool ResourcePanel::updateColumnWidths(IDWriteFactory* dwrite, IDWriteTextFormat
     const std::wstring threeDigits = twoDigits + singleDigit;
     const std::wstring decimalDigits = twoDigits + L"." + singleDigit;
 
-    std::vector<std::array<float, 2>> pageColumnWidths;
-    std::array<float, 2> singleLineWidths{};
     const auto values = readings();
     float verticalInlineWidth = 0.0f;
     float verticalStackedWidth = 0.0f;
+    float verticalMinWidth = 0.0f;
     float verticalLineHeight = 0.0f;
     size_t cellIndex = 0;
     auto measureCell = [&](const std::vector<std::wstring>& samples) {
         const size_t indexInPage = cellIndex % 4;
         if (indexInPage == 0)
-            pageColumnWidths.push_back({});
-        float& columnWidth = pageColumnWidths.back()[indexInPage / 2];
+            result.pageColumnWidths.push_back({});
+        float& columnWidth = result.pageColumnWidths.back()[indexInPage / 2];
         const auto& reading = values[cellIndex];
         const std::wstring label = reading.label;
         const std::wstring prefix = label + L": ";
-        verticalStackedWidth = std::max(
-            verticalStackedWidth, measureResourceTextWidth(dwrite, format, label));
+        const float labelWidth = measureResourceTextWidth(dwrite, format, label);
+        verticalMinWidth = std::max(verticalMinWidth, labelWidth);
+        verticalStackedWidth = std::max(verticalStackedWidth, labelWidth);
         for (const auto& sample : samples) {
             const float measured = measureResourceTextWidth(dwrite, format, prefix + sample);
             columnWidth = std::max(columnWidth, measured);
-            singleLineWidths[cellIndex % 2] = std::max(singleLineWidths[cellIndex % 2], measured);
+            result.singleLineWidths[cellIndex % 2] =
+                std::max(result.singleLineWidths[cellIndex % 2], measured);
             verticalInlineWidth = std::max(
                 verticalInlineWidth, measureResourceTextWidth(
                     dwrite, format, label + L" " + sample, &verticalLineHeight));
@@ -349,9 +357,10 @@ bool ResourcePanel::updateColumnWidths(IDWriteFactory* dwrite, IDWriteTextFormat
     static constexpr const wchar_t* rateUnits[] = {L"B/s", L"KB/s", L"MB/s", L"GB/s", L"TB/s"};
     auto measureRate = [&] {
         std::vector<std::wstring> samples;
-        for (const wchar_t* unitLabel : rateUnits) {
-            samples.push_back(decimalDigits + unitLabel);
-            samples.push_back(threeDigits + unitLabel);
+        for (size_t i = 0; i < std::size(rateUnits); ++i) {
+            if (i > 0)
+                samples.push_back(decimalDigits + rateUnits[i]);
+            samples.push_back(threeDigits + rateUnits[i]);
         }
         measureCell(samples);
     };
@@ -364,27 +373,44 @@ bool ResourcePanel::updateColumnWidths(IDWriteFactory* dwrite, IDWriteTextFormat
     if (dockResourceVisibility_.cpuFrequency)
         measureCell({decimalDigits + L"GHz"});
 
-    for (auto& [left, right] : pageColumnWidths) {
+    for (auto& [left, right] : result.pageColumnWidths) {
         left = std::max(1.0f, std::ceil(left) + kResourceCellSafetyPadding);
         if (right > 0.0f)
             right = std::ceil(right) + kResourceCellSafetyPadding;
     }
-    for (float& cellWidth : singleLineWidths)
+    for (float& cellWidth : result.singleLineWidths)
         if (cellWidth > 0.0f)
             cellWidth = std::ceil(cellWidth) + kResourceCellSafetyPadding;
 
-    const float inlineWidth = std::ceil(verticalInlineWidth);
-    const float stackedWidth = std::ceil(verticalStackedWidth);
-    const float lineHeight = std::ceil(verticalLineHeight);
-    const bool changed = pageColumnWidths != resourcePageColumnWidths_ ||
-                         singleLineWidths != resourceSingleLineWidths_ ||
-                         inlineWidth != verticalInlineWidth_ || stackedWidth != verticalStackedWidth_ ||
-                         lineHeight != verticalLineHeight_;
-    resourcePageColumnWidths_.swap(pageColumnWidths);
-    resourceSingleLineWidths_ = singleLineWidths;
-    verticalInlineWidth_ = inlineWidth;
-    verticalStackedWidth_ = stackedWidth;
-    verticalLineHeight_ = lineHeight;
+    result.verticalInlineWidth = std::ceil(verticalInlineWidth);
+    result.verticalStackedWidth = verticalStackedWidth;
+    result.verticalMinWidth = std::ceil(verticalMinWidth);
+    result.verticalLineHeight = std::ceil(verticalLineHeight);
+    return result;
+}
+
+float ResourcePanel::measureVerticalStackedWidth(IDWriteFactory* dwrite,
+                                                 IDWriteTextFormat* format) const {
+    return measureColumnMetrics(dwrite, format).verticalStackedWidth;
+}
+
+bool ResourcePanel::updateColumnWidths(IDWriteFactory* dwrite, IDWriteTextFormat* format) {
+    if (!dwrite || !format)
+        return false;
+
+    ColumnMetrics measured = measureColumnMetrics(dwrite, format);
+    const bool changed = measured.pageColumnWidths != resourcePageColumnWidths_ ||
+                         measured.singleLineWidths != resourceSingleLineWidths_ ||
+                         measured.verticalInlineWidth != verticalInlineWidth_ ||
+                         measured.verticalStackedWidth != verticalStackedWidth_ ||
+                         measured.verticalMinWidth != verticalMinWidth_ ||
+                         measured.verticalLineHeight != verticalLineHeight_;
+    resourcePageColumnWidths_.swap(measured.pageColumnWidths);
+    resourceSingleLineWidths_ = measured.singleLineWidths;
+    verticalInlineWidth_ = measured.verticalInlineWidth;
+    verticalStackedWidth_ = measured.verticalStackedWidth;
+    verticalMinWidth_ = measured.verticalMinWidth;
+    verticalLineHeight_ = measured.verticalLineHeight;
     return changed;
 }
 
