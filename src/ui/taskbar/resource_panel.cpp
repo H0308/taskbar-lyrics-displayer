@@ -14,6 +14,8 @@ constexpr float kVerticalResourceInset = 2.0f;
 constexpr float kVerticalResourceLabelGap = 1.0f;
 constexpr float kVerticalResourceGroupGap = 4.0f;
 constexpr UINT kResourceSnapshotPollMs = 250;
+constexpr ULONGLONG kTransientLabelHoldMs = 900;
+constexpr ULONGLONG kTransientLabelFadeMs = 260;
 } // namespace
 using taskbar_detail::monotonicNowMs;
 
@@ -54,19 +56,24 @@ std::vector<ResourcePanel::Reading> ResourcePanel::readings() const {
 }
 
 std::vector<ResourcePanel::DockResourceRow> ResourcePanel::rows() const {
-    std::vector<std::wstring> cells;
-    for (const auto& reading : readings())
-        cells.push_back(std::wstring(reading.label) + L": " + reading.value);
+    std::vector<DockResourceCell> cells;
+    const bool hideLabels = dockResourceVisibility_.hideLabels;
+    for (const auto& reading : readings()) {
+        if (hideLabels)
+            cells.push_back({reading.value, reading.label});
+        else
+            cells.push_back({std::wstring(reading.label) + L": " + reading.value, {}});
+    }
     std::vector<DockResourceRow> rows;
     if (compact_) {
         for (size_t i = 0; i < cells.size(); i += 2)
-            rows.push_back({cells[i], i + 1 < cells.size() ? cells[i + 1] : L""});
+            rows.push_back({cells[i], i + 1 < cells.size() ? cells[i + 1] : DockResourceCell{}});
         return rows;
     }
     for (size_t i = 0; i < cells.size(); i += 4) {
-        rows.push_back({cells[i], i + 2 < cells.size() ? cells[i + 2] : L""});
-        rows.push_back(
-            {i + 1 < cells.size() ? cells[i + 1] : L"", i + 3 < cells.size() ? cells[i + 3] : L""});
+        rows.push_back({cells[i], i + 2 < cells.size() ? cells[i + 2] : DockResourceCell{}});
+        rows.push_back({i + 1 < cells.size() ? cells[i + 1] : DockResourceCell{},
+                        i + 3 < cells.size() ? cells[i + 3] : DockResourceCell{}});
     }
     return rows;
 }
@@ -91,6 +98,8 @@ float ResourcePanel::verticalHeight(float width) const {
     const float available = verticalAvailableWidth(width);
     if (verticalLineHeight_ <= 0.0f || available < verticalMinWidth_)
         return 0.0f;
+    if (dockResourceVisibility_.hideLabels)
+        return 2.0f * verticalLineHeight_ + kVerticalResourceGroupGap;
     if (available < verticalInlineWidth_)
         return 2.0f * (2.0f * verticalLineHeight_ + kVerticalResourceLabelGap) +
                kVerticalResourceGroupGap;
@@ -104,29 +113,48 @@ void ResourcePanel::drawVertical(ID2D1DeviceContext* rt, IDWriteTextFormat* form
 
     const auto values = readings();
     const size_t first = std::min(dockResourcePage_, (values.size() - 1) / 2) * 2;
-    const bool stacked = verticalAvailableWidth(area.right - area.left) < verticalInlineWidth_;
+    const bool hideLabels = dockResourceVisibility_.hideLabels;
+    const bool stacked =
+        !hideLabels && verticalAvailableWidth(area.right - area.left) < verticalInlineWidth_;
     float top = area.top;
     const auto previousAlignment = format->GetTextAlignment();
     format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-    // 堆叠模式文本已水平居中且窗口外侧已有任务栏边距，不再二次内缩裁剪，避免窄栏边缘裁字。
-    const float inset = stacked ? 0.0f : kVerticalResourceInset;
-    const auto drawLine = [&](std::wstring_view text) {
+    // 堆叠和隐藏标签模式文本均已水平居中且窗口外侧已有任务栏边距，不再二次内缩裁剪。
+    const float inset = (stacked || hideLabels) ? 0.0f : kVerticalResourceInset;
+    const auto drawText = [&](std::wstring_view text, float y, float opacityScale) {
+        if (text.empty() || opacityScale <= 0.001f)
+            return;
+        const float previousOpacity = brush->GetOpacity();
+        if (opacityScale < 0.999f)
+            brush->SetOpacity(previousOpacity * opacityScale);
         rt->DrawTextW(text.data(), static_cast<UINT32>(text.size()), format,
-                      D2D1::RectF(area.left + inset, top,
-                                  area.right - inset, top + verticalLineHeight_),
+                      D2D1::RectF(area.left + inset, y,
+                                  area.right - inset, y + verticalLineHeight_),
                       brush, D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
-        top += verticalLineHeight_;
+        if (opacityScale < 0.999f)
+            brush->SetOpacity(previousOpacity);
     };
     for (size_t index = first; index < std::min(first + 2, values.size()); ++index) {
         const auto& reading = values[index];
-        if (stacked) {
+        if (hideLabels) {
             if (index != first)
                 top += kVerticalResourceGroupGap;
-            drawLine(reading.label);
-            top += kVerticalResourceLabelGap;
-            drawLine(shortVerticalValue(reading.value));
+            const float labelAlpha = transientLabelAlpha_;
+            if (labelAlpha < 0.999f)
+                drawText(shortVerticalValue(reading.value), top, 1.0f - labelAlpha);
+            if (labelAlpha > 0.001f)
+                drawText(reading.label, top, labelAlpha);
+            top += verticalLineHeight_;
+        } else if (stacked) {
+            if (index != first)
+                top += kVerticalResourceGroupGap;
+            drawText(reading.label, top, 1.0f);
+            top += verticalLineHeight_ + kVerticalResourceLabelGap;
+            drawText(shortVerticalValue(reading.value), top, 1.0f);
+            top += verticalLineHeight_;
         } else {
-            drawLine(std::wstring(reading.label) + L" " + reading.value);
+            drawText(std::wstring(reading.label) + L" " + reading.value, top, 1.0f);
+            top += verticalLineHeight_;
         }
     }
     format->SetTextAlignment(previousAlignment);
@@ -181,6 +209,54 @@ void ResourcePanel::start() {
 void ResourcePanel::stop() {
     resourceMonitor_.stop();
     nextResourceSnapshotPollMs_ = 0;
+    clearTransientLabels();
+}
+
+void ResourcePanel::triggerTransientLabels(ULONGLONG now) {
+    if (!dockResourceVisibility_.hideLabels)
+        return;
+    transientLabelActive_ = true;
+    transientLabelStartMs_ = now != 0 ? now : monotonicNowMs();
+    transientLabelAlpha_ = 1.0f;
+}
+
+void ResourcePanel::clearTransientLabels() {
+    transientLabelActive_ = false;
+    transientLabelStartMs_ = 0;
+    transientLabelAlpha_ = 0.0f;
+}
+
+bool ResourcePanel::transientLabelsFading(ULONGLONG now, bool animate) const {
+    if (!transientLabelActive_ || !animate)
+        return false;
+    const ULONGLONG elapsed = now >= transientLabelStartMs_ ? now - transientLabelStartMs_ : 0;
+    return elapsed >= kTransientLabelHoldMs &&
+           elapsed < kTransientLabelHoldMs + kTransientLabelFadeMs;
+}
+
+bool ResourcePanel::tickTransientLabels(ULONGLONG now, bool animate) {
+    if (!transientLabelActive_)
+        return false;
+    const ULONGLONG elapsed = now >= transientLabelStartMs_ ? now - transientLabelStartMs_ : 0;
+    const ULONGLONG fadeMs = animate ? kTransientLabelFadeMs : 0;
+    if (elapsed >= kTransientLabelHoldMs + fadeMs) {
+        transientLabelActive_ = false;
+        transientLabelStartMs_ = 0;
+        const bool changed = transientLabelAlpha_ > 0.0f;
+        transientLabelAlpha_ = 0.0f;
+        return changed;
+    }
+    float nextAlpha = 1.0f;
+    if (elapsed >= kTransientLabelHoldMs && fadeMs > 0) {
+        const float t =
+            static_cast<float>(elapsed - kTransientLabelHoldMs) / static_cast<float>(fadeMs);
+        nextAlpha = 1.0f - t * t * (3.0f - 2.0f * t);
+    }
+    if (std::abs(nextAlpha - transientLabelAlpha_) > 0.002f) {
+        transientLabelAlpha_ = nextAlpha;
+        return true;
+    }
+    return false;
 }
 
 bool ResourcePanel::refresh() {
@@ -220,20 +296,49 @@ void ResourcePanel::draw(ID2D1DeviceContext* rt, IDWriteTextFormat* format, ID2D
     const size_t pageCount = compact_ ? rows.size() : rows.size() / 2;
     const size_t page = std::min(dockResourcePage_, pageCount - 1);
     const float gap = columnGap();
+    const bool hideLabels = dockResourceVisibility_.hideLabels;
+
+    auto drawText = [&](const std::wstring& text, const D2D1_RECT_F& rect,
+                        D2D1_DRAW_TEXT_OPTIONS options, float opacityScale) {
+        if (text.empty() || opacityScale <= 0.001f)
+            return;
+        const float previousOpacity = brush->GetOpacity();
+        if (opacityScale < 0.999f)
+            brush->SetOpacity(previousOpacity * opacityScale);
+        rt->DrawTextW(text.c_str(), static_cast<UINT32>(text.size()), format, rect, brush, options,
+                      DWRITE_MEASURING_MODE_NATURAL);
+        if (opacityScale < 0.999f)
+            brush->SetOpacity(previousOpacity);
+    };
+    auto drawCell = [&](const DockResourceCell& cell, float left, float rowTop, float cellW,
+                        float cellH, D2D1_DRAW_TEXT_OPTIONS options) {
+        if (cell.value.empty() && cell.label.empty())
+            return;
+        if (cellW <= 0.0f || cellH <= 0.0f)
+            return;
+        const D2D1_RECT_F rect = D2D1::RectF(left, rowTop, left + cellW, rowTop + cellH);
+        if (!hideLabels) {
+            drawText(cell.value, rect, options, 1.0f);
+            return;
+        }
+        const float labelAlpha = transientLabelAlpha_;
+        if (labelAlpha < 0.999f)
+            drawText(cell.value, rect, options, 1.0f - labelAlpha);
+        if (labelAlpha > 0.001f)
+            drawText(cell.label, rect, options, labelAlpha);
+    };
 
     if (compact_) {
-        const std::array<const std::wstring*, 2> cells{&rows[page].left, &rows[page].right};
+        const std::array<const DockResourceCell*, 2> cells{&rows[page].left, &rows[page].right};
         rt->PushAxisAlignedClip(D2D1::RectF(x, 0.0f, x + width, h), D2D1_ANTIALIAS_MODE_ALIASED);
         float cellX = x;
         for (size_t i = 0; i < cells.size(); ++i) {
-            if (cells[i]->empty())
+            if (cells[i]->value.empty() && cells[i]->label.empty())
                 continue;
             const float cellRight = std::min(x + width, cellX + resourceSingleLineWidths_[i]);
             if (cellRight <= cellX)
                 break;
-            rt->DrawTextW(cells[i]->c_str(), static_cast<UINT32>(cells[i]->size()), format,
-                          D2D1::RectF(cellX, 0.0f, cellRight, h), brush,
-                          D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
+            drawCell(*cells[i], cellX, 0.0f, cellRight - cellX, h, D2D1_DRAW_TEXT_OPTIONS_CLIP);
             cellX += resourceSingleLineWidths_[i] + gap;
         }
         rt->PopAxisAlignedClip();
@@ -256,21 +361,14 @@ void ResourcePanel::draw(ID2D1DeviceContext* rt, IDWriteTextFormat* format, ID2D
                                                    ? D2D1_DRAW_TEXT_OPTIONS_NONE
                                                    : D2D1_DRAW_TEXT_OPTIONS_CLIP;
 
-    auto drawResourceCell = [&](const std::wstring& text, float left, float rowTop, float cellW) {
-        if (text.empty() || cellW <= 0.0f)
-            return;
-        rt->DrawTextW(text.c_str(), static_cast<UINT32>(text.size()), format,
-                      D2D1::RectF(left, rowTop, left + cellW, rowTop + rowH), brush, drawOptions,
-                      DWRITE_MEASURING_MODE_NATURAL);
-    };
     for (size_t row = 0; row < visibleRows.size(); ++row) {
         const auto& current = visibleRows[row];
         const float rowTop = top + row * rowH;
-        if (current.right.empty()) {
-            drawResourceCell(current.left, x, rowTop, width);
+        if (current.right.value.empty() && current.right.label.empty()) {
+            drawCell(current.left, x, rowTop, width, rowH, drawOptions);
         } else {
-            drawResourceCell(current.left, x, rowTop, leftColumnW);
-            drawResourceCell(current.right, rightColumnX, rowTop, rightColumnW);
+            drawCell(current.left, x, rowTop, leftColumnW, rowH, drawOptions);
+            drawCell(current.right, rightColumnX, rowTop, rightColumnW, rowH, drawOptions);
         }
     }
 }
@@ -332,14 +430,21 @@ ResourcePanel::ColumnMetrics ResourcePanel::measureColumnMetrics(IDWriteFactory*
         if (indexInPage == 0)
             result.pageColumnWidths.push_back({});
         float& columnWidth = result.pageColumnWidths.back()[indexInPage / 2];
+        const bool hideLabels = dockResourceVisibility_.hideLabels;
         const auto& reading = values[cellIndex];
         const std::wstring label = reading.label;
         const std::wstring prefix = label + L": ";
-        const float labelWidth = measureResourceTextWidth(dwrite, format, label);
+        const float labelWidth = measureResourceTextWidth(dwrite, format, label, &verticalLineHeight);
         verticalMinWidth = std::max(verticalMinWidth, labelWidth);
         verticalStackedWidth = std::max(verticalStackedWidth, labelWidth);
+        if (hideLabels) {
+            columnWidth = std::max(columnWidth, labelWidth);
+            result.singleLineWidths[cellIndex % 2] =
+                std::max(result.singleLineWidths[cellIndex % 2], labelWidth);
+        }
         for (const auto& sample : samples) {
-            const float measured = measureResourceTextWidth(dwrite, format, prefix + sample);
+            const float measured = measureResourceTextWidth(
+                dwrite, format, hideLabels ? sample : prefix + sample, &verticalLineHeight);
             columnWidth = std::max(columnWidth, measured);
             result.singleLineWidths[cellIndex % 2] =
                 std::max(result.singleLineWidths[cellIndex % 2], measured);
@@ -425,5 +530,7 @@ bool ResourcePanel::advancePage(int steps) {
     if (next < 0)
         next += count;
     dockResourcePage_ = static_cast<size_t>(next);
+    if (dockResourceVisibility_.hideLabels)
+        triggerTransientLabels(monotonicNowMs());
     return true;
 }

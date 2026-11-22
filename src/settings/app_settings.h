@@ -64,6 +64,7 @@ struct AppSettings {
     bool dockResourceUpload_ = true;
     bool dockResourceCpuFrequency_ = false;
     bool dockResourceSmallFont_ = false; // 性能监测小字模式
+    bool dockResourceHideLabels_ = false; // 性能监测隐藏标签，仅翻页或悬停时短暂提示
     ResourcePlacement dockResourcePlacement_ = ResourcePlacement::End; // 仅内嵌模式生效
     bool taskbarContextMenuEnabled_ = true;
     bool hoverPlaybackControls_ = true;

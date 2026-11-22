@@ -519,6 +519,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     std::function<void(std::vector<TaskbarAnchorOption>)> onAnchorOptionsChanged_;
     std::vector<TaskbarAnchorOption> publishedAnchorOptions_;
     bool mouseOver_ = false;
+    bool resourceHovered_ = false;
     bool verticalResourceHovered_ = false;
     bool trackingLeave_ = false;
     int immersiveControlHover_ = -1;
@@ -2647,14 +2648,18 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const bool embeddedChanged =
             resourcePanel_.visibility().embeddedEnabled != visibility.embeddedEnabled;
         const bool fontChanged = resourcePanel_.visibility().smallFont != visibility.smallFont;
+        const bool hideLabelsChanged =
+            resourcePanel_.visibility().hideLabels != visibility.hideLabels;
         const bool placementChanged = resourcePanel_.visibility().placement != visibility.placement;
         resourcePanel_.setVisibility(visibility);
+        if (visibility.hideLabels && (isAppBarView() || visibility.embeddedEnabled))
+            resourcePanel_.triggerTransientLabels(monotonicNowMs());
         if (placementChanged) {
             resetLyricTransition();
             clearImmersiveSongContentTransition();
         }
-        if (fontChanged || isVerticalTaskbar())
-            recreateResourceFormat(); // 字号或竖向窄栏拟合依赖已启用指标，必须清缓存重建
+        if (fontChanged || hideLabelsChanged || isVerticalTaskbar())
+            recreateResourceFormat(); // 字号、标签显示或竖向窄栏拟合依赖已启用指标，必须清缓存重建
         else
             updateResourceColumnWidths();
         if (embeddedChanged && viewMode_ == TaskbarViewMode::Embedded && hwnd) {
@@ -3094,15 +3099,15 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return D2D1::RectF(resourceX, 0.0f, resourceX + resourceW, hostH);
     }
 
-    bool hitDockResourceArea(float clientX, float clientY) const {
-        if (!resourceMonitoringEnabled() || !dockResourceExtrasVisible())
+    bool pointInResourceArea(float clientX, float clientY) const {
+        if (!resourceMonitoringEnabled())
             return false;
 
         float x = 0.0f;
         float y = 0.0f;
         clientPointToLogicalDip(clientX, clientY, x, y);
         if (isVerticalTaskbar()) {
-            const auto area = verticalLayout().resources;
+            const auto area = verticalLayout(false).resources;
             return x >= area.left && x < area.right && y >= area.top && y < area.bottom;
         }
         int pxW = 0;
@@ -3110,6 +3115,10 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         logicalClientPixelSize(pxW, pxH);
         const auto area = horizontalResourceRect(dip(pxW), dip(pxH));
         return x >= area.left && x <= area.right && y >= area.top && y <= area.bottom;
+    }
+
+    bool hitDockResourceArea(float clientX, float clientY) const {
+        return dockResourceExtrasVisible() && pointInResourceArea(clientX, clientY);
     }
 
     void advanceDockResourcePage(int steps) {
@@ -7409,6 +7418,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return true;
         if (spectrumVisualsAnimating() || spectrumEffectsAnimating() || lyricEffectsAnimating())
             return true;
+        if (resourceMonitoringEnabled() &&
+            resourcePanel_.transientLabelsFading(monotonicNowMs(), clientAnimations_))
+            return true;
         if (media.playing && scroll_.animating() && !songLayerActive)
             return true;
         if (media.playing && clientAnimations_ && karaokeLine() && !songLayerActive)
@@ -7576,6 +7588,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         // 频谱柱等静音衰减到阈值以下才算静止
         if (spectrumVisualsAnimating() || spectrumEffectsAnimating() || lyricEffectsAnimating())
             return true;
+        if (resourceMonitoringEnabled() &&
+            resourcePanel_.transientLabelsFading(monotonicNowMs(), clientAnimations_))
+            return true;
         if (spectrumVisible_) {
             for (float v : spectrum_.bands())
                 if (v > 0.01f)
@@ -7640,7 +7655,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         lyricFxWasAnimating_ = lyricAnimating;
         dockPet_.tick(frameNowMs_);
         updateVinylRotation();
-        if (refreshResourceSnapshot())
+        if (refreshResourceSnapshot() ||
+            (resourceMonitoringEnabled() &&
+             resourcePanel_.tickTransientLabels(frameNowMs_, clientAnimations_)))
             requestFrame();
         // 任务栏位置/DPI/主题跟踪与避让探测结果拾取，放到慢速分支，不跟 60fps 走
         if (++slowTick_ >= kSlowTickInterval) {
@@ -7824,16 +7841,14 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             const float mouseX = static_cast<float>(GET_X_LPARAM(lp));
             const float mouseY = static_cast<float>(GET_Y_LPARAM(lp));
             const bool inPinnedControls = pointInPinnedControlsZone(mouseX, mouseY);
-            const bool wasOverResource = verticalResourceHovered_;
-            verticalResourceHovered_ = false;
-            if (isVerticalTaskbar() && resourceMonitoringEnabled()) {
-                const auto area = verticalLayout(false).resources;
-                float x = 0.0f;
-                float y = 0.0f;
-                clientPointToLogicalDip(mouseX, mouseY, x, y);
-                verticalResourceHovered_ =
-                    x >= area.left && x < area.right && y >= area.top && y < area.bottom;
-            }
+            const bool wasOverResource = resourceHovered_;
+            const bool wasOverVerticalResource = verticalResourceHovered_;
+            resourceHovered_ = pointInResourceArea(mouseX, mouseY);
+            verticalResourceHovered_ = isVerticalTaskbar() && resourceHovered_;
+            const bool triggeredResourceLabels =
+                !wasOverResource && resourceHovered_ && resourcePanel_.visibility().hideLabels;
+            if (triggeredResourceLabels)
+                resourcePanel_.triggerTransientLabels(monotonicNowMs());
             bool wasOver = mouseOver_;
             mouseOver_ = true;
             if (mediaPopupEnabledForScene()) {
@@ -7842,7 +7857,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 else
                     mediaPopup.onAnchorEnter();
             }
-            if (!wasOver || wasOverResource != verticalResourceHovered_)
+            if (!wasOver || wasOverVerticalResource != verticalResourceHovered_ ||
+                triggeredResourceLabels)
                 requestFrameAndFlush();
             trackMouseLeave();
             const int immersiveHover = isExpandedView() ? hitImmersiveControl(mouseX, mouseY) : -1;
@@ -7890,6 +7906,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 return 0;
             cancelImmersiveYield();
             mouseOver_ = false;
+            resourceHovered_ = false;
             verticalResourceHovered_ = false;
             trackingLeave_ = false;
             volumeHover_ = false;

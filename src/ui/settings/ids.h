@@ -101,6 +101,7 @@ inline constexpr int kIdDockResourceGpuUsage = 473;
 inline constexpr int kIdDockResourceCpuFrequency = 477;
 inline constexpr int kIdDockResourceSmallFont = 490;
 inline constexpr int kIdDockResourcePlacement = 491;
+inline constexpr int kIdDockResourceHideLabels = 492;
 inline constexpr int kIdImmersiveBackgroundAdjustment = 479;
 inline constexpr int kIdDockBackgroundAdjustment = 480;
 inline constexpr int kIdContentScrollBar = 401;

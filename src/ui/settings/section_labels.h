@@ -110,6 +110,7 @@ inline settings_icon::Kind iconForRow(int id) {
     case kIdDockResourceDownload:
     case kIdDockResourceUpload:
     case kIdDockResourceCpuFrequency:
+    case kIdDockResourceHideLabels:
         return settings_icon::Kind::Performance;
     case kIdHoverControls:
         return settings_icon::Kind::Hover;

@@ -417,6 +417,8 @@ private:
 
     void applyDockResourceSmallFont(bool on);
 
+    void applyDockResourceHideLabels(bool on);
+
     void applyDockResourcePlacement(int placement);
 
     bool isRenderMode(RenderMode mode) const;

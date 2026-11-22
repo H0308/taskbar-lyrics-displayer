@@ -151,6 +151,11 @@ void SettingsSections::createTaskbarModeRows() {
         addRow(kTaskbarModePage, kIdDockResourceSmallFont, ControlKind::Toggle, L"紧凑显示",
                L"缩小资源监视字号，收紧双行布局的行距。", 40.0f, kRowTallH);
     dockResourceSmallFont.checked = state.dockResourceSmallFont;
+    Row& dockResourceHideLabels =
+        addRow(kTaskbarModePage, kIdDockResourceHideLabels, ControlKind::Toggle, L"隐藏监控标签",
+               L"常态仅显示数值以节省空间；翻页、开启或移入资源区时短暂提示指标名称。",
+               40.0f, kRowTallH);
+    dockResourceHideLabels.checked = state.dockResourceHideLabels;
     const bool resourceExtrasEnabled =
         state.taskbarViewMode == 2 ||
         (state.taskbarViewMode == 0 && state.embeddedResourceMonitor);
@@ -163,6 +168,8 @@ void SettingsSections::createTaskbarModeRows() {
     if (auto* row = findRow(kIdDockResourceCpuFrequency))
         row->enabled = resourceExtrasEnabled;
     if (auto* row = findRow(kIdDockResourceSmallFont))
+        row->enabled = resourceExtrasEnabled;
+    if (auto* row = findRow(kIdDockResourceHideLabels))
         row->enabled = resourceExtrasEnabled;
 }
 

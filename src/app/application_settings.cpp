@@ -268,6 +268,7 @@ void App::applyDockResourceVisibility() {
     visibility.gpuUsage = settings_.dockResourceGpuUsage_;
     visibility.cpuFrequency = settings_.dockResourceCpuFrequency_;
     visibility.smallFont = settings_.dockResourceSmallFont_;
+    visibility.hideLabels = settings_.dockResourceHideLabels_;
     visibility.placement = settings_.dockResourcePlacement_;
     publishTaskbarAppearance();
 }
@@ -306,6 +307,13 @@ void App::applyDockResourceSmallFont(bool on) {
     settings_.dockResourceSmallFont_ = on;
     applyDockResourceVisibility();
     logSettingBool(L"dock-resource-small-font", on);
+    saveSettings();
+}
+
+void App::applyDockResourceHideLabels(bool on) {
+    settings_.dockResourceHideLabels_ = on;
+    applyDockResourceVisibility();
+    logSettingBool(L"dock-resource-hide-labels", on);
     saveSettings();
 }
 
@@ -1289,6 +1297,7 @@ SettingsState App::currentSettingsState() const {
     st.dockResourceUpload = settings_.dockResourceUpload_;
     st.dockResourceCpuFrequency = settings_.dockResourceCpuFrequency_;
     st.dockResourceSmallFont = settings_.dockResourceSmallFont_;
+    st.dockResourceHideLabels = settings_.dockResourceHideLabels_;
     st.dockResourcePlacement = settings_.dockResourcePlacement_ == ResourcePlacement::Start ? 0 : 1;
     st.songInfoVisible = view.songInfoVisible;
     st.albumCoverVisible = settings_.albumCoverVisible_;
@@ -1422,6 +1431,7 @@ SettingsActions App::buildSettingsActions() {
     act.onDockResourceUpload = [this](bool on) { applyDockResourceNetwork(false, on); };
     act.onDockResourceCpuFrequency = [this](bool on) { applyDockResourceCpuFrequency(on); };
     act.onDockResourceSmallFont = [this](bool on) { applyDockResourceSmallFont(on); };
+    act.onDockResourceHideLabels = [this](bool on) { applyDockResourceHideLabels(on); };
     act.onDockResourcePlacement = [this](int placement) { applyDockResourcePlacement(placement); };
     act.onSpectrum = [this](bool on) { applySpectrumOn(on); };
     act.onSpectrumStyle = [this](int style) { applySpectrumStyle(style); };

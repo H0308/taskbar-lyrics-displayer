@@ -369,6 +369,10 @@ void SettingsSections::syncTaskbarModeRows(const SettingsState& s) {
         row->checked = s.dockResourceSmallFont;
         row->enabled = resourceExtrasEnabled;
     }
+    if (auto* row = findRow(kIdDockResourceHideLabels)) {
+        row->checked = s.dockResourceHideLabels;
+        row->enabled = resourceExtrasEnabled;
+    }
     settings_ui::updateSpectrumRows(rows[kSpectrumPage], s);
 }
 

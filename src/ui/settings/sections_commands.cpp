@@ -420,6 +420,12 @@ void SettingsSections::onCommand(int id, int option) {
         if (actions.onDockResourceSmallFont)
             actions.onDockResourceSmallFont(row->checked);
         break;
+    case kIdDockResourceHideLabels:
+        row->checked = !row->checked;
+        state.dockResourceHideLabels = row->checked;
+        if (actions.onDockResourceHideLabels)
+            actions.onDockResourceHideLabels(row->checked);
+        break;
     case kIdDockResourceDownload:
         row->checked = !row->checked;
         state.dockResourceDownload = row->checked;

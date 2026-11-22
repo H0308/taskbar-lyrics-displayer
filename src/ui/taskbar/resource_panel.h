@@ -15,6 +15,8 @@ public:
     const DockResourceVisibility& visibility() const { return dockResourceVisibility_; }
     void setVisibility(const DockResourceVisibility& value) {
         dockResourceVisibility_ = value;
+        if (!value.hideLabels)
+            clearTransientLabels();
         resetPage();
     }
     void setLayout(bool compact, bool vertical) {
@@ -25,6 +27,10 @@ public:
         vertical_ = vertical;
     }
     void resetPage() { dockResourcePage_ = 0; }
+    void triggerTransientLabels(ULONGLONG now);
+    void clearTransientLabels();
+    bool transientLabelsFading(ULONGLONG now, bool animate) const;
+    bool tickTransientLabels(ULONGLONG now, bool animate);
     void start();
     void stop();
     bool refresh();
@@ -45,8 +51,12 @@ private:
         const wchar_t* label;
         const std::wstring& value;
     };
+    struct DockResourceCell {
+        std::wstring value;
+        std::wstring label;
+    };
     struct DockResourceRow {
-        std::wstring left, right;
+        DockResourceCell left, right;
     };
     struct ColumnMetrics {
         std::vector<std::array<float, 2>> pageColumnWidths;
@@ -85,4 +95,7 @@ private:
     float verticalLineHeight_ = 0.0f;
     bool compact_ = false;
     bool vertical_ = false;
+    bool transientLabelActive_ = false;
+    ULONGLONG transientLabelStartMs_ = 0;
+    float transientLabelAlpha_ = 0.0f;
 };
