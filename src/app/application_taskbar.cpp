@@ -399,8 +399,8 @@ void App::configureTaskbarHostCallbacks(TaskbarHost* host, bool primary) {
                     onTaskbarPlacementStatus(status);
             });
     }
-    host->setControlCallback([this](MediaControl c, uint64_t sessionGeneration) {
-        onControl(c, sessionGeneration);
+    host->setControlCallback([this](MediaControl c, uint64_t sessionGeneration, int64_t positionMs) {
+        onControl(c, sessionGeneration, positionMs);
     });
     host->setImmersiveExitCallback([this] { applyTaskbarViewMode(0); });
     host->setDockQuickAppsCallback([this](POINT pt) { showDockQuickApps(pt); });

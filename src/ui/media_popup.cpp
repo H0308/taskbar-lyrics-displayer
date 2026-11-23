@@ -151,7 +151,7 @@ struct MediaPopup::Impl {
     bool hoverCopy = false;
     bool pressedCopy = false;
     bool copySucceeded = false;
-    std::function<void(MediaControl, uint64_t)> onControl;
+    std::function<void(MediaControl, uint64_t, int64_t)> onControl;
     std::function<void(const std::wstring&)> onSourceOpen;
     std::function<void(const std::wstring&)> onIdleAppOpen;
     std::function<void(const IdleTaskInfo&)> onIdleTaskOpen;
@@ -2240,6 +2240,15 @@ struct MediaPopup::Impl {
         }
     }
 
+    bool hitProgress(float x, float y) const {
+        const auto& track = mediaLayout_.track;
+        const float localY = y - cardOriginDip;
+        return available && media.canSeek && media.durationMs > 0 &&
+               currentPage() == PopupPage::Media && !categoryTransition.active() &&
+               track.right > track.left && x >= track.left && x <= track.right &&
+               localY >= track.top - 5.0f && localY <= track.bottom + 5.0f;
+    }
+
     int hitButton(float x, float y) const {
         if (categoryTransition.active())
             return -1;
@@ -2866,7 +2875,8 @@ struct MediaPopup::Impl {
             if (LOWORD(lp) == HTCLIENT) {
                 POINT point{};
                 if (GetCursorPos(&point) && ScreenToClient(hwnd, &point) &&
-                    (hitSource(clientDipX(point.x), clientDipY(point.y)) ||
+                    (hitProgress(clientDipX(point.x), clientDipY(point.y)) ||
+                     hitSource(clientDipX(point.x), clientDipY(point.y)) ||
                      hitVolumeIcon(clientDipX(point.x), clientDipY(point.y)) ||
                      hitVolumeSlider(clientDipX(point.x), clientDipY(point.y)) ||
                      hitPageArrow(clientDipX(point.x), clientDipY(point.y)) ||
@@ -3011,6 +3021,13 @@ struct MediaPopup::Impl {
                 pressedVolume = true;
                 SetCapture(hwnd);
                 renderOrDefer();
+                return 0;
+            }
+            if (onControl && hitProgress(x, y)) {
+                const auto& track = mediaLayout_.track;
+                const double fraction = static_cast<double>(x - track.left) / (track.right - track.left);
+                onControl(MediaControl::Seek, media.sessionGeneration,
+                          static_cast<int64_t>(fraction * media.durationMs));
                 return 0;
             }
             pressedSource = hitSource(x, y);
@@ -3161,7 +3178,7 @@ struct MediaPopup::Impl {
                 onSourceOpen(sourceId);
             } else if (pressed >= 0 && pressed == button && onControl &&
                        pressedControlSession == media.sessionGeneration) {
-                onControl(static_cast<MediaControl>(pressed), pressedControlSession);
+                onControl(static_cast<MediaControl>(pressed), pressedControlSession, 0);
             }
             return 0;
         }
@@ -3424,7 +3441,7 @@ void MediaPopup::destroy() {
     });
 }
 
-void MediaPopup::setControlCallback(std::function<void(MediaControl, uint64_t)> cb) {
+void MediaPopup::setControlCallback(std::function<void(MediaControl, uint64_t, int64_t)> cb) {
     enqueue([=, this]() mutable {
         impl_->onControl = std::move(cb);
     });
@@ -3628,7 +3645,7 @@ void MediaPopup::setMedia(const OverlayMediaInfo& info, bool available,
                              info.durationMs != impl_->media.durationMs ||
                              info.canPrev != impl_->media.canPrev ||
                              info.canPlayPause != impl_->media.canPlayPause ||
-                             info.canNext != impl_->media.canNext ||
+                             info.canSeek != impl_->media.canSeek || info.canNext != impl_->media.canNext ||
                              info.canRepeat != impl_->media.canRepeat ||
                              info.repeatMode != impl_->media.repeatMode ||
                              info.playing != impl_->media.playing;

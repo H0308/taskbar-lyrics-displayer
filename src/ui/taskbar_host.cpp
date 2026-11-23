@@ -507,7 +507,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
     // 交互
     std::function<void()> tick;
-    std::function<void(MediaControl, uint64_t)> onControl;
+    std::function<void(MediaControl, uint64_t, int64_t)> onControl;
     std::function<void(const std::wstring&)> onSourceOpen;
     TaskbarTooltip hoverTip_;
     std::wstring pressedCoverSource_;
@@ -966,7 +966,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const bool canSwitchSourceChanged = info.canSwitchSource != media.canSwitchSource;
         bool controlsChanged = info.canPrev != media.canPrev ||
                                info.canPlayPause != media.canPlayPause ||
-                               info.canNext != media.canNext ||
+                               info.canSeek != media.canSeek || info.canNext != media.canNext ||
                                canRepeatChanged || canSwitchSourceChanged ||
                                info.repeatMode != media.repeatMode;
         bool playingChanged = info.playing != media.playing;
@@ -5239,7 +5239,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             if (index == kImmersiveControlRepeat)
                 armRepeatHint(SmtcSnapshot::nextPlayMode(media.repeatMode));
             if (onControl)
-                onControl(static_cast<MediaControl>(index), media.sessionGeneration);
+                onControl(static_cast<MediaControl>(index), media.sessionGeneration, 0);
             break;
         case kImmersiveControlVolume:
             if (appVolume_.available) {
@@ -7952,7 +7952,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 const auto action =
                     steps > 0 ? MediaControl::PreviousSource : MediaControl::NextSource;
                 for (int i = 0; i < std::abs(steps); ++i)
-                    onControl(action, media.sessionGeneration);
+                    onControl(action, media.sessionGeneration, 0);
             } else {
                 sourceWheelRemainder_ = 0;
             }
@@ -8041,7 +8041,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             const int btn = hitInlineControl(mx, my);
             if (sourceControlPressed || btn == kInlineSourceControl) {
                 if (sourceControlPressed && hadPress && btn == kInlineSourceControl && onControl)
-                    onControl(MediaControl::NextSource, media.sessionGeneration);
+                    onControl(MediaControl::NextSource, media.sessionGeneration, 0);
                 return 0;
             }
             if (btn >= 0 && btn <= kImmersiveControlRepeat &&
@@ -8051,7 +8051,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             if (btn == static_cast<int>(MediaControl::Repeat))
                 armRepeatHint(SmtcSnapshot::nextPlayMode(media.repeatMode));
             if (btn >= 0 && btn != kImmersiveControlVolume && onControl)
-                onControl(static_cast<MediaControl>(btn), media.sessionGeneration);
+                onControl(static_cast<MediaControl>(btn), media.sessionGeneration, 0);
             // 卡片的当前页面自己判断是否为点击展开；这样无播放时的每日一言卡片
             // 可以独立于媒体控件样式使用点击展开。
             else if (!pointInPinnedControlsZone(mx, my) && !hitVolumeButton(mx, my) &&
@@ -8263,7 +8263,7 @@ void TaskbarHost::applySpectrumPatch(const SpectrumPatch& patch) {
     });
 }
 
-void TaskbarHost::setControlCallback(std::function<void(MediaControl, uint64_t)> cb) {
+void TaskbarHost::setControlCallback(std::function<void(MediaControl, uint64_t, int64_t)> cb) {
     cb = callbacks_->callback(std::move(cb));
     thread_->invoke([=, this]() mutable {
         impl_->onControl = cb;

@@ -60,6 +60,7 @@ OverlayMediaInfo makeMediaInfo(const SmtcSnapshot& snap, const PlaybackState& pl
     mi.durationMs = !snap.timelineStale && snap.durationMs > 0 ? snap.durationMs : 0;
     mi.canPrev = snap.canPrev;
     mi.canPlayPause = snap.canPlayPause;
+    mi.canSeek = snap.canSeek && !snap.timelineStale;
     mi.canNext = snap.canNext;
     mi.canRepeat = snap.canRepeat;
     mi.canSwitchSource = snap.canSwitchSource;

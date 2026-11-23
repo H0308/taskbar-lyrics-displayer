@@ -154,10 +154,11 @@ bool shuffleFor(int mode) { return mode == 3; }
 } // namespace
 
 struct SmtcMonitor::Impl {
-    enum class ControlAction { PlayPause, SkipNext, SkipPrevious, CycleRepeat };
+    enum class ControlAction { PlayPause, SkipNext, SkipPrevious, CycleRepeat, Seek };
     struct ControlRequest {
         ControlAction action;
         uint64_t sessionGeneration;
+        int64_t positionMs = 0;
     };
 
     struct RefreshSignal {
@@ -750,7 +751,7 @@ struct SmtcMonitor::Impl {
                 playbackChanged = snap.status != previous.status ||
                                   snap.canPrev != previous.canPrev ||
                                   snap.canPlayPause != previous.canPlayPause ||
-                                  snap.canNext != previous.canNext ||
+                                  snap.canSeek != previous.canSeek || snap.canNext != previous.canNext ||
                                   snap.canRepeat != previous.canRepeat;
             }
             previous = snap;
@@ -938,7 +939,7 @@ struct SmtcMonitor::Impl {
                       next.positionMs != snap.positionMs || next.anchorUtcMs != snap.anchorUtcMs ||
                       next.timelineStale != snap.timelineStale ||
                       next.thumbnail != snap.thumbnail || next.canPrev != snap.canPrev ||
-                      next.canPlayPause != snap.canPlayPause || next.canNext != snap.canNext ||
+                      next.canPlayPause != snap.canPlayPause || next.canSeek != snap.canSeek || next.canNext != snap.canNext ||
                       next.canRepeat != snap.canRepeat ||
                       next.repeatMode != snap.repeatMode || next.shuffle != snap.shuffle;
             if (next.repeatMode != snap.repeatMode || next.shuffle != snap.shuffle)
@@ -1351,6 +1352,20 @@ struct SmtcMonitor::Impl {
             snapshotCopy = snap;
         }
         switch (request.action) {
+        case ControlAction::Seek:
+            if (snapshotCopy.canSeek && !snapshotCopy.timelineStale && snapshotCopy.durationMs > 0) {
+                const auto ms = std::clamp(request.positionMs, int64_t{0}, snapshotCopy.durationMs);
+                startControlOperation(L"seek", L"TryChangePlaybackPositionAsync", current, snapshotCopy,
+                    [current, ms] {
+                        const auto timeline = current.GetTimelineProperties();
+                        auto ticks = ms * 10000;
+                        if (timeline && timeline.MaxSeekTime() > timeline.MinSeekTime())
+                            ticks = std::clamp<int64_t>(ticks, timeline.MinSeekTime().count(),
+                                                       timeline.MaxSeekTime().count());
+                        return current.TryChangePlaybackPositionAsync(ticks);
+                    });
+            }
+            break;
         case ControlAction::PlayPause:
             startControlOperation(L"play-pause", L"TryTogglePlayPauseAsync", current, snapshotCopy,
                                   [current] { return current.TryTogglePlayPauseAsync(); });
@@ -1615,6 +1630,10 @@ SmtcSnapshot SmtcMonitor::snapshot() const {
 
 void SmtcMonitor::playPause(uint64_t sessionGeneration) {
     Impl::requestControl(impl_->refreshSignal, {Impl::ControlAction::PlayPause, sessionGeneration});
+}
+
+void SmtcMonitor::seek(uint64_t sessionGeneration, int64_t positionMs) {
+    Impl::requestControl(impl_->refreshSignal, {Impl::ControlAction::Seek, sessionGeneration, positionMs});
 }
 
 void SmtcMonitor::skipNext(uint64_t sessionGeneration) {

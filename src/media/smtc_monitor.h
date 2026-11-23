@@ -38,6 +38,7 @@ struct SmtcSnapshot {
     bool canPrev = false;
     bool canPlayPause = false;
     bool canNext = false;
+    bool canSeek = false;
     bool canRepeat = false;
     bool canSwitchSource = false;
     // 原始 SMTC 循环维度：0 关闭、1 单曲循环、2 列表循环（AutoRepeatMode）。
@@ -96,6 +97,7 @@ public:
 
     // 播放控制（无会话或调用失败时不改变 UI，并记录诊断日志）
     void playPause(uint64_t sessionGeneration);
+    void seek(uint64_t sessionGeneration, int64_t positionMs);
     void skipNext(uint64_t sessionGeneration);
     void skipPrevious(uint64_t sessionGeneration);
     // 切换播放模式：顺序播放 → 单曲循环 → 随机播放 → 顺序播放（由播放器通过 SMTC 执行）。
