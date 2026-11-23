@@ -545,8 +545,8 @@ void App::applyHoverControlStyle(int style) {
     if (taskbarExpandedConfigured() && !taskbarVertical_)
         return;
     settings_.hoverControlStyle_ =
-        style == 1 ? HoverControlStyle::Popup : HoverControlStyle::Inline;
-    logSettingInt(L"hover-control-style", style == 1 ? 1 : 0);
+        hoverControlStyleFromInt(style);
+    logSettingInt(L"hover-control-style", static_cast<int>(settings_.hoverControlStyle_));
     commitAppearanceSettings();
 }
 
@@ -1325,7 +1325,7 @@ SettingsState App::currentSettingsState() const {
     st.fullscreenRenderModeMonitorLabel = fullscreenRenderModeMonitorLabel();
     st.taskbarContextMenu = settings_.taskbarContextMenuEnabled_;
     st.hoverControls = settings_.hoverPlaybackControls_;
-    st.hoverControlStyle = settings_.hoverControlStyle_ == HoverControlStyle::Popup ? 1 : 0;
+    st.hoverControlStyle = static_cast<int>(settings_.hoverControlStyle_);
     st.inlineControlDisplayMode =
         settings_.inlineControlDisplayMode_ == InlineControlDisplayMode::Always ? 1 : 0;
     st.floatingCardTrigger = settings_.floatingCardTrigger_ == MediaPopupTrigger::Click ? 1 : 0;

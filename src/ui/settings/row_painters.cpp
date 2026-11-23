@@ -284,7 +284,7 @@ void drawIdleQuoteBackgroundRadio(fluent::FluentDialogSurface::Painter& painter,
     }
 }
 
-void drawHoverControlStyleRadio(fluent::FluentDialogSurface::Painter& painter,
+void drawHoverControlStyleOptions(fluent::FluentDialogSurface::Painter& painter,
                                 const RowPaintContext& ctx, Row& row) {
     const auto& p = painter.colors();
     auto* titleFormat = painter.textFormat(fluent::font_sizes::settings::option, 500, true, true);
@@ -302,7 +302,7 @@ void drawHoverControlStyleRadio(fluent::FluentDialogSurface::Painter& painter,
                                              row.controlRect.bottom);
         row.optionRects.push_back(card);
 
-        const bool selected = static_cast<int>(i) == row.selected;
+        const bool selected = row.selected == static_cast<int>(HoverControlStyle::Both) || static_cast<int>(i) == row.selected;
         const bool hovered = row.enabled && ctx.hoverId == row.id &&
                              ctx.hoverOption == static_cast<int>(i);
         const bool pressed = row.enabled && ctx.pressedId == row.id &&
@@ -315,7 +315,18 @@ void drawHoverControlStyleRadio(fluent::FluentDialogSurface::Painter& painter,
         ctx.artwork.drawHoverControlStyleArtwork(painter, artwork, i == 1, row.enabled);
 
         // 示意图先画，单选框最后画，确保它始终位于卡片内容之上。
-        drawRadioIndicator(painter, row, card, selected, hovered, pressed, 16.0f, 14.0f);
+        const auto box = D2D1::RectF(card.right - 23.0f, card.top + 7.0f,
+                                     card.right - 9.0f, card.top + 21.0f);
+        if (selected) {
+            painter.fillRoundRect(row.enabled ? p.accent : p.disabled, box, 3.0f);
+            if (auto* brush = painter.brush(p.textOnAccent)) {
+                const auto middle = D2D1::Point2F(box.left + 6, box.top + 10);
+                painter.target()->DrawLine(D2D1::Point2F(box.left + 3, box.top + 7), middle, brush, 1.5f);
+                painter.target()->DrawLine(middle, D2D1::Point2F(box.left + 11, box.top + 4), brush, 1.5f);
+            }
+        } else {
+            painter.strokeRoundRect(row.enabled ? p.textSecondary : p.disabled, box, 1.0f, 3.0f);
+        }
 
         painter.drawText(row.options[i], titleFormat,
                          D2D1::RectF(card.left + 10.0f, card.bottom - 24.0f,
@@ -508,7 +519,7 @@ void drawRadio(fluent::FluentDialogSurface::Painter& painter, const RowPaintCont
         return;
     }
     if (row.id == kIdHoverControlStyle) {
-        drawHoverControlStyleRadio(painter, ctx, row);
+        drawHoverControlStyleOptions(painter, ctx, row);
         return;
     }
     if (row.id == kIdSongToastPosition) {

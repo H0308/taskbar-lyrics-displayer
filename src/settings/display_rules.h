@@ -13,7 +13,7 @@ constexpr TaskbarViewMode effectiveTaskbarViewMode(TaskbarViewMode configured,
 constexpr bool canEditInlineControlDisplayMode(TaskbarViewMode effectiveMode, bool vertical,
                                                bool controlsEnabled, HoverControlStyle style) {
     return effectiveMode == TaskbarViewMode::Embedded && !vertical && controlsEnabled &&
-           style == HoverControlStyle::Inline;
+           includesInlineControls(style);
 }
 
 // 运行环境只产生显示限制，不能据此改写持久化配置。

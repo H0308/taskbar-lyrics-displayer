@@ -74,7 +74,7 @@ struct SettingsState {
     std::wstring fullscreenRenderModeMonitorLabel;
     bool taskbarContextMenu = true;
     bool hoverControls = true;
-    int hoverControlStyle = 0; // 0 内嵌控件 1 媒体卡片
+    int hoverControlStyle = 0; // 0 内嵌控件 1 媒体卡片 2 两者同时显示
     int inlineControlDisplayMode = 0; // 0 悬浮显示 1 常驻显示
     int floatingCardTrigger = 0; // 0 悬浮展开 1 点击展开
     int floatingCardBackground = 0; // 0 纯色 1 磨砂玻璃

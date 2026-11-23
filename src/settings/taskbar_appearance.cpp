@@ -23,7 +23,7 @@ TaskbarAppearance resolveTaskbarAppearance(const AppSettings& settings,
     result.controlsOnHover = settings.hoverPlaybackControls_;
     result.hoverControlStyle = minimal ? HoverControlStyle::Inline : settings.hoverControlStyle_;
     result.inlineControlDisplayMode =
-        vertical || (minimal && settings.hoverControlStyle_ != HoverControlStyle::Inline)
+        vertical || (minimal && !includesInlineControls(settings.hoverControlStyle_))
             ? InlineControlDisplayMode::Hover
             : settings.inlineControlDisplayMode_;
     result.floatingCardTrigger = settings.floatingCardTrigger_;

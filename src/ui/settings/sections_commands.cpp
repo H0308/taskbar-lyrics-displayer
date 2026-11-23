@@ -472,7 +472,7 @@ void SettingsSections::onCommand(int id, int option) {
         updateFloatingCardRowsEnabled();
         break;
     case kIdHoverControlStyle:
-        state.hoverControlStyle = std::clamp(row->selected, 0, 1);
+        state.hoverControlStyle = row->selected;
         if (actions.onHoverControlStyle)
             actions.onHoverControlStyle(row->selected);
         updateMediaControlRowsEnabled();

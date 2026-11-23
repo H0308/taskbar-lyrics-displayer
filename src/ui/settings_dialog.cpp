@@ -2173,7 +2173,9 @@ struct SettingsDialog::Impl {
                         if (pressedOptionValue >= 0 && pressedOptionValue == option &&
                             pressedOptionValue != row->selected &&
                             isOptionEnabled(*row, static_cast<size_t>(pressedOptionValue))) {
-                            row->selected = pressedOptionValue;
+                            row->selected = row->id == kIdHoverControlStyle
+                                ? toggleHoverControlOption(row->selected, pressedOptionValue)
+                                : pressedOptionValue;
                             onCommand(pressed);
                         }
                     } else if (row->kind == ControlKind::AppList) {
@@ -2299,6 +2301,9 @@ struct SettingsDialog::Impl {
                     const int direction = wp == VK_LEFT ? -1 : 1;
                     row->value = std::clamp(row->value + direction, row->minValue,
                                             row->maxValue);
+                    onCommand(row->id);
+                } else if (row && row->enabled && row->id == kIdHoverControlStyle) {
+                    row->selected = toggleHoverControlOption(row->selected, wp == VK_LEFT ? 0 : 1);
                     onCommand(row->id);
                 } else if (row && (row->kind == ControlKind::Radio ||
                                    row->kind == ControlKind::ModeGrid) &&

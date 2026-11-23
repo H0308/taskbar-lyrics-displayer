@@ -33,9 +33,29 @@ enum class LyricAlignment {
 };
 
 enum class HoverControlStyle {
-    Inline,
-    Popup,
+    Inline = 0,
+    Popup = 1,
+    Both = 2,
 };
+
+constexpr HoverControlStyle hoverControlStyleFromInt(int value) {
+    return value == 2 ? HoverControlStyle::Both :
+           value == 1 ? HoverControlStyle::Popup : HoverControlStyle::Inline;
+}
+
+constexpr bool includesInlineControls(HoverControlStyle style) {
+    return style != HoverControlStyle::Popup;
+}
+
+constexpr bool includesMediaCard(HoverControlStyle style) {
+    return style != HoverControlStyle::Inline;
+}
+
+constexpr int toggleHoverControlOption(int value, int option) {
+    if (value == static_cast<int>(HoverControlStyle::Both))
+        return option == 0 ? 1 : 0;
+    return option == value ? value : static_cast<int>(HoverControlStyle::Both);
+}
 
 // 内嵌播放控件的显示方式：鼠标悬浮时替换歌词，或常驻在歌曲信息与歌词之间。
 enum class InlineControlDisplayMode {

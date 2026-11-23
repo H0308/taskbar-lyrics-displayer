@@ -69,6 +69,26 @@ TEST_CASE("display_rules.constraints_and_lyric_conflict_resolution") {
     EXPECT_NE(settings.lyricEffects_ & lyricEffectBit(LyricEffect::Stardust), 0u);
 }
 
+TEST_CASE("media_controls.combined_style_restores_and_roundtrips") {
+    EXPECT_EQ(toggleHoverControlOption(0, 1), 2);
+    EXPECT_EQ(toggleHoverControlOption(1, 0), 2);
+    EXPECT_EQ(toggleHoverControlOption(2, 0), 1);
+    EXPECT_EQ(toggleHoverControlOption(2, 1), 0);
+    AppSettings settings;
+    settings.hoverControlStyle_ = HoverControlStyle::Both;
+    AppSettings loaded;
+    bool migrate = false;
+    loaded.readJson(settings.toJson(), false, migrate);
+    EXPECT_EQ(loaded.hoverControlStyle_, HoverControlStyle::Both);
+    AppearanceContext context{};
+    context.renderMode = RenderMode::Minimal;
+    EXPECT_EQ(resolveTaskbarAppearance(loaded, context).hoverControlStyle, HoverControlStyle::Inline);
+    context.renderMode = RenderMode::Normal;
+    const auto style = resolveTaskbarAppearance(loaded, context).hoverControlStyle;
+    EXPECT_TRUE(includesInlineControls(style));
+    EXPECT_TRUE(includesMediaCard(style));
+}
+
 TEST_CASE("taskbar_appearance.temporary_restrictions_preserve_user_preferences") {
     AppSettings settings;
     settings.secondaryLyricEnabled_ = true;

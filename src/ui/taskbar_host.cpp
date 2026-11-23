@@ -2194,7 +2194,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return false;
         if (scene_ == DisplayScene::Idle)
             return isSessionVisible() && idle.hasContent();
-        if (hoverControlStyle_ == HoverControlStyle::Popup)
+        if (includesMediaCard(hoverControlStyle_))
             return controlsOnHover_;
         return isSessionVisible() && idle.hasContent();
     }
@@ -2211,14 +2211,14 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             mediaPopup.beginPresentationUpdate();
             mediaPopup.setIdleContent(idle, available);
             mediaPopup.setPresentationMode(scene_, available,
-                                           hoverControlStyle_ == HoverControlStyle::Inline);
+                                           !includesMediaCard(hoverControlStyle_));
             mediaPopup.setMedia(media, available);
             mediaPopup.endPresentationUpdate();
         } else if (enabled) {
             const bool available = mediaPopupAvailable(isSessionVisible());
             mediaPopup.beginPresentationUpdate();
             mediaPopup.setPresentationMode(scene_, available,
-                                           hoverControlStyle_ == HoverControlStyle::Inline);
+                                           !includesMediaCard(hoverControlStyle_));
             mediaPopup.endPresentationUpdate();
         }
         mediaPopup.setTriggerOnHover(floatingCardTrigger_ == MediaPopupTrigger::Hover);
@@ -2799,7 +2799,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             updateVinylRotation();
             mediaPopup.setMedia(media, mediaPopupAvailable(isSessionVisible()));
             mediaPopup.setPresentationMode(scene_, mediaPopupAvailable(isSessionVisible()),
-                                           hoverControlStyle_ == HoverControlStyle::Inline);
+                                           !includesMediaCard(hoverControlStyle_));
         }
         mediaPopup.endPresentationUpdate();
         if (playingChanged) {
@@ -2859,7 +2859,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             player_source::resolvePlayerType(frame.media.sourceAppUserModelId);
         const bool inlineControlsShown =
             !pinnedInlineControlsLayoutForScene(scene_, lastLogicalPxW_, lastLogicalPxH_).active() &&
-            mouseOver_ && controlsOnHover_ && hoverControlStyle_ == HoverControlStyle::Inline &&
+            mouseOver_ && controlsOnHover_ && includesInlineControls(hoverControlStyle_) &&
             !isExpandedView();
         const bool loadedLyricsFromPrelude = !trackChanged && lyricsChanged && sourceLines_.empty() &&
             !inlineControlsShown &&
@@ -2911,7 +2911,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         // 先同步完整媒体数据，再建立页面转场层，避免 Idle → Media 时目标层
         // 先绘制旧歌曲、随后才收到本帧最新标题/歌手而在转场结束时跳变。
         mediaPopup.setPresentationMode(frame.scene, popupAvailable,
-                                       hoverControlStyle_ == HoverControlStyle::Inline);
+                                       !includesMediaCard(hoverControlStyle_));
         mediaPopup.setProgress(frame.actualPositionMs);
         mediaPopup.endPresentationUpdate();
 
@@ -3427,7 +3427,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             const auto text = D2D1::RectF(lyric.x, 0.0f, lyric.x + lyric.w, h);
             const auto pinned = pinnedInlineControlsLayoutForScene(scene_, pxW, pxH);
             const bool showControls = !pinned.active() && mouseOver_ && controlsOnHover_ &&
-                                      hoverControlStyle_ == HoverControlStyle::Inline &&
+                                      includesInlineControls(hoverControlStyle_) &&
                                       !idleScene && !isExpandedView() &&
                                       !(transition_.kind() == LyricTransitionKind::Scene &&
                                         isLyricTransitionActive() &&
@@ -4406,14 +4406,14 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             resourceMonitoringEnabled() ? resourcePanel_.verticalHeight(widthDip) : 0.0f;
         return taskbar_detail::verticalLayout(
             widthDip, dip(height), scene_, albumCoverVisible_,
-            hovered && controlsOnHover_ && hoverControlStyle_ == HoverControlStyle::Inline,
+            hovered && controlsOnHover_ && includesInlineControls(hoverControlStyle_),
             media.canSwitchSource, resourceHeight, songInfoVisible_,
             resourcePanel_.visibility().placement, verticalResourceOnly());
     }
 
     bool pinnedInlineControlsConfigured() const {
         return !isExpandedView() && !isVerticalTaskbar() && controlsOnHover_ &&
-               hoverControlStyle_ == HoverControlStyle::Inline &&
+               includesInlineControls(hoverControlStyle_) &&
                inlineControlDisplayMode_ == InlineControlDisplayMode::Always;
     }
 
@@ -4567,7 +4567,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (isExpandedView() || isVerticalTaskbar() || scene_ == DisplayScene::Idle ||
             scene_ == DisplayScene::NoPlayback)
             return false;
-        if (!controlsOnHover_ || !mouseOver_ || hoverControlStyle_ != HoverControlStyle::Inline)
+        if (!controlsOnHover_ || !mouseOver_ || !includesInlineControls(hoverControlStyle_))
             return false;
         int pxW = 0;
         int pxH = 0;
@@ -5294,7 +5294,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return -1;
         if (!isVerticalTaskbar() && pinnedInlineControlsLayout().active())
             return hitPinnedInlineControl(x, y);
-        if (!controlsOnHover_ || !mouseOver_ || hoverControlStyle_ != HoverControlStyle::Inline)
+        if (!controlsOnHover_ || !mouseOver_ || !includesInlineControls(hoverControlStyle_))
             return -1;
         float logicalX = 0.0f;
         float logicalY = 0.0f;
@@ -5339,7 +5339,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (!media.canSwitchSource || !onControl || isExpandedView() || drag_.pressed() ||
             scene_ == DisplayScene::Idle || scene_ == DisplayScene::NoPlayback)
             return false;
-        const bool cardStyle = hoverControlStyle_ == HoverControlStyle::Popup &&
+        const bool cardStyle = includesMediaCard(hoverControlStyle_) &&
                                mediaPopupEnabledForScene();
         const auto pinned = pinnedInlineControlsLayout();
         if (!cardStyle && !pinned.active())
@@ -6966,7 +6966,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             pinnedInlineControlsLayoutForScene(scene_, logicalPxW, logicalPxH);
         bool showControls =
             !pinnedControls.active() && mouseOver_ && controlsOnHover_ &&
-            hoverControlStyle_ == HoverControlStyle::Inline && !idleScene && !isExpandedView() &&
+            includesInlineControls(hoverControlStyle_) && !idleScene && !isExpandedView() &&
             !(transition_.kind() == LyricTransitionKind::Scene && isLyricTransitionActive() &&
               isTaskbarSceneTransition(sceneTransition_.outgoingScene(), scene_));
         const bool backgroundSpectrum = !idleScene && spectrumVisible_ && backgroundWaveEnabled();
@@ -7329,7 +7329,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         input.songInfoVisible = songInfoVisible_;
         input.showInlineControls =
             !pinnedInlineControlsLayoutForScene(scene_, width, height).active() && mouseOver_ &&
-            controlsOnHover_ && hoverControlStyle_ == HoverControlStyle::Inline;
+            controlsOnHover_ && includesInlineControls(hoverControlStyle_);
         input.titleWidth = titleWidth_;
         input.artistWidth = artistWidth_;
         input.lyricWidth = lyricWidth_;
@@ -7506,7 +7506,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         mediaPopup.setIdleContent(idle, popupAvailable);
         mediaPopup.setMedia(media, popupAvailable);
         mediaPopup.setPresentationMode(scene_, popupAvailable,
-                                       hoverControlStyle_ == HoverControlStyle::Inline);
+                                       !includesMediaCard(hoverControlStyle_));
         mediaPopup.endPresentationUpdate();
         syncMediaPopupEnabled();
         if (isMinimalMode()) {

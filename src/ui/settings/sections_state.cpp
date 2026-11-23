@@ -25,7 +25,7 @@ void SettingsSections::updateFloatingCardRowsEnabled() {
     const auto* controls = findRow(kIdHoverControls);
     const auto* style = findRow(kIdHoverControlStyle);
     const auto* background = findRow(kIdFloatingCardBackground);
-    const bool mediaCardEnabled = controls && controls->checked && style && style->selected == 1;
+    const bool mediaCardEnabled = controls && controls->checked && style && includesMediaCard(hoverControlStyleFromInt(style->selected));
     const bool cardEnabled =
         !minimalModeActive() && (state.idleTextEnabled || state.quickStartEnabled ||
                                 state.tickTickEnabled || mediaCardEnabled);
@@ -161,7 +161,7 @@ void SettingsSections::updateMediaControlRowsEnabled() {
                                    : std::clamp(state.inlineControlDisplayMode, 0, 1);
         inlineMode->enabled = display_rules::canEditInlineControlDisplayMode(
             effectiveMode, state.verticalTaskbar, controls && controls->checked,
-            state.hoverControlStyle == 0 ? HoverControlStyle::Inline : HoverControlStyle::Popup);
+            hoverControlStyleFromInt(state.hoverControlStyle));
     }
 }
 

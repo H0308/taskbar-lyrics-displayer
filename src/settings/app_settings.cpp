@@ -368,7 +368,7 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
     // 性能模式只对本次运行有效；忽略旧版本可能留下的持久化值，启动始终回到正常模式。
     hoverPlaybackControls_ = j.value("hoverPlaybackControls", true);
     hoverControlStyle_ =
-        j.value("hoverControlStyle", 0) == 1 ? HoverControlStyle::Popup : HoverControlStyle::Inline;
+        hoverControlStyleFromInt(j.value("hoverControlStyle", 0));
     inlineControlDisplayMode_ = j.value("inlineControlDisplayMode", 0) == 1
                                     ? InlineControlDisplayMode::Always
                                     : InlineControlDisplayMode::Hover;
@@ -653,7 +653,7 @@ nlohmann::json AppSettings::toJson() const {
                                                : fullscreenRenderModeMonitorId_);
     // 性能模式不写入配置，重启后由 loadSettings() 恢复正常模式。
     j["hoverPlaybackControls"] = hoverPlaybackControls_;
-    j["hoverControlStyle"] = hoverControlStyle_ == HoverControlStyle::Popup ? 1 : 0;
+    j["hoverControlStyle"] = static_cast<int>(hoverControlStyle_);
     j["inlineControlDisplayMode"] =
         inlineControlDisplayMode_ == InlineControlDisplayMode::Always ? 1 : 0;
     j["floatingCardTrigger"] = floatingCardTrigger_ == MediaPopupTrigger::Click ? 1 : 0;
