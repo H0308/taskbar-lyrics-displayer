@@ -39,6 +39,13 @@ struct SettingsState {
     int taskbarViewMode = 0; // 0 内嵌 1 沉浸 2 AppBar
     bool songTransitionEnabled = true;
     std::wstring taskbarMonitorLabel;
+    bool multiMonitorConnected = false;        // 当前连接了多台显示器
+    bool monitorEnabled = true;                // 当前编辑的显示器是否启用显示
+    bool monitorDisableAllowed = false;        // 是否允许关闭当前编辑的显示器（至少保留一台）
+    bool editingMonitorHasTaskbar = true;      // 当前编辑的显示器是否开启系统任务栏
+    bool editingMonitorVertical = false;       // 当前编辑的显示器是否为竖向任务栏
+    bool anyEmbeddedHostActive = true;         // 是否有任意已启用显示器处于内嵌模式
+    bool anyHorizontalEmbeddedHostActive = true; // 是否有任意已启用显示器处于横向内嵌模式
     bool mediaSessionAlive = false; // 当前是否存在活动媒体会话
     int appBarEdge = 0; // 0 顶部 1 底部
     int immersiveBackgroundBlur = 88;
@@ -142,6 +149,8 @@ struct SettingsActions {
     std::function<void(int)> onTaskbarViewMode;
     std::function<void(bool)> onSongTransitionEnabled;
     std::function<void()> onChooseTaskbarMonitor;
+    std::function<void(bool)> onMonitorEnabled;
+    std::function<void()> onApplyMonitorSettingsToAll;
     std::function<void(int)> onAppBarEdge;
     std::function<void(int)> onImmersiveBackgroundBlur;
     std::function<void(int)> onDockBackgroundBlur;

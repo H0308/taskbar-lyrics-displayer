@@ -258,3 +258,77 @@ TEST_CASE("settings_store.atomic_save_and_error_statuses") {
 
     std::filesystem::remove_all(tempDir, ec);
 }
+
+TEST_CASE("app_settings.per_monitor_profiles_and_appearance_override") {
+    // 1. 旧配置未写入 monitorTaskbarSettings 时，按 taskbarMonitorId_ 推导各屏默认启用态
+    AppSettings legacyPrimaryOnly;
+    legacyPrimaryOnly.taskbarViewMode_ = TaskbarViewMode::Immersive;
+    legacyPrimaryOnly.immersiveBackgroundBlur_ = 72;
+    legacyPrimaryOnly.taskbarMonitorId_.clear();
+    EXPECT_TRUE(legacyPrimaryOnly.monitorTaskbarSettingsFor(L"\\\\.\\DISPLAY1", true).enabled);
+    EXPECT_FALSE(legacyPrimaryOnly.monitorTaskbarSettingsFor(L"\\\\.\\DISPLAY2", false).enabled);
+
+    AppSettings legacyAll = legacyPrimaryOnly;
+    legacyAll.taskbarMonitorId_ = L"all";
+    EXPECT_TRUE(legacyAll.monitorTaskbarSettingsFor(L"\\\\.\\DISPLAY1", true).enabled);
+    EXPECT_TRUE(legacyAll.monitorTaskbarSettingsFor(L"\\\\.\\DISPLAY2", false).enabled);
+
+    // 2. 每显示器独立配置写入、读取与边界校验
+    AppSettings multi;
+    auto& disp1 = multi.ensureMonitorTaskbarSettings(L"\\\\.\\DISPLAY1", true);
+    disp1.enabled = true;
+    disp1.viewMode = TaskbarViewMode::Embedded;
+    disp1.setAnchor(TaskbarAnchorSpec::relative(0.35, TaskbarAnchorEdge::Start));
+    disp1.embeddedResourceMonitor = true;
+    disp1.dockResourcePlacement = ResourcePlacement::Start;
+    disp1.dockResourceGpuUsage = true;
+    multi.syncLegacyTaskbarFieldsFromMonitor(disp1);
+
+    auto& disp2 = multi.ensureMonitorTaskbarSettings(L"\\\\.\\DISPLAY2", false);
+    disp2.enabled = true;
+    disp2.viewMode = TaskbarViewMode::AppBar;
+    disp2.appBarEdge = AppBarEdge::Bottom;
+    disp2.dockBackgroundAdjustment = 1;
+    disp2.dockBackgroundBlur = 55;
+    disp2.dockResourceDownload = false;
+    disp2.dockResourceCpuFrequency = true;
+
+    const nlohmann::json serialized = multi.toJson();
+    AppSettings loaded;
+    bool migrateLog = false;
+    loaded.readJson(serialized, false, migrateLog);
+    EXPECT_EQ(loaded.monitorTaskbarSettings_.size(), 2u);
+
+    const auto loadedDisp1 = loaded.monitorTaskbarSettingsFor(L"\\\\.\\DISPLAY1", true);
+    EXPECT_TRUE(loadedDisp1.enabled);
+    EXPECT_EQ(loadedDisp1.viewMode, TaskbarViewMode::Embedded);
+    EXPECT_EQ(loadedDisp1.taskbarPosition, 2);
+    EXPECT_TRUE(loadedDisp1.embeddedResourceMonitor);
+    EXPECT_EQ(loadedDisp1.dockResourcePlacement, ResourcePlacement::Start);
+    EXPECT_TRUE(loadedDisp1.dockResourceGpuUsage);
+
+    const auto loadedDisp2 = loaded.monitorTaskbarSettingsFor(L"\\\\.\\DISPLAY2", false);
+    EXPECT_TRUE(loadedDisp2.enabled);
+    EXPECT_EQ(loadedDisp2.viewMode, TaskbarViewMode::AppBar);
+    EXPECT_EQ(loadedDisp2.appBarEdge, AppBarEdge::Bottom);
+    EXPECT_EQ(loadedDisp2.dockBackgroundAdjustment, 1);
+    EXPECT_EQ(loadedDisp2.dockBackgroundBlur, 55);
+    EXPECT_FALSE(loadedDisp2.dockResourceDownload);
+    EXPECT_TRUE(loadedDisp2.dockResourceCpuFrequency);
+
+    // 3. resolveTaskbarAppearance 按显示器独立覆盖背景与资源监视
+    AppearanceContext ctx1;
+    ctx1.monitorSettings = &loadedDisp1;
+    const auto app1 = resolveTaskbarAppearance(loaded, ctx1);
+    EXPECT_TRUE(app1.dockResourceVisibility.embeddedEnabled);
+    EXPECT_EQ(app1.dockResourceVisibility.placement, ResourcePlacement::Start);
+    EXPECT_TRUE(app1.dockResourceVisibility.gpuUsage);
+
+    AppearanceContext ctx2;
+    ctx2.monitorSettings = &loadedDisp2;
+    const auto app2 = resolveTaskbarAppearance(loaded, ctx2);
+    EXPECT_EQ(app2.dockBackgroundAdjustment, 1);
+    EXPECT_EQ(app2.dockBackgroundBlur, 55);
+    EXPECT_FALSE(app2.dockResourceVisibility.download);
+    EXPECT_TRUE(app2.dockResourceVisibility.cpuFrequency);
+}

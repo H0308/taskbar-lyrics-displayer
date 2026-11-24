@@ -351,7 +351,8 @@ void SettingsSections::onCommand(int id, int option) {
             actions.onTaskbarContextMenu(row->checked);
         break;
     case kIdTaskbarViewMode:
-        if (row->selected == 1 && state.verticalTaskbar) {
+        if ((row->selected == 0 && !state.editingMonitorHasTaskbar) ||
+            (row->selected == 1 && (!state.editingMonitorHasTaskbar || state.editingMonitorVertical))) {
             row->selected = std::clamp(state.taskbarViewMode, 0, 2);
             break;
         }
@@ -368,8 +369,25 @@ void SettingsSections::onCommand(int id, int option) {
             actions.onSongTransitionEnabled(row->checked);
         break;
     case kIdTaskbarMonitor:
-        if (actions.onChooseTaskbarMonitor)
+        if (state.multiMonitorConnected && actions.onChooseTaskbarMonitor)
             actions.onChooseTaskbarMonitor();
+        break;
+    case kIdMonitorEnabled: {
+        if (!state.multiMonitorConnected)
+            break;
+        const bool next = !row->checked;
+        if (!next && !state.monitorDisableAllowed)
+            break;
+        row->checked = next;
+        state.monitorEnabled = next;
+        updateImmersiveRowsEnabled();
+        if (actions.onMonitorEnabled)
+            actions.onMonitorEnabled(next);
+        break;
+    }
+    case kIdApplyMonitorToAll:
+        if (state.multiMonitorConnected && actions.onApplyMonitorSettingsToAll)
+            actions.onApplyMonitorSettingsToAll();
         break;
     case kIdAppBarEdge:
         state.appBarEdge = std::clamp(row->selected, 0, 1);

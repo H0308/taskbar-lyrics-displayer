@@ -548,4 +548,21 @@ TEST_CASE("playback_controller.salt_player_debounce_duration_update_and_transien
     EXPECT_EQ(immersiveQuickFrame.scene, DisplayScene::Idle);
     EXPECT_TRUE(immersiveQuickFrame.visible);
     EXPECT_TRUE(immersiveQuickFrame.statusText.empty());
+
+    // 9. 多屏不同模式时，frameForView 按各自屏幕的空闲常驻与资源监视状态独立派生帧
+    IdleFrameInput embeddedEmptyIdle;
+    embeddedEmptyIdle.presentation.showText = false;
+    embeddedEmptyIdle.presentation.quickStartEnabled = false;
+    embeddedEmptyIdle.presentation.todayTasksEnabled = false;
+    const auto embeddedHidden =
+        model.frameForView(closedSnap, controller.state(), embeddedEmptyIdle);
+    EXPECT_EQ(embeddedHidden.scene, DisplayScene::NoPlayback);
+    EXPECT_FALSE(embeddedHidden.visible);
+
+    embeddedEmptyIdle.presentation.quickStartEnabled = true;
+    const auto embeddedQuick =
+        model.frameForView(closedSnap, controller.state(), embeddedEmptyIdle);
+    EXPECT_EQ(embeddedQuick.scene, DisplayScene::Idle);
+    EXPECT_TRUE(embeddedQuick.visible);
+    EXPECT_EQ(embeddedQuick.statusText, std::wstring(L"快捷启动"));
 }

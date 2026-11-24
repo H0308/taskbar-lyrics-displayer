@@ -77,9 +77,12 @@ struct TaskbarAppearance {
     bool operator==(const TaskbarAppearance&) const = default;
 };
 
+struct MonitorTaskbarSettings;
+
 struct AppearanceContext {
     RenderMode renderMode = RenderMode::Normal;
     bool vertical = false;
+    const MonitorTaskbarSettings* monitorSettings = nullptr;
     LyricAppearance lyricAppearance;
     COLORREF playedColor = RGB(49, 194, 124);
     COLORREF albumColor = RGB(49, 194, 124);

@@ -1,7 +1,141 @@
 #include "app/application_internal.h"
 #include "settings/display_rules.h"
 namespace lyrics_app {
-std::vector<TaskbarDisplayInfo> App::desiredTaskbarDisplays(const SmtcSnapshot& snap) const {
+namespace {
+const wchar_t* viewModeShortName(TaskbarViewMode mode) {
+    switch (mode) {
+    case TaskbarViewMode::Immersive:
+        return L"沉浸";
+    case TaskbarViewMode::AppBar:
+        return L"Dock 模式";
+    case TaskbarViewMode::Embedded:
+    default:
+        return L"内嵌";
+    }
+}
+} // namespace
+
+MonitorTaskbarSettings App::monitorSettingsForDisplay(const TaskbarDisplayInfo& display) const {
+    return settings_.monitorTaskbarSettingsFor(display.deviceName, display.primary);
+}
+
+MonitorTaskbarSettings App::monitorSettingsForDevice(const std::wstring& deviceName) const {
+    const auto displays = enumerateTaskbarDisplays();
+    if (!deviceName.empty()) {
+        const auto found = std::find_if(displays.begin(), displays.end(), [&](const auto& item) {
+            return item.deviceName == deviceName;
+        });
+        if (found != displays.end())
+            return settings_.monitorTaskbarSettingsFor(found->deviceName, found->primary);
+        return settings_.monitorTaskbarSettingsFor(deviceName, false);
+    }
+    const auto primary = std::find_if(displays.begin(), displays.end(),
+                                      [](const auto& item) { return item.primary; });
+    if (primary != displays.end())
+        return settings_.monitorTaskbarSettingsFor(primary->deviceName, true);
+    if (!displays.empty())
+        return settings_.monitorTaskbarSettingsFor(displays.front().deviceName,
+                                                   displays.front().primary);
+    return settings_.defaultMonitorTaskbarSettings(L"", true);
+}
+
+MonitorTaskbarSettings App::monitorSettingsForHost(const TaskbarHost* host) const {
+    return monitorSettingsForDevice(host ? host->monitorDeviceName() : std::wstring{});
+}
+
+TaskbarHost* App::findHostForMonitor(const std::wstring& deviceName) const {
+    if (deviceName.empty())
+        return taskbarHost.get();
+    if (taskbarHost && taskbarHost->monitorDeviceName() == deviceName)
+        return taskbarHost.get();
+    for (const auto& host : additionalTaskbarHosts_) {
+        if (host && host->monitorDeviceName() == deviceName)
+            return host.get();
+    }
+    return nullptr;
+}
+
+std::wstring App::resolveEditingMonitorDeviceName(
+    const std::vector<TaskbarDisplayInfo>& displays) const {
+    if (displays.empty())
+        return {};
+    if (!settingsEditingMonitorId_.empty()) {
+        const auto found = std::find_if(displays.begin(), displays.end(), [this](const auto& item) {
+            return item.deviceName == settingsEditingMonitorId_;
+        });
+        if (found != displays.end())
+            return found->deviceName;
+    }
+    const auto primary = std::find_if(displays.begin(), displays.end(),
+                                      [](const auto& item) { return item.primary; });
+    return primary != displays.end() ? primary->deviceName : displays.front().deviceName;
+}
+
+void App::materializeConnectedMonitorSettings(const std::vector<TaskbarDisplayInfo>& displays) {
+    if (!settings_.monitorTaskbarSettings_.empty() || displays.empty())
+        return;
+    std::vector<MonitorTaskbarSettings> initial;
+    initial.reserve(displays.size());
+    for (const auto& display : displays)
+        initial.push_back(settings_.defaultMonitorTaskbarSettings(display.deviceName, display.primary));
+    settings_.monitorTaskbarSettings_ = std::move(initial);
+}
+
+bool App::updateMonitorSettings(const std::wstring& deviceName,
+                                const std::function<void(MonitorTaskbarSettings&)>& mutator) {
+    const auto displays = enumerateTaskbarDisplays();
+    if (displays.empty())
+        return false;
+    auto target = displays.end();
+    if (!deviceName.empty()) {
+        target = std::find_if(displays.begin(), displays.end(),
+                              [&](const auto& item) { return item.deviceName == deviceName; });
+    }
+    if (target == displays.end()) {
+        target = std::find_if(displays.begin(), displays.end(),
+                              [](const auto& item) { return item.primary; });
+    }
+    if (target == displays.end())
+        target = displays.begin();
+
+    materializeConnectedMonitorSettings(displays);
+    auto& profile = settings_.ensureMonitorTaskbarSettings(target->deviceName, target->primary);
+    mutator(profile);
+    if (target->primary)
+        settings_.syncLegacyTaskbarFieldsFromMonitor(profile);
+    return true;
+}
+
+bool App::anyEmbeddedHostConfigured() const {
+    const auto displays = desiredTaskbarDisplays(monitor.snapshot());
+    if (displays.empty())
+        return settings_.taskbarViewMode_ == TaskbarViewMode::Embedded;
+    for (const auto& display : displays) {
+        const auto profile = monitorSettingsForDisplay(display);
+        const bool vertical = !display.taskbarWindow || !display.horizontalTaskbar;
+        if (display_rules::effectiveTaskbarViewMode(profile.viewMode, vertical) ==
+            TaskbarViewMode::Embedded)
+            return true;
+    }
+    return false;
+}
+
+bool App::anyHorizontalEmbeddedHostConfigured() const {
+    const auto displays = desiredTaskbarDisplays(monitor.snapshot());
+    if (displays.empty())
+        return settings_.taskbarViewMode_ == TaskbarViewMode::Embedded && !taskbarVertical_;
+    for (const auto& display : displays) {
+        const auto profile = monitorSettingsForDisplay(display);
+        const bool vertical = !display.taskbarWindow || !display.horizontalTaskbar;
+        if (!vertical &&
+            display_rules::effectiveTaskbarViewMode(profile.viewMode, false) ==
+                TaskbarViewMode::Embedded)
+            return true;
+    }
+    return false;
+}
+
+std::vector<TaskbarDisplayInfo> App::desiredTaskbarDisplays(const SmtcSnapshot&) const {
     auto displays = enumerateTaskbarDisplays();
     if (displays.empty())
         return {};
@@ -10,36 +144,26 @@ std::vector<TaskbarDisplayInfo> App::desiredTaskbarDisplays(const SmtcSnapshot& 
     if (primary == displays.end())
         primary = displays.begin();
 
-    if (settings_.taskbarMonitorId_ == L"all") {
-        if (settings_.taskbarViewMode_ == TaskbarViewMode::Immersive) {
-            std::vector<TaskbarDisplayInfo> horizontal;
-            std::copy_if(
-                displays.begin(), displays.end(), std::back_inserter(horizontal),
-                [](const auto& item) { return item.taskbarWindow && item.horizontalTaskbar; });
-            return horizontal.empty() ? std::vector<TaskbarDisplayInfo>{*primary}
-                                      : std::move(horizontal);
-        }
-        if (settings_.taskbarViewMode_ == TaskbarViewMode::Embedded) {
-            std::vector<TaskbarDisplayInfo> withTaskbar;
-            std::copy_if(displays.begin(), displays.end(), std::back_inserter(withTaskbar),
-                         [](const auto& item) { return item.taskbarWindow != nullptr; });
-            return withTaskbar.empty() ? std::vector<TaskbarDisplayInfo>{*primary}
-                                       : std::move(withTaskbar);
-        }
-        return displays;
-    }
+    // 单显示器（含副屏断开或宕机后仅剩一台显示器）始终强制保持启用，
+    // 防止用户把副屏设为主用后因显示器宕机导致所有屏幕都不可见。
+    if (displays.size() == 1)
+        return {*primary};
 
-    auto selected = primary;
-    if (!settings_.taskbarMonitorId_.empty()) {
-        const auto found = std::find_if(displays.begin(), displays.end(), [this](const auto& item) {
-            return item.deviceName == settings_.taskbarMonitorId_;
-        });
-        if (found != displays.end())
-            selected = found;
+    std::vector<TaskbarDisplayInfo> selected;
+    selected.reserve(displays.size());
+    for (const auto& display : displays) {
+        const MonitorTaskbarSettings profile = monitorSettingsForDisplay(display);
+        if (!profile.enabled)
+            continue;
+        if (profile.viewMode != TaskbarViewMode::AppBar && !display.taskbarWindow)
+            continue;
+        selected.push_back(display);
     }
-    if (settings_.taskbarViewMode_ != TaskbarViewMode::AppBar && !selected->taskbarWindow)
-        selected = primary;
-    return {*selected};
+    // 兜底：若所有已连接且启用的显示器都不可承载（例如唯一启用的副屏宕机或被关闭系统任务栏），
+    // 自动回退到主显示器，但不改写已持久化的每显示器配置。
+    if (selected.empty())
+        return {*primary};
+    return selected;
 }
 
 std::wstring App::taskbarDisplayLabel(const TaskbarDisplayInfo& display) const {
@@ -52,73 +176,138 @@ std::wstring App::taskbarDisplayLabel(const TaskbarDisplayInfo& display) const {
 }
 
 std::wstring App::taskbarMonitorLabel() const {
-    if (settings_.taskbarMonitorId_ == L"all")
-        return L"全部显示器";
-
     const auto compactDeviceName = [](std::wstring deviceName) {
         if (deviceName.rfind(L"\\\\.\\", 0) == 0)
             deviceName.erase(0, 4);
         return deviceName;
     };
     const auto displays = enumerateTaskbarDisplays();
-    if (settings_.taskbarMonitorId_.empty())
+    if (displays.empty())
         return L"主显示器";
-    const auto selected = std::find_if(displays.begin(), displays.end(), [this](const auto& item) {
-        return item.deviceName == settings_.taskbarMonitorId_;
+    const std::wstring targetId = resolveEditingMonitorDeviceName(displays);
+    const auto selected = std::find_if(displays.begin(), displays.end(), [&](const auto& item) {
+        return item.deviceName == targetId;
     });
     if (selected == displays.end())
-        return compactDeviceName(settings_.taskbarMonitorId_) + L" 断开";
+        return L"主显示器";
     return selected->primary ? L"主显示器" : compactDeviceName(selected->deviceName);
 }
 
 void App::selectTaskbarMonitor(const std::wstring& deviceName) {
-    if (settings_.taskbarMonitorId_ == deviceName)
+    if (settingsEditingMonitorId_ == deviceName)
         return;
-    settings_.taskbarMonitorId_ = deviceName;
-    saveSettings();
-    syncTaskbarView(monitor.snapshot());
+    settingsEditingMonitorId_ = deviceName;
     refreshSettingsDialog(true);
 }
 
 void App::showTaskbarMonitorMenu() {
     const auto displays = enumerateTaskbarDisplays();
+    if (displays.empty())
+        return;
+    const std::wstring editingId = resolveEditingMonitorDeviceName(displays);
     std::vector<fluent::FluentMenuItem> items;
     taskbarMonitorMenuItems_.clear();
-    fluent::FluentMenuItem all;
-    all.id = kCmdTaskbarMonitorAll;
-    all.text = L"全部显示器";
-    all.icon = settings_icon::Kind::Display;
-    all.checked = settings_.taskbarMonitorId_ == L"all";
-    items.push_back(std::move(all));
-    const bool requiresTaskbar = settings_.taskbarViewMode_ != TaskbarViewMode::AppBar;
+    const bool singleDisplay = displays.size() <= 1;
     for (size_t i = 0; i < displays.size(); ++i) {
         const auto& display = displays[i];
+        const auto profile = monitorSettingsForDisplay(display);
         fluent::FluentMenuItem item;
         item.id = kCmdTaskbarMonitorBase + static_cast<int>(i);
-        const bool checked = settings_.taskbarMonitorId_.empty()
-                                 ? display.primary
-                                 : settings_.taskbarMonitorId_ == display.deviceName;
-        const bool unavailable = requiresTaskbar && !display.taskbarWindow;
-        item.text = taskbarDisplayLabel(display) + (unavailable ? L"（无任务栏）" : L"");
+        const bool activeEnabled = singleDisplay || profile.enabled;
+        std::wstring suffix = activeEnabled ? (std::wstring(L" · ") + viewModeShortName(profile.viewMode))
+                                            : std::wstring(L" · 未启用");
+        if (activeEnabled && profile.viewMode != TaskbarViewMode::AppBar && !display.taskbarWindow)
+            suffix += L"（无任务栏）";
+        item.text = taskbarDisplayLabel(display) + suffix;
         item.icon = settings_icon::Kind::Display;
-        item.checked = checked;
-        item.enabled = !unavailable || checked;
+        item.checked = display.deviceName == editingId;
         taskbarMonitorMenuItems_.emplace_back(item.id, display.deviceName);
         items.push_back(std::move(item));
     }
     POINT point{};
     GetCursorPos(&point);
     fluent::FluentMenu::show(trayHwnd, point, std::move(items), [this](int command) {
-        if (command == kCmdTaskbarMonitorAll) {
-            selectTaskbarMonitor(L"all");
-            return;
-        }
         const auto found =
             std::find_if(taskbarMonitorMenuItems_.begin(), taskbarMonitorMenuItems_.end(),
                          [command](const auto& item) { return item.first == command; });
         if (found != taskbarMonitorMenuItems_.end())
             selectTaskbarMonitor(found->second);
     });
+}
+
+void App::applyMonitorEnabled(bool on) {
+    const auto displays = enumerateTaskbarDisplays();
+    if (displays.size() <= 1) {
+        refreshSettingsDialog(true);
+        return;
+    }
+    const std::wstring targetId = resolveEditingMonitorDeviceName(displays);
+    if (!on) {
+        int otherEnabledCount = 0;
+        for (const auto& display : displays) {
+            if (display.deviceName == targetId)
+                continue;
+            const auto profile = monitorSettingsForDisplay(display);
+            if (profile.enabled &&
+                (profile.viewMode == TaskbarViewMode::AppBar || display.taskbarWindow != nullptr))
+                ++otherEnabledCount;
+        }
+        if (otherEnabledCount == 0) {
+            refreshSettingsDialog(true);
+            return;
+        }
+    }
+    if (!updateMonitorSettings(targetId,
+                               [on](MonitorTaskbarSettings& profile) { profile.enabled = on; }))
+        return;
+    settingsEditingMonitorId_ = targetId;
+    if (taskbarHost || taskbarPendingDisplayRebuild_)
+        syncTaskbarView(monitor.snapshot());
+    logSettingBool(L"monitor-enabled", on);
+    saveSettings();
+    refreshSettingsDialog(true);
+}
+
+void App::applyMonitorSettingsToAll() {
+    const auto displays = enumerateTaskbarDisplays();
+    if (displays.size() <= 1)
+        return;
+    const std::wstring sourceId = resolveEditingMonitorDeviceName(displays);
+    const MonitorTaskbarSettings source = monitorSettingsForDevice(sourceId);
+    materializeConnectedMonitorSettings(displays);
+    for (const auto& display : displays) {
+        auto& profile = settings_.ensureMonitorTaskbarSettings(display.deviceName, display.primary);
+        profile.enabled = true;
+        profile.viewMode = source.viewMode;
+        profile.appBarEdge = source.appBarEdge;
+        profile.immersiveBackgroundBlur = source.immersiveBackgroundBlur;
+        profile.dockBackgroundBlur = source.dockBackgroundBlur;
+        profile.immersiveBackgroundAdjustment = source.immersiveBackgroundAdjustment;
+        profile.dockBackgroundAdjustment = source.dockBackgroundAdjustment;
+        profile.embeddedResourceMonitor = source.embeddedResourceMonitor;
+        profile.dockResourceGpuUsage = source.dockResourceGpuUsage;
+        profile.dockResourceDownload = source.dockResourceDownload;
+        profile.dockResourceUpload = source.dockResourceUpload;
+        profile.dockResourceCpuFrequency = source.dockResourceCpuFrequency;
+        profile.dockResourceSmallFont = source.dockResourceSmallFont;
+        profile.dockResourceHideLabels = source.dockResourceHideLabels;
+        profile.dockResourcePlacement = source.dockResourcePlacement;
+        if (display.primary)
+            settings_.syncLegacyTaskbarFieldsFromMonitor(profile);
+    }
+    if (taskbarHost || taskbarPendingDisplayRebuild_) {
+        publishTaskbarAppearance();
+        syncTaskbarView(monitor.snapshot());
+        if (taskbarHost) {
+            syncTaskbarOrientation();
+            applyEffectiveTaskbarSettings();
+            publishPresentationFrame(monitor.snapshot(), {.lyricsChanged = true});
+        }
+    }
+    runtime_log::writef(L"[action][setting] apply-monitor-settings-to-all source=%s",
+                        sourceId.c_str());
+    saveSettings();
+    refreshSettingsDialog(true);
 }
 
 bool App::fullscreenTargetAllMonitors() const {
@@ -193,7 +382,7 @@ void App::showFullscreenRenderModeMonitorMenu() {
 }
 
 bool App::taskbarExpandedConfigured() const {
-    return settings_.taskbarViewMode_ != TaskbarViewMode::Embedded;
+    return !anyEmbeddedHostConfigured();
 }
 
 void App::requestTaskbarRebuild() {
@@ -263,8 +452,9 @@ void App::syncTaskbarView(const SmtcSnapshot& snap) {
     }
 
     forEachHost([&](TaskbarHost* host) {
-        host->setAppBarEdge(settings_.appBarEdge_);
-        const auto configuredMode = settings_.taskbarViewMode_;
+        const auto profile = monitorSettingsForHost(host);
+        host->setAppBarEdge(profile.appBarEdge);
+        const auto configuredMode = profile.viewMode;
         const bool vertical =
             configuredMode == TaskbarViewMode::Immersive && host->isVerticalTaskbar();
         host->setViewMode(display_rules::effectiveTaskbarViewMode(configuredMode, vertical));
@@ -330,7 +520,8 @@ void App::syncTaskbarOrientation() {
     taskbarVertical_ = vertical;
     // 方向只影响实际显示与采样，保留用户配置，回到横向后重新应用。
     forEachHost([&](TaskbarHost* host) {
-        const auto configuredMode = settings_.taskbarViewMode_;
+        const auto profile = monitorSettingsForHost(host);
+        const auto configuredMode = profile.viewMode;
         const bool hostVertical =
             configuredMode == TaskbarViewMode::Immersive && host->isVerticalTaskbar();
         host->setViewMode(display_rules::effectiveTaskbarViewMode(configuredMode, hostVertical));
@@ -414,13 +605,20 @@ void App::configureTaskbarHostCallbacks(TaskbarHost* host, bool primary) {
     host->setControlCallback([this](MediaControl c, uint64_t sessionGeneration, int64_t positionMs) {
         onControl(c, sessionGeneration, positionMs);
     });
-    host->setImmersiveExitCallback([this] { applyTaskbarViewMode(0); });
+    host->setImmersiveExitCallback([this, host] {
+        if (isLiveTaskbarHost(host))
+            applyTaskbarViewModeForMonitor(host->monitorDeviceName(), 0);
+    });
     host->setDockQuickAppsCallback([this](POINT pt) { showDockQuickApps(pt); });
-    host->setImmersiveMenuCallback([this](POINT pt) { showTrayMenu(pt, false); });
+    host->setImmersiveMenuCallback([this, host](POINT pt) {
+        if (isLiveTaskbarHost(host))
+            activeMenuMonitorId_ = host->monitorDeviceName();
+        showTrayMenu(pt, false);
+    });
     host->setContextMenuCallback([this, host](POINT pt) { showTaskbarMenu(pt, host); });
     host->setAnchorChangedCallback([this, host](TaskbarAnchorSpec anchor) {
         if (isLiveTaskbarHost(host))
-            applyTaskbarAnchor(anchor, L"taskbar-position-drag", host);
+            applyTaskbarAnchor(anchor, L"taskbar-position-drag", host, host->monitorDeviceName());
     });
     host->setAnchorOptionsChangedCallback([this, host](std::vector<TaskbarAnchorOption> options) {
         if (isLiveTaskbarHost(host))
@@ -458,17 +656,29 @@ bool App::isLiveTaskbarHost(const TaskbarHost* host) const {
 }
 
 void App::applyTaskbarAnchor(const TaskbarAnchorSpec& anchor, const wchar_t* logSource,
-                             const TaskbarHost* alreadyAppliedHost) {
-    if (settings_.taskbarAnchor() == anchor)
+                             const TaskbarHost* alreadyAppliedHost,
+                             const std::wstring& targetMonitorDeviceName) {
+    const std::wstring targetId =
+        !targetMonitorDeviceName.empty()
+            ? targetMonitorDeviceName
+            : (alreadyAppliedHost ? alreadyAppliedHost->monitorDeviceName()
+                                  : (taskbarHost ? taskbarHost->monitorDeviceName() : std::wstring{}));
+    const MonitorTaskbarSettings before = monitorSettingsForDevice(targetId);
+    if (before.anchor() == anchor)
         return;
-    settings_.setTaskbarAnchor(anchor);
-    const TaskbarAnchorSpec saved = settings_.taskbarAnchor();
-    runtime_log::writef(L"[setting] %s mode=%d ratio=%.4f align=%d", logSource, saved.mode,
-                        saved.ratio, saved.edge == TaskbarAnchorEdge::Start ? 0 : 1);
-    forEachHost([&](TaskbarHost* host) {
-        if (host != alreadyAppliedHost)
-            host->setAnchor(saved);
-    });
+    TaskbarAnchorSpec saved = anchor;
+    if (!updateMonitorSettings(targetId, [&](MonitorTaskbarSettings& profile) {
+            profile.setAnchor(anchor);
+            saved = profile.anchor();
+        })) {
+        settings_.setTaskbarAnchor(anchor);
+        saved = settings_.taskbarAnchor();
+    }
+    runtime_log::writef(L"[setting] %s monitor=%s mode=%d ratio=%.4f align=%d", logSource,
+                        targetId.c_str(), saved.mode, saved.ratio,
+                        saved.edge == TaskbarAnchorEdge::Start ? 0 : 1);
+    if (TaskbarHost* host = findHostForMonitor(targetId); host && host != alreadyAppliedHost)
+        host->setAnchor(saved);
     saveSettings();
 }
 
@@ -491,9 +701,10 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
             runtime_log::writef(L"[taskbar] forced-open result=unavailable");
             return TaskbarCreateResult::Failed;
         }
+        const SmtcSnapshot forcedSnap = monitor.snapshot();
         forEachHost([&](TaskbarHost* host) {
             host->show();
-            host->applyPresentationFrame(presentation_.frame());
+            applyPresentationFrameToHost(host, forcedSnap);
             host->refreshPlacement();
         });
         syncSpectrumWithMode();
@@ -512,12 +723,17 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
     if (displays.empty())
         return waitForTaskbar();
     auto systemTaskbarReady = [&] {
-        if (settings_.taskbarViewMode_ == TaskbarViewMode::AppBar)
-            return true;
-        RECT taskbarRect{};
-        const HWND taskbar = displays.front().taskbarWindow;
-        return taskbar && IsWindow(taskbar) && GetWindowRect(taskbar, &taskbarRect) &&
-               taskbarRect.right > taskbarRect.left && taskbarRect.bottom > taskbarRect.top;
+        for (const auto& display : displays) {
+            const auto profile = monitorSettingsForDisplay(display);
+            if (profile.viewMode == TaskbarViewMode::AppBar)
+                return true;
+            RECT taskbarRect{};
+            const HWND taskbar = display.taskbarWindow;
+            if (taskbar && IsWindow(taskbar) && GetWindowRect(taskbar, &taskbarRect) &&
+                taskbarRect.right > taskbarRect.left && taskbarRect.bottom > taskbarRect.top)
+                return true;
+        }
+        return false;
     };
     if (!systemTaskbarReady())
         return waitForTaskbar();
@@ -529,8 +745,9 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
     auto createHost = [&](const TaskbarDisplayInfo& display, bool primary) {
         auto host = std::make_unique<TaskbarHost>();
         host->setVisibilitySuppressed(true);
+        const auto profile = monitorSettingsForDisplay(display);
         const auto initialMode = display_rules::effectiveTaskbarViewMode(
-            settings_.taskbarViewMode_, !display.taskbarWindow || !display.horizontalTaskbar);
+            profile.viewMode, !display.taskbarWindow || !display.horizontalTaskbar);
         if (!host->create(inst, display.deviceName, initialMode)) {
             runtime_log::writef(L"failed to create taskbar host for %s",
                                 display.deviceName.c_str());
@@ -540,11 +757,21 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
         configureTaskbarHostCallbacks(host.get(), primary);
         // 完全停止模式下新宿主从创建开始就保持隐藏，避免同步首帧后闪现。
         host->setRenderMode(effectiveRenderModeForHost(host.get()));
-        host->setAppBarEdge(settings_.appBarEdge_);
+        host->setAppBarEdge(profile.appBarEdge);
         return host;
     };
 
-    taskbarHost = createHost(displays.front(), true);
+    // 逐台创建宿主：单台显示器在热拔插或宕机瞬间创建失败时，不阻断其余健康显示器。
+    for (const auto& display : displays) {
+        const bool primaryHost = !taskbarHost;
+        auto host = createHost(display, primaryHost);
+        if (!host)
+            continue;
+        if (primaryHost)
+            taskbarHost = std::move(host);
+        else
+            additionalTaskbarHosts_.push_back(std::move(host));
+    }
     if (!taskbarHost) {
         activeTaskbarDisplayIds_.clear();
         taskbarAllowOverlap_ = false;
@@ -553,21 +780,16 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
             return waitForTaskbar();
         return TaskbarCreateResult::Failed;
     }
-    for (size_t i = 1; i < displays.size(); ++i) {
-        auto host = createHost(displays[i], false);
-        if (host)
-            additionalTaskbarHosts_.push_back(std::move(host));
-    }
 
     forEachHost([&](TaskbarHost* host) {
-        host->setAppBarEdge(settings_.appBarEdge_);
+        const auto profile = monitorSettingsForHost(host);
+        host->setAppBarEdge(profile.appBarEdge);
         syncHost(host);
         if (settings_.hasUserFont_)
             host->setFont(settings_.fontFamily_, settings_.fontSize_, settings_.fontStyle_);
-        host->applyAppearance(
-            appearanceForHost(host->isVerticalTaskbar(), effectiveRenderModeForHost(host)));
+        host->applyAppearance(appearanceForHost(host));
 
-        host->setAnchor(settings_.taskbarAnchor());
+        host->setAnchor(profile.anchor());
         host->setAppVolume(appVolumeState_);
     });
     applyFontAppearance();
@@ -614,11 +836,14 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
     }
     if (!anyHostHasSpace && anyHostUnavailable) {
         runtime_log::writef(L"[taskbar] placement unavailable after creation");
+        bool allAppBar = true;
+        forEachHost([&](TaskbarHost* host) {
+            if (monitorSettingsForHost(host).viewMode != TaskbarViewMode::AppBar)
+                allAppBar = false;
+        });
         destroyTaskbar();
         // AppBar 的注册失败属于真正的创建失败，不作为 Explorer 未就绪处理。
-        return settings_.taskbarViewMode_ == TaskbarViewMode::AppBar
-                   ? TaskbarCreateResult::Failed
-                   : waitForTaskbar();
+        return allAppBar ? TaskbarCreateResult::Failed : waitForTaskbar();
     }
     taskbarAutoClosedForNoSpace_ = false;
     cancelTaskbarAutoRestore();
@@ -628,7 +853,7 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
     if (allowOverlap) {
         forEachHost([&](TaskbarHost* host) {
             host->show();
-            host->applyPresentationFrame(presentation_.frame());
+            applyPresentationFrameToHost(host, snap);
         });
     }
     updateTrayIcon();
@@ -661,11 +886,14 @@ bool App::taskbarEnabledForUserAction() {
         return taskbarPendingDisplayRebuild_;
     bool anyAvailable = false;
     bool anyDisplayed = false;
+    bool anyAppBar = false;
     forEachHost([&](TaskbarHost* host) {
         const TaskbarPlacementStatus status = host->placementStatus();
         if (status != TaskbarPlacementStatus::NoSpace &&
             status != TaskbarPlacementStatus::Unavailable) {
             anyAvailable = true;
+            if (monitorSettingsForHost(host).viewMode == TaskbarViewMode::AppBar)
+                anyAppBar = true;
             if (host->isDisplayed())
                 anyDisplayed = true;
         }
@@ -674,7 +902,7 @@ bool App::taskbarEnabledForUserAction() {
         return false;
     // AppBar 在无媒体且关闭空闲入口时会主动隐藏并释放工作区，
     // 但宿主与用户选择仍是开启状态，托盘操作不能把它误判为关闭。
-    if (settings_.taskbarViewMode_ == TaskbarViewMode::AppBar)
+    if (anyAppBar)
         return true;
     if (anyDisplayed) {
         taskbarEnabledBeforeStopped_ = false;

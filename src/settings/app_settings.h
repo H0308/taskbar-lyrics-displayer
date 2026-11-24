@@ -8,6 +8,32 @@
 #include <string>
 #include <vector>
 
+struct MonitorTaskbarSettings {
+    std::wstring deviceName;
+    bool enabled = true;
+    TaskbarViewMode viewMode = TaskbarViewMode::Embedded;
+    int taskbarPosition = 0;
+    double taskbarAnchorRatio = 1.0;
+    TaskbarAnchorEdge taskbarAnchorEdge = TaskbarAnchorEdge::End;
+    AppBarEdge appBarEdge = AppBarEdge::Top;
+    int immersiveBackgroundBlur = 88;
+    int dockBackgroundBlur = 88;
+    int immersiveBackgroundAdjustment = 0;
+    int dockBackgroundAdjustment = 0;
+    bool embeddedResourceMonitor = false;
+    bool dockResourceGpuUsage = false;
+    bool dockResourceDownload = true;
+    bool dockResourceUpload = true;
+    bool dockResourceCpuFrequency = false;
+    bool dockResourceSmallFont = false;
+    bool dockResourceHideLabels = false;
+    ResourcePlacement dockResourcePlacement = ResourcePlacement::End;
+
+    TaskbarAnchorSpec anchor() const;
+    void setAnchor(const TaskbarAnchorSpec& value);
+    bool operator==(const MonitorTaskbarSettings&) const = default;
+};
+
 // 仅包含持久化的偏好与内容缓存；异步请求、窗口和播放状态不属于配置。
 struct AppSettings {
     int frameRate_ = 1;
@@ -120,10 +146,19 @@ struct AppSettings {
     std::vector<GenericSmtcAppRule> genericSmtcBlockList_;
     std::wstring logDirectory_;
     int logRetentionDays_ = 30;
+    // 按显示器设备名保存的展示模式与模式专属效果；空时沿用上方全局字段向后兼容。
+    std::vector<MonitorTaskbarSettings> monitorTaskbarSettings_;
 
     // 保留既有字段读取规则及主题初始化顺序；迁移标志在部分字段异常时仍保留。
     TaskbarAnchorSpec taskbarAnchor() const;
     void setTaskbarAnchor(const TaskbarAnchorSpec& anchor);
+    MonitorTaskbarSettings defaultMonitorTaskbarSettings(const std::wstring& deviceName,
+                                                         bool primary) const;
+    MonitorTaskbarSettings monitorTaskbarSettingsFor(const std::wstring& deviceName,
+                                                     bool primary) const;
+    MonitorTaskbarSettings& ensureMonitorTaskbarSettings(const std::wstring& deviceName,
+                                                         bool primary);
+    void syncLegacyTaskbarFieldsFromMonitor(const MonitorTaskbarSettings& profile);
     void readJson(const nlohmann::json& document, bool hasTickTickToken,
                   bool& migrateLegacyLogDirectory);
     nlohmann::json toJson() const;

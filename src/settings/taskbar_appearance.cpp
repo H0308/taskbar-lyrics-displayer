@@ -50,15 +50,24 @@ TaskbarAppearance resolveTaskbarAppearance(const AppSettings& settings,
     result.background = minimal ? TaskbarBackground::None
                                 : static_cast<TaskbarBackground>(settings.taskbarBackground_);
     result.coverBackgroundOpacity = settings.coverBackgroundOpacity_;
-    result.immersiveBackgroundAdjustment = settings.immersiveBackgroundAdjustment_;
-    result.dockBackgroundAdjustment = settings.dockBackgroundAdjustment_;
-    result.immersiveBackgroundBlur = settings.immersiveBackgroundBlur_;
-    result.dockBackgroundBlur = settings.dockBackgroundBlur_;
-    result.dockResourceVisibility =
-        DockResourceVisibility{settings.embeddedResourceMonitor_, settings.dockResourceDownload_,
-                               settings.dockResourceUpload_, settings.dockResourceGpuUsage_,
-                               settings.dockResourceCpuFrequency_, settings.dockResourceSmallFont_,
-                               settings.dockResourceHideLabels_, settings.dockResourcePlacement_};
+    const auto* monitor = context.monitorSettings;
+    result.immersiveBackgroundAdjustment =
+        monitor ? monitor->immersiveBackgroundAdjustment : settings.immersiveBackgroundAdjustment_;
+    result.dockBackgroundAdjustment =
+        monitor ? monitor->dockBackgroundAdjustment : settings.dockBackgroundAdjustment_;
+    result.immersiveBackgroundBlur =
+        monitor ? monitor->immersiveBackgroundBlur : settings.immersiveBackgroundBlur_;
+    result.dockBackgroundBlur =
+        monitor ? monitor->dockBackgroundBlur : settings.dockBackgroundBlur_;
+    result.dockResourceVisibility = monitor
+        ? DockResourceVisibility{monitor->embeddedResourceMonitor, monitor->dockResourceDownload,
+                                 monitor->dockResourceUpload, monitor->dockResourceGpuUsage,
+                                 monitor->dockResourceCpuFrequency, monitor->dockResourceSmallFont,
+                                 monitor->dockResourceHideLabels, monitor->dockResourcePlacement}
+        : DockResourceVisibility{settings.embeddedResourceMonitor_, settings.dockResourceDownload_,
+                                 settings.dockResourceUpload_, settings.dockResourceGpuUsage_,
+                                 settings.dockResourceCpuFrequency_, settings.dockResourceSmallFont_,
+                                 settings.dockResourceHideLabels_, settings.dockResourcePlacement_};
     result.albumCoverVisible = settings.albumCoverVisible_;
     result.songTransitionEnabled = settings.songTransitionEnabled_;
     result.platformIconVisible = settings.platformIconVisible_;

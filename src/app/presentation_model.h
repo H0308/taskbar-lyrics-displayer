@@ -19,6 +19,8 @@ struct IdleFrameInput {
 class PresentationModel {
 public:
     const PresentationFrame& frame() const { return frame_; }
+    PresentationFrame frameForView(const SmtcSnapshot& snap, const PlaybackState& playback,
+                                   const IdleFrameInput& idle) const;
     const PresentationFrame& update(const SmtcSnapshot& snap, const AppSettings& settings,
                                     const PlaybackState& playback, const IdleFrameInput& idle,
                                     PresentationUpdate update);

@@ -231,6 +231,34 @@ const char* fullscreenRenderModeConfigName(RenderMode mode) {
 }
 } // namespace
 
+TaskbarAnchorSpec MonitorTaskbarSettings::anchor() const {
+    if (taskbarPosition == 1)
+        return TaskbarAnchorSpec::outerStart();
+    if (taskbarPosition == 2)
+        return TaskbarAnchorSpec::relative(taskbarAnchorRatio, taskbarAnchorEdge);
+    return TaskbarAnchorSpec::outerEnd();
+}
+
+void MonitorTaskbarSettings::setAnchor(const TaskbarAnchorSpec& value) {
+    const int mode = std::clamp(value.mode, 0, 2);
+    taskbarPosition = mode;
+    if (mode == 0) {
+        taskbarAnchorRatio = 1.0;
+        taskbarAnchorEdge = TaskbarAnchorEdge::End;
+        return;
+    }
+    if (mode == 1) {
+        taskbarAnchorRatio = 0.0;
+        taskbarAnchorEdge = TaskbarAnchorEdge::Start;
+        return;
+    }
+    const double finiteRatio = std::isfinite(value.ratio) ? value.ratio : 0.0;
+    const double clamped = std::clamp(finiteRatio, 0.0, 1.0);
+    taskbarAnchorRatio = std::round(clamped * 10000.0) / 10000.0;
+    taskbarAnchorEdge =
+        value.edge == TaskbarAnchorEdge::Start ? TaskbarAnchorEdge::Start : TaskbarAnchorEdge::End;
+}
+
 TaskbarAnchorSpec AppSettings::taskbarAnchor() const {
     if (taskbarPosition_ == 1)
         return TaskbarAnchorSpec::outerStart();
@@ -257,6 +285,79 @@ void AppSettings::setTaskbarAnchor(const TaskbarAnchorSpec& anchor) {
     taskbarAnchorRatio_ = std::round(clamped * 10000.0) / 10000.0;
     taskbarAnchorEdge_ =
         anchor.edge == TaskbarAnchorEdge::Start ? TaskbarAnchorEdge::Start : TaskbarAnchorEdge::End;
+}
+
+MonitorTaskbarSettings AppSettings::defaultMonitorTaskbarSettings(const std::wstring& deviceName,
+                                                                  bool primary) const {
+    MonitorTaskbarSettings profile;
+    profile.deviceName = deviceName;
+    if (monitorTaskbarSettings_.empty()) {
+        if (taskbarMonitorId_ == L"all")
+            profile.enabled = true;
+        else if (taskbarMonitorId_.empty())
+            profile.enabled = primary;
+        else
+            profile.enabled = !deviceName.empty() && deviceName == taskbarMonitorId_;
+    } else {
+        profile.enabled = primary || taskbarMonitorId_ == L"all";
+    }
+    profile.viewMode = taskbarViewMode_;
+    profile.setAnchor(taskbarAnchor());
+    profile.appBarEdge = appBarEdge_;
+    profile.immersiveBackgroundBlur = immersiveBackgroundBlur_;
+    profile.dockBackgroundBlur = dockBackgroundBlur_;
+    profile.immersiveBackgroundAdjustment = immersiveBackgroundAdjustment_;
+    profile.dockBackgroundAdjustment = dockBackgroundAdjustment_;
+    profile.embeddedResourceMonitor = embeddedResourceMonitor_;
+    profile.dockResourceGpuUsage = dockResourceGpuUsage_;
+    profile.dockResourceDownload = dockResourceDownload_;
+    profile.dockResourceUpload = dockResourceUpload_;
+    profile.dockResourceCpuFrequency = dockResourceCpuFrequency_;
+    profile.dockResourceSmallFont = dockResourceSmallFont_;
+    profile.dockResourceHideLabels = dockResourceHideLabels_;
+    profile.dockResourcePlacement = dockResourcePlacement_;
+    return profile;
+}
+
+MonitorTaskbarSettings AppSettings::monitorTaskbarSettingsFor(const std::wstring& deviceName,
+                                                              bool primary) const {
+    if (!deviceName.empty()) {
+        const auto found = std::find_if(
+            monitorTaskbarSettings_.begin(), monitorTaskbarSettings_.end(),
+            [&](const MonitorTaskbarSettings& item) { return item.deviceName == deviceName; });
+        if (found != monitorTaskbarSettings_.end())
+            return *found;
+    }
+    return defaultMonitorTaskbarSettings(deviceName, primary);
+}
+
+MonitorTaskbarSettings& AppSettings::ensureMonitorTaskbarSettings(const std::wstring& deviceName,
+                                                                  bool primary) {
+    const auto found = std::find_if(
+        monitorTaskbarSettings_.begin(), monitorTaskbarSettings_.end(),
+        [&](const MonitorTaskbarSettings& item) { return item.deviceName == deviceName; });
+    if (found != monitorTaskbarSettings_.end())
+        return *found;
+    monitorTaskbarSettings_.push_back(defaultMonitorTaskbarSettings(deviceName, primary));
+    return monitorTaskbarSettings_.back();
+}
+
+void AppSettings::syncLegacyTaskbarFieldsFromMonitor(const MonitorTaskbarSettings& profile) {
+    taskbarViewMode_ = profile.viewMode;
+    setTaskbarAnchor(profile.anchor());
+    appBarEdge_ = profile.appBarEdge;
+    immersiveBackgroundBlur_ = profile.immersiveBackgroundBlur;
+    dockBackgroundBlur_ = profile.dockBackgroundBlur;
+    immersiveBackgroundAdjustment_ = profile.immersiveBackgroundAdjustment;
+    dockBackgroundAdjustment_ = profile.dockBackgroundAdjustment;
+    embeddedResourceMonitor_ = profile.embeddedResourceMonitor;
+    dockResourceGpuUsage_ = profile.dockResourceGpuUsage;
+    dockResourceDownload_ = profile.dockResourceDownload;
+    dockResourceUpload_ = profile.dockResourceUpload;
+    dockResourceCpuFrequency_ = profile.dockResourceCpuFrequency;
+    dockResourceSmallFont_ = profile.dockResourceSmallFont;
+    dockResourceHideLabels_ = profile.dockResourceHideLabels;
+    dockResourcePlacement_ = profile.dockResourcePlacement;
 }
 
 void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
@@ -364,6 +465,66 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
     dockResourceDownload_ = j.value("dockResourceDownload", true);
     dockResourceUpload_ = j.value("dockResourceUpload", true);
     dockResourceCpuFrequency_ = j.value("dockResourceCpuFrequency", false);
+    monitorTaskbarSettings_.clear();
+    if (j.contains("monitorTaskbarSettings") && j["monitorTaskbarSettings"].is_array()) {
+        for (const auto& entry : j["monitorTaskbarSettings"]) {
+            if (!entry.is_object())
+                continue;
+            const std::wstring deviceName = wideOf(entry.value("deviceName", std::string()));
+            if (deviceName.empty())
+                continue;
+            const bool duplicate = std::any_of(
+                monitorTaskbarSettings_.begin(), monitorTaskbarSettings_.end(),
+                [&](const MonitorTaskbarSettings& existing) {
+                    return existing.deviceName == deviceName;
+                });
+            if (duplicate)
+                continue;
+            MonitorTaskbarSettings profile = defaultMonitorTaskbarSettings(deviceName, false);
+            profile.deviceName = deviceName;
+            profile.enabled = entry.value("enabled", true);
+            profile.viewMode = static_cast<TaskbarViewMode>(
+                std::clamp(entry.value("viewMode", static_cast<int>(taskbarViewMode_)), 0, 2));
+            const int entryPos = std::clamp(entry.value("taskbarPosition", taskbarPosition_), 0, 2);
+            const double entryRatio = std::clamp(
+                entry.value("taskbarAnchorRatio", entryPos == 1 ? 0.0 : 1.0), 0.0, 1.0);
+            const TaskbarAnchorEdge entryEdge =
+                entry.value("taskbarAnchorAlign", entryPos == 1 ? 0 : 1) == 0
+                    ? TaskbarAnchorEdge::Start
+                    : TaskbarAnchorEdge::End;
+            profile.setAnchor({entryPos, entryRatio, entryEdge});
+            profile.appBarEdge =
+                entry.value("appBarEdge", appBarEdge_ == AppBarEdge::Bottom ? 1 : 0) == 1
+                    ? AppBarEdge::Bottom
+                    : AppBarEdge::Top;
+            profile.immersiveBackgroundBlur = std::clamp(
+                entry.value("immersiveBackgroundBlur", immersiveBackgroundBlur_), 0, 100);
+            profile.dockBackgroundBlur = std::clamp(
+                entry.value("dockBackgroundBlurLevel", dockBackgroundBlur_), 0, 100);
+            profile.immersiveBackgroundAdjustment = std::clamp(
+                entry.value("immersiveBackgroundAdjustment", immersiveBackgroundAdjustment_), 0, 1);
+            profile.dockBackgroundAdjustment = std::clamp(
+                entry.value("dockBackgroundAdjustment", dockBackgroundAdjustment_), 0, 1);
+            profile.embeddedResourceMonitor =
+                entry.value("embeddedResourceMonitor", embeddedResourceMonitor_);
+            profile.dockResourceSmallFont =
+                entry.value("dockResourceSmallFont", dockResourceSmallFont_);
+            profile.dockResourceHideLabels =
+                entry.value("dockResourceHideLabels", dockResourceHideLabels_);
+            profile.dockResourcePlacement =
+                entry.value("dockResourcePlacement",
+                            dockResourcePlacement_ == ResourcePlacement::Start ? 0 : 1) == 0
+                    ? ResourcePlacement::Start
+                    : ResourcePlacement::End;
+            profile.dockResourceGpuUsage = entry.value("dockResourceGpu", dockResourceGpuUsage_);
+            profile.dockResourceDownload =
+                entry.value("dockResourceDownload", dockResourceDownload_);
+            profile.dockResourceUpload = entry.value("dockResourceUpload", dockResourceUpload_);
+            profile.dockResourceCpuFrequency =
+                entry.value("dockResourceCpuFrequency", dockResourceCpuFrequency_);
+            monitorTaskbarSettings_.push_back(std::move(profile));
+        }
+    }
     taskbarContextMenuEnabled_ = j.value("taskbarContextMenu", true);
     // 性能模式只对本次运行有效；忽略旧版本可能留下的持久化值，启动始终回到正常模式。
     hoverPlaybackControls_ = j.value("hoverPlaybackControls", true);
@@ -643,6 +804,42 @@ nlohmann::json AppSettings::toJson() const {
     j.erase("dockResourceBattery");
     j.erase("dockResourceTemperature");
     j["dockResourceCpuFrequency"] = dockResourceCpuFrequency_;
+    if (!monitorTaskbarSettings_.empty()) {
+        nlohmann::json monitors = nlohmann::json::array();
+        for (const auto& profile : monitorTaskbarSettings_) {
+            if (profile.deviceName.empty())
+                continue;
+            nlohmann::json entry = {
+                {"deviceName", utf8Of(profile.deviceName)},
+                {"enabled", profile.enabled},
+                {"viewMode", static_cast<int>(profile.viewMode)},
+                {"taskbarPosition", profile.taskbarPosition},
+                {"appBarEdge", profile.appBarEdge == AppBarEdge::Bottom ? 1 : 0},
+                {"immersiveBackgroundBlur", profile.immersiveBackgroundBlur},
+                {"dockBackgroundBlurLevel", profile.dockBackgroundBlur},
+                {"immersiveBackgroundAdjustment", profile.immersiveBackgroundAdjustment},
+                {"dockBackgroundAdjustment", profile.dockBackgroundAdjustment},
+                {"embeddedResourceMonitor", profile.embeddedResourceMonitor},
+                {"dockResourceSmallFont", profile.dockResourceSmallFont},
+                {"dockResourceHideLabels", profile.dockResourceHideLabels},
+                {"dockResourcePlacement",
+                 profile.dockResourcePlacement == ResourcePlacement::Start ? 0 : 1},
+                {"dockResourceGpu", profile.dockResourceGpuUsage},
+                {"dockResourceDownload", profile.dockResourceDownload},
+                {"dockResourceUpload", profile.dockResourceUpload},
+                {"dockResourceCpuFrequency", profile.dockResourceCpuFrequency},
+            };
+            if (profile.taskbarPosition == 2) {
+                entry["taskbarAnchorRatio"] = profile.taskbarAnchorRatio;
+                entry["taskbarAnchorAlign"] =
+                    profile.taskbarAnchorEdge == TaskbarAnchorEdge::Start ? 0 : 1;
+            }
+            monitors.push_back(std::move(entry));
+        }
+        j["monitorTaskbarSettings"] = std::move(monitors);
+    } else {
+        j.erase("monitorTaskbarSettings");
+    }
     j.erase("immersiveMaskCustomColor");
     j.erase("immersiveMaskColor");
     j["taskbarContextMenu"] = taskbarContextMenuEnabled_;

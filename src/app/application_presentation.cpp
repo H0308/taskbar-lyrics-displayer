@@ -166,28 +166,52 @@ void App::refreshIdleWelcome() {
     publishPresentationFrame(snap, {.lyricsChanged = true});
 }
 
-const PresentationFrame& App::preparePresentationFrame(const SmtcSnapshot& snap,
-                                                       PresentationUpdate update) {
+IdleFrameInput App::buildIdleFrameInput(TaskbarViewMode effectiveMode,
+                                        bool embeddedResourceMonitor) const {
     IdleFrameInput input;
     input.presentation = idle_.currentIdlePresentation();
     input.summaryActive = idle_.state().startupTaskSummaryActive_;
     input.summaryPending = idle_.state().startupTaskSummaryPending_;
     input.tasksEnabled = idle_.tickTickEffectiveEnabled();
-    input.resourcesVisible = settings_.taskbarViewMode_ == TaskbarViewMode::AppBar ||
-        (settings_.taskbarViewMode_ == TaskbarViewMode::Embedded &&
-         settings_.embeddedResourceMonitor_);
-    input.keepIdleVisible =
-        display_rules::effectiveTaskbarViewMode(settings_.taskbarViewMode_, taskbarVertical_) ==
-        TaskbarViewMode::Immersive;
+    input.resourcesVisible = effectiveMode == TaskbarViewMode::AppBar ||
+                             (effectiveMode == TaskbarViewMode::Embedded && embeddedResourceMonitor);
+    input.keepIdleVisible = effectiveMode == TaskbarViewMode::Immersive;
     if (input.summaryActive)
         input.summaryText = idle_.startupTaskSummaryText();
+    return input;
+}
+
+const PresentationFrame& App::preparePresentationFrame(const SmtcSnapshot& snap,
+                                                       PresentationUpdate update) {
+    const MonitorTaskbarSettings primaryProfile =
+        taskbarHost ? monitorSettingsForHost(taskbarHost.get())
+                    : monitorSettingsForDevice(L"");
+    const bool primaryVertical = taskbarHost ? taskbarHost->isVerticalTaskbar() : taskbarVertical_;
+    const auto effectiveMode =
+        display_rules::effectiveTaskbarViewMode(primaryProfile.viewMode, primaryVertical);
+    const IdleFrameInput input =
+        buildIdleFrameInput(effectiveMode, primaryProfile.embeddedResourceMonitor);
     return presentation_.update(snap, settings_, playback_.state(), input, update);
+}
+
+void App::applyPresentationFrameToHost(TaskbarHost* host, const SmtcSnapshot& snap) {
+    if (!host)
+        return;
+    if (snap.sessionAlive) {
+        host->applyPresentationFrame(presentation_.frame());
+        return;
+    }
+    const MonitorTaskbarSettings profile = monitorSettingsForHost(host);
+    const auto effectiveMode =
+        display_rules::effectiveTaskbarViewMode(profile.viewMode, host->isVerticalTaskbar());
+    const IdleFrameInput input = buildIdleFrameInput(effectiveMode, profile.embeddedResourceMonitor);
+    host->applyPresentationFrame(presentation_.frameForView(snap, playback_.state(), input));
 }
 
 void App::publishPresentationFrame(const SmtcSnapshot& snap, PresentationUpdate update) {
     // SMTC 状态/控制/封面事件只刷新帧字段；完整歌词仅在内容事务变化时复制。
     preparePresentationFrame(snap, update);
-    forEachHost([&](ILyricHost* host) { host->applyPresentationFrame(presentation_.frame()); });
+    forEachHost([&](TaskbarHost* host) { applyPresentationFrameToHost(host, snap); });
     // 设置窗口同步由状态变化显式声明，不再借用“歌词内容变化”的含义。
     if (update.refreshSettings)
         refreshSettingsDialog(true);
@@ -202,13 +226,14 @@ void App::publishPresentationFrame(const SmtcSnapshot& snap, PresentationUpdate 
     }
 }
 
-void App::syncHost(ILyricHost* host) {
+void App::syncHost(TaskbarHost* host) {
     if (!host)
         return;
+    const SmtcSnapshot snap = monitor.snapshot();
     if (presentation_.frame().frameRevision == 0) {
-        preparePresentationFrame(monitor.snapshot(), {.lyricsChanged = true});
+        preparePresentationFrame(snap, {.lyricsChanged = true});
     }
-    host->applyPresentationFrame(presentation_.frame());
+    applyPresentationFrameToHost(host, snap);
 }
 
 void App::onControl(MediaControl c, uint64_t sessionGeneration, int64_t positionMs) {
@@ -376,8 +401,9 @@ void App::onFrame() {
 void App::tryExtractAlbumColor() {
     if (!playback_.extractAlbumColor())
         return;
-    const auto& frame = presentation_.updateAlbumColor(playback_.state().albumColor_);
-    forEachHost([&](ILyricHost* host) { host->applyPresentationFrame(frame); });
+    presentation_.updateAlbumColor(playback_.state().albumColor_);
+    const SmtcSnapshot snap = monitor.snapshot();
+    forEachHost([&](TaskbarHost* host) { applyPresentationFrameToHost(host, snap); });
     applyFontColors();
 }
 } // namespace lyrics_app

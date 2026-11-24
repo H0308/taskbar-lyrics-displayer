@@ -80,26 +80,13 @@ DisplayScene displaySceneFor(const SmtcSnapshot& snap, const AppSettings& settin
     return settings.spectrumOn_ ? DisplayScene::Spectrum : DisplayScene::Message;
 }
 
-void fillPresentationFrame(PresentationFrame& frame, const SmtcSnapshot& snap,
-                           bool animateTransition, bool copyLyrics, bool durationOnlyUpdate,
-                           const AppSettings& settings, const PlaybackState& playback,
-                           const IdleFrameInput& idle) {
-    frame.requestGeneration = playback.requestGeneration_;
-    frame.trackKey = playback.currentKey;
+void applyIdleViewState(PresentationFrame& frame, const SmtcSnapshot& snap,
+                        const PlaybackState& playback, const IdleFrameInput& idle) {
     const bool alwaysIdleBar = idle.resourcesVisible || idle.keepIdleVisible;
     const bool idleVisible = idle.presentation.hasContent() || alwaysIdleBar ||
                              idle.summaryActive || (idle.summaryPending && idle.tasksEnabled);
-    frame.scene = displaySceneFor(snap, settings, playback, idleVisible);
-    frame.media = makeMediaInfo(snap, playback, frame);
-    frame.idle = idle.presentation;
-    if (copyLyrics)
-        frame.lyrics = playback.currentLyrics_;
-    frame.actualPositionMs = snap.positionMs;
-    frame.lineSelectionPositionMs = lyricSelectionPosition(snap, frame.lyrics);
-    frame.currentLine = LyricProvider::findLine(frame.lyrics, frame.lineSelectionPositionMs);
-    frame.visible = snap.sessionAlive || idleVisible;
-    frame.animateTransition = animateTransition;
-    frame.durationOnlyUpdate = durationOnlyUpdate;
+    frame.scene = idleVisible ? DisplayScene::Idle : DisplayScene::NoPlayback;
+    frame.visible = idleVisible;
     const bool showStartupTaskSummary =
         idle.summaryActive && !snap.sessionAlive && frame.scene == DisplayScene::Idle;
     const bool showStartupTaskLoading = idle.summaryPending && idle.tasksEnabled &&
@@ -120,10 +107,39 @@ void fillPresentationFrame(PresentationFrame& frame, const SmtcSnapshot& snap,
             frame.statusText = L"今日任务";
         else
             frame.statusText.clear();
-    } else if (!snap.sessionAlive)
+    } else {
         frame.statusText = notRunningStatus(playback);
-    else if (playback.lyricLoading_ && !player_source::usesMetadataLyricPath(snap.player) &&
-             snap.player != SmtcPlayerType::QQMusic && snap.player != SmtcPlayerType::NetEase)
+    }
+}
+
+void fillPresentationFrame(PresentationFrame& frame, const SmtcSnapshot& snap,
+                           bool animateTransition, bool copyLyrics, bool durationOnlyUpdate,
+                           const AppSettings& settings, const PlaybackState& playback,
+                           const IdleFrameInput& idle) {
+    frame.requestGeneration = playback.requestGeneration_;
+    frame.trackKey = playback.currentKey;
+    const bool alwaysIdleBar = idle.resourcesVisible || idle.keepIdleVisible;
+    const bool idleVisible = idle.presentation.hasContent() || alwaysIdleBar ||
+                             idle.summaryActive || (idle.summaryPending && idle.tasksEnabled);
+    frame.scene = displaySceneFor(snap, settings, playback, idleVisible);
+    frame.media = makeMediaInfo(snap, playback, frame);
+    frame.idle = idle.presentation;
+    if (copyLyrics)
+        frame.lyrics = playback.currentLyrics_;
+    frame.actualPositionMs = snap.positionMs;
+    frame.lineSelectionPositionMs = lyricSelectionPosition(snap, frame.lyrics);
+    frame.currentLine = LyricProvider::findLine(frame.lyrics, frame.lineSelectionPositionMs);
+    frame.visible = snap.sessionAlive || idleVisible;
+    frame.animateTransition = animateTransition;
+    frame.durationOnlyUpdate = durationOnlyUpdate;
+    if (!snap.sessionAlive) {
+        applyIdleViewState(frame, snap, playback, idle);
+        return;
+    }
+    frame.statusTextOneShot = false;
+    frame.statusTextIsTrackInfo = false;
+    if (playback.lyricLoading_ && !player_source::usesMetadataLyricPath(snap.player) &&
+        snap.player != SmtcPlayerType::QQMusic && snap.player != SmtcPlayerType::NetEase)
         frame.statusText = L"歌词加载中…";
     else if (player_source::usesMetadataLyricPath(snap.player) ||
              (player_source::showsTrackInfoBeforeLyrics(snap.player) &&
@@ -141,6 +157,16 @@ void fillPresentationFrame(PresentationFrame& frame, const SmtcSnapshot& snap,
         frame.statusText.clear();
 }
 } // namespace
+
+PresentationFrame PresentationModel::frameForView(const SmtcSnapshot& snap,
+                                                  const PlaybackState& playback,
+                                                  const IdleFrameInput& idle) const {
+    if (snap.sessionAlive)
+        return frame_;
+    PresentationFrame adjusted = frame_;
+    applyIdleViewState(adjusted, snap, playback, idle);
+    return adjusted;
+}
 
 const PresentationFrame& PresentationModel::update(const SmtcSnapshot& snap,
                                                    const AppSettings& settings,

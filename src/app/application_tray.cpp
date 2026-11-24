@@ -108,8 +108,18 @@ std::vector<fluent::FluentMenuItem> App::buildMenuItems(bool fullTrayMenu,
     addRenderMode(kCmdRenderModeMinimal, L"极简", RenderMode::Minimal);
     items.push_back(std::move(performance));
     if (taskbarEnabled) {
-        if (settings_.taskbarViewMode_ == TaskbarViewMode::Embedded) {
-            const TaskbarHost* targetHost = menuHost ? menuHost : taskbarHost.get();
+        const TaskbarHost* targetHost =
+            menuHost ? menuHost
+                     : (!activeMenuMonitorId_.empty() ? findHostForMonitor(activeMenuMonitorId_)
+                                                      : taskbarHost.get());
+        if (!targetHost)
+            targetHost = taskbarHost.get();
+        const std::wstring targetMonitorId =
+            targetHost ? targetHost->monitorDeviceName() : activeMenuMonitorId_;
+        const MonitorTaskbarSettings targetProfile = monitorSettingsForDevice(targetMonitorId);
+        const bool targetVertical =
+            targetHost ? targetHost->isVerticalTaskbar() : taskbarVertical_;
+        if (targetProfile.viewMode == TaskbarViewMode::Embedded) {
             std::vector<TaskbarAnchorOption> anchorOptions;
             if (targetHost) {
                 const auto found = taskbarAnchorOptions_.find(targetHost);
@@ -117,12 +127,10 @@ std::vector<fluent::FluentMenuItem> App::buildMenuItems(bool fullTrayMenu,
                     anchorOptions = found->second;
             }
             if (anchorOptions.empty()) {
-                const bool vertical =
-                    targetHost ? targetHost->isVerticalTaskbar() : taskbarVertical_;
-                const int posMode = settings_.taskbarPosition_;
+                const int posMode = targetProfile.taskbarPosition;
                 anchorOptions = {
-                    {TaskbarAnchorSpec::outerStart(), 0, 1, true, vertical, posMode == 1},
-                    {TaskbarAnchorSpec::outerEnd(), 0, 1, true, vertical, posMode != 1},
+                    {TaskbarAnchorSpec::outerStart(), 0, 1, true, targetVertical, posMode == 1},
+                    {TaskbarAnchorSpec::outerEnd(), 0, 1, true, targetVertical, posMode != 1},
                 };
             }
 
@@ -151,22 +159,23 @@ std::vector<fluent::FluentMenuItem> App::buildMenuItems(bool fullTrayMenu,
         fluent::FluentMenuItem viewMode;
         viewMode.text = L"展示模式";
         viewMode.icon = settings_icon::Kind::Display;
-        auto addViewMode = [this, &viewMode](int id, const wchar_t* text, TaskbarViewMode mode,
-                                             bool enabled = true) {
+        auto addViewMode = [&targetProfile, &viewMode](int id, const wchar_t* text,
+                                                       TaskbarViewMode mode,
+                                                       bool enabled = true) {
             fluent::FluentMenuItem sub;
             sub.id = id;
             sub.text = text;
             sub.icon = settings_icon::Kind::Display;
-            sub.checked = settings_.taskbarViewMode_ == mode;
+            sub.checked = targetProfile.viewMode == mode;
             sub.enabled = enabled;
             viewMode.submenu.push_back(std::move(sub));
         };
         addViewMode(kCmdTaskbarModeEmbedded, L"内嵌", TaskbarViewMode::Embedded);
         addViewMode(kCmdTaskbarModeImmersive, L"沉浸", TaskbarViewMode::Immersive,
-                    !taskbarVertical_);
+                    !targetVertical);
         addViewMode(kCmdTaskbarModeAppBar, L"Dock 模式", TaskbarViewMode::AppBar);
         items.push_back(std::move(viewMode));
-        if (settings_.taskbarViewMode_ == TaskbarViewMode::AppBar) {
+        if (targetProfile.viewMode == TaskbarViewMode::AppBar) {
             fluent::FluentMenuItem edge;
             edge.text = L"Dock 位置";
             edge.icon = settings_icon::Kind::Position;
@@ -174,11 +183,11 @@ std::vector<fluent::FluentMenuItem> App::buildMenuItems(bool fullTrayMenu,
             sub.id = kCmdAppBarTop;
             sub.text = L"顶部";
             sub.icon = settings_icon::Kind::Position;
-            sub.checked = settings_.appBarEdge_ == AppBarEdge::Top;
+            sub.checked = targetProfile.appBarEdge == AppBarEdge::Top;
             edge.submenu.push_back(sub);
             sub.id = kCmdAppBarBottom;
             sub.text = L"底部";
-            sub.checked = settings_.appBarEdge_ == AppBarEdge::Bottom;
+            sub.checked = targetProfile.appBarEdge == AppBarEdge::Bottom;
             edge.submenu.push_back(sub);
             items.push_back(std::move(edge));
         }
@@ -279,17 +288,22 @@ std::vector<fluent::FluentMenuItem> App::buildMenuItems(bool fullTrayMenu,
 void App::showTrayMenu() {
     POINT pt{};
     GetCursorPos(&pt);
+    activeMenuMonitorId_ = taskbarHost ? taskbarHost->monitorDeviceName() : std::wstring{};
     showTrayMenu(pt);
 }
 
 void App::showTrayMenu(POINT screenPt, bool includePlaybackSources) {
+    if (activeMenuMonitorId_.empty() && taskbarHost)
+        activeMenuMonitorId_ = taskbarHost->monitorDeviceName();
     fluent::FluentMenu::show(trayHwnd, screenPt,
                              buildMenuItems(true, nullptr, includePlaybackSources),
                              [this](int cmd) { onMenuCommand(cmd, L"tray"); });
 }
 
 void App::showTaskbarMenu(POINT screenPt, const TaskbarHost* menuHost) {
-    const auto configuredMode = settings_.taskbarViewMode_;
+    activeMenuMonitorId_ = menuHost ? menuHost->monitorDeviceName()
+                                    : (taskbarHost ? taskbarHost->monitorDeviceName() : std::wstring{});
+    const auto configuredMode = monitorSettingsForDevice(activeMenuMonitorId_).viewMode;
     const bool vertical = configuredMode == TaskbarViewMode::Immersive &&
                           (menuHost ? menuHost->isVerticalTaskbar() : taskbarVertical_);
     const auto effectiveMode = display_rules::effectiveTaskbarViewMode(configuredMode, vertical);
@@ -378,11 +392,16 @@ void App::onMenuCommand(int cmd, const wchar_t* source) {
         return;
     }
     runtime_log::writef(L"[action][%s] command=%s id=%d", source, trayCommandName(cmd), cmd);
+    const std::wstring menuMonitorId =
+        !activeMenuMonitorId_.empty()
+            ? activeMenuMonitorId_
+            : (taskbarHost ? taskbarHost->monitorDeviceName() : std::wstring{});
     if (cmd >= kCmdTaskbarAnchorBase &&
         cmd < kCmdTaskbarAnchorBase + static_cast<int>(activeTaskbarAnchorMenuSpecs_.size())) {
-        if (settings_.taskbarViewMode_ == TaskbarViewMode::Embedded) {
+        if (monitorSettingsForDevice(menuMonitorId).viewMode == TaskbarViewMode::Embedded) {
             const size_t index = static_cast<size_t>(cmd - kCmdTaskbarAnchorBase);
-            applyTaskbarAnchor(activeTaskbarAnchorMenuSpecs_[index], L"taskbar-position");
+            applyTaskbarAnchor(activeTaskbarAnchorMenuSpecs_[index], L"taskbar-position", nullptr,
+                               menuMonitorId);
         }
         return;
     }
@@ -404,20 +423,23 @@ void App::onMenuCommand(int cmd, const wchar_t* source) {
         applyRenderMode(static_cast<int>(RenderMode::Minimal));
         break;
     case kCmdTaskbarModeEmbedded:
-        applyTaskbarViewMode(0);
+        applyTaskbarViewModeForMonitor(menuMonitorId, 0);
         break;
-    case kCmdTaskbarModeImmersive:
-        if (!taskbarVertical_)
-            applyTaskbarViewMode(1);
+    case kCmdTaskbarModeImmersive: {
+        const TaskbarHost* host = findHostForMonitor(menuMonitorId);
+        const bool vertical = host ? host->isVerticalTaskbar() : taskbarVertical_;
+        if (!vertical)
+            applyTaskbarViewModeForMonitor(menuMonitorId, 1);
         break;
+    }
     case kCmdTaskbarModeAppBar:
-        applyTaskbarViewMode(2);
+        applyTaskbarViewModeForMonitor(menuMonitorId, 2);
         break;
     case kCmdAppBarTop:
-        applyAppBarEdge(0);
+        applyAppBarEdgeForMonitor(menuMonitorId, 0);
         break;
     case kCmdAppBarBottom:
-        applyAppBarEdge(1);
+        applyAppBarEdgeForMonitor(menuMonitorId, 1);
         break;
     case kCmdSpectrum:
         applySpectrumOn(!settings_.spectrumOn_);
@@ -585,6 +607,7 @@ LRESULT CALLBACK App::trayWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_DISPLAYCHANGE) {
         app->taskbarDisplayRebuildRetries_ = 0;
         app->requestTaskbarRebuild();
+        app->refreshSettingsDialog(true);
         return 0;
     }
     if (msg == kMsgTaskbarRebuild) {

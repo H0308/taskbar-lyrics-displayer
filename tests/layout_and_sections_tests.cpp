@@ -257,3 +257,53 @@ TEST_CASE("settings_sections.search_and_interdependent_row_states") {
     EXPECT_TRUE(fsTarget->enabled);
     EXPECT_EQ(fsTarget->selected, 2);
 }
+
+TEST_CASE("settings_sections.per_monitor_mode_constraints_and_single_display_guard") {
+    SettingsSections sections;
+    sections.state.multiMonitorConnected = false;
+    sections.state.monitorEnabled = true;
+    sections.state.monitorDisableAllowed = false;
+    sections.state.editingMonitorHasTaskbar = true;
+    sections.state.editingMonitorVertical = false;
+    sections.state.taskbarViewMode = 0;
+    sections.create();
+
+    // 单显示器时不允许关闭「在此显示器显示」，也不启用多屏切换与一键同步
+    const auto* monitorBtn = sections.findRow(settings_ui::kIdTaskbarMonitor);
+    const auto* monitorToggle = sections.findRow(settings_ui::kIdMonitorEnabled);
+    const auto* applyAllBtn = sections.findRow(settings_ui::kIdApplyMonitorToAll);
+    EXPECT_TRUE(monitorBtn != nullptr && monitorToggle != nullptr && applyAllBtn != nullptr);
+    EXPECT_FALSE(monitorBtn->enabled);
+    EXPECT_TRUE(monitorToggle->checked);
+    EXPECT_FALSE(monitorToggle->enabled);
+    EXPECT_FALSE(applyAllBtn->enabled);
+
+    // 多显示器且副屏未开启系统任务栏时，仅允许选择 Dock 模式；关闭显示器时保留原模式值
+    auto multiState = sections.state;
+    multiState.multiMonitorConnected = true;
+    multiState.monitorEnabled = true;
+    multiState.monitorDisableAllowed = true;
+    multiState.editingMonitorHasTaskbar = false;
+    multiState.taskbarViewMode = 2;
+    sections.update(multiState);
+    const auto* viewMode = sections.findRow(settings_ui::kIdTaskbarViewMode);
+    EXPECT_TRUE(viewMode != nullptr);
+    EXPECT_TRUE(monitorBtn->enabled);
+    EXPECT_TRUE(monitorToggle->enabled);
+    EXPECT_TRUE(applyAllBtn->enabled);
+    EXPECT_FALSE(viewMode->optionEnabled[0]);
+    EXPECT_FALSE(viewMode->optionEnabled[1]);
+    EXPECT_TRUE(viewMode->optionEnabled[2]);
+
+    bool enabledCallbackFired = false;
+    bool enabledValue = true;
+    sections.actions.onMonitorEnabled = [&](bool on) {
+        enabledCallbackFired = true;
+        enabledValue = on;
+    };
+    sections.onCommand(settings_ui::kIdMonitorEnabled);
+    EXPECT_TRUE(enabledCallbackFired);
+    EXPECT_FALSE(enabledValue);
+    EXPECT_FALSE(viewMode->enabled);
+    EXPECT_EQ(viewMode->selected, 2);
+}

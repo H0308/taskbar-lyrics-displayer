@@ -158,9 +158,16 @@ void App::applyCoverBackgroundOpacity(int percent) {
     commitAppearanceSettings();
 }
 
-void App::applyTaskbarViewMode(int mode) {
+void App::applyTaskbarViewModeForMonitor(const std::wstring& deviceName, int mode) {
     mode = std::clamp(mode, 0, 2);
-    settings_.taskbarViewMode_ = static_cast<TaskbarViewMode>(mode);
+    const auto displays = enumerateTaskbarDisplays();
+    const std::wstring targetId =
+        deviceName.empty() ? resolveEditingMonitorDeviceName(displays) : deviceName;
+    if (!updateMonitorSettings(targetId, [mode](MonitorTaskbarSettings& profile) {
+            profile.viewMode = static_cast<TaskbarViewMode>(mode);
+        })) {
+        settings_.taskbarViewMode_ = static_cast<TaskbarViewMode>(mode);
+    }
     if (taskbarHost || taskbarPendingDisplayRebuild_) {
         publishTaskbarAppearance();
         syncTaskbarView(monitor.snapshot());
@@ -175,39 +182,68 @@ void App::applyTaskbarViewMode(int mode) {
     refreshSettingsDialog(true);
 }
 
+void App::applyTaskbarViewMode(int mode) {
+    const auto displays = enumerateTaskbarDisplays();
+    applyTaskbarViewModeForMonitor(resolveEditingMonitorDeviceName(displays), mode);
+}
+
 void App::applySongTransitionEnabled(bool on) {
     settings_.songTransitionEnabled_ = on;
     logSettingBool(L"song-transition", on);
     commitAppearanceSettings();
 }
 
-void App::applyAppBarEdge(int edge) {
-    settings_.appBarEdge_ = edge == 1 ? AppBarEdge::Bottom : AppBarEdge::Top;
-    forEachHost([&](TaskbarHost* host) { host->setAppBarEdge(settings_.appBarEdge_); });
-    logSettingInt(L"appbar-edge", settings_.appBarEdge_ == AppBarEdge::Bottom ? 1 : 0);
+void App::applyAppBarEdgeForMonitor(const std::wstring& deviceName, int edge) {
+    const AppBarEdge targetEdge = edge == 1 ? AppBarEdge::Bottom : AppBarEdge::Top;
+    const auto displays = enumerateTaskbarDisplays();
+    const std::wstring targetId =
+        deviceName.empty() ? resolveEditingMonitorDeviceName(displays) : deviceName;
+    if (!updateMonitorSettings(targetId, [targetEdge](MonitorTaskbarSettings& profile) {
+            profile.appBarEdge = targetEdge;
+        })) {
+        settings_.appBarEdge_ = targetEdge;
+    }
+    if (TaskbarHost* host = findHostForMonitor(targetId))
+        host->setAppBarEdge(targetEdge);
+    logSettingInt(L"appbar-edge", targetEdge == AppBarEdge::Bottom ? 1 : 0);
     saveSettings();
     refreshSettingsDialog(true);
 }
 
+void App::applyAppBarEdge(int edge) {
+    const auto displays = enumerateTaskbarDisplays();
+    applyAppBarEdgeForMonitor(resolveEditingMonitorDeviceName(displays), edge);
+}
+
 void App::applyImmersiveBackgroundBlur(int percent) {
     const int nextBlur = std::clamp(percent, 0, 100);
-    if (settings_.immersiveBackgroundBlur_ == nextBlur)
+    const auto displays = enumerateTaskbarDisplays();
+    const std::wstring targetId = resolveEditingMonitorDeviceName(displays);
+    if (monitorSettingsForDevice(targetId).immersiveBackgroundBlur == nextBlur)
         return;
-    settings_.immersiveBackgroundBlur_ = nextBlur;
+    updateMonitorSettings(targetId, [nextBlur](MonitorTaskbarSettings& profile) {
+        profile.immersiveBackgroundBlur = nextBlur;
+    });
     publishTaskbarAppearance();
     scheduleBackgroundBlurSettingsSave(true);
-    if (taskbarHost && !taskbarHost->backgroundBlurAvailable())
+    TaskbarHost* host = findHostForMonitor(targetId);
+    if (host && !host->backgroundBlurAvailable())
         refreshSettingsDialog(true);
 }
 
 void App::applyDockBackgroundBlur(int percent) {
     const int nextBlur = std::clamp(percent, 0, 100);
-    if (settings_.dockBackgroundBlur_ == nextBlur)
+    const auto displays = enumerateTaskbarDisplays();
+    const std::wstring targetId = resolveEditingMonitorDeviceName(displays);
+    if (monitorSettingsForDevice(targetId).dockBackgroundBlur == nextBlur)
         return;
-    settings_.dockBackgroundBlur_ = nextBlur;
+    updateMonitorSettings(targetId, [nextBlur](MonitorTaskbarSettings& profile) {
+        profile.dockBackgroundBlur = nextBlur;
+    });
     publishTaskbarAppearance();
     scheduleBackgroundBlurSettingsSave(false);
-    if (taskbarHost && !taskbarHost->backgroundBlurAvailable())
+    TaskbarHost* host = findHostForMonitor(targetId);
+    if (host && !host->backgroundBlurAvailable())
         refreshSettingsDialog(true);
 }
 
@@ -229,52 +265,61 @@ void App::flushBackgroundBlurSettingsSave() {
     backgroundBlurSettingsSavePending_ = false;
     if (trayHwnd)
         KillTimer(trayHwnd, kTimerBackgroundSettingsSave);
+    const auto displays = enumerateTaskbarDisplays();
+    const auto profile = monitorSettingsForDevice(resolveEditingMonitorDeviceName(displays));
     if (immersiveBackgroundBlurLogPending_) {
         immersiveBackgroundBlurLogPending_ = false;
-        logSettingInt(L"immersive-background-blur", settings_.immersiveBackgroundBlur_);
+        logSettingInt(L"immersive-background-blur", profile.immersiveBackgroundBlur);
     }
     if (dockBackgroundBlurLogPending_) {
         dockBackgroundBlurLogPending_ = false;
-        logSettingInt(L"dock-background-blur", settings_.dockBackgroundBlur_);
+        logSettingInt(L"dock-background-blur", profile.dockBackgroundBlur);
     }
     saveSettings();
 }
 
 void App::applyImmersiveBackgroundAdjustment(int mode) {
-    settings_.immersiveBackgroundAdjustment_ = std::clamp(mode, 0, 1);
+    const int nextMode = std::clamp(mode, 0, 1);
+    const auto displays = enumerateTaskbarDisplays();
+    const std::wstring targetId = resolveEditingMonitorDeviceName(displays);
+    updateMonitorSettings(targetId, [nextMode](MonitorTaskbarSettings& profile) {
+        profile.immersiveBackgroundAdjustment = nextMode;
+    });
     publishTaskbarAppearance();
-    logSettingInt(L"immersive-background-adjustment", settings_.immersiveBackgroundAdjustment_);
+    logSettingInt(L"immersive-background-adjustment", nextMode);
     saveSettings();
-    if (taskbarHost && !taskbarHost->backgroundBlurAvailable())
+    TaskbarHost* host = findHostForMonitor(targetId);
+    if (host && !host->backgroundBlurAvailable())
         refreshSettingsDialog(true);
 }
 
 void App::applyDockBackgroundAdjustment(int mode) {
-    settings_.dockBackgroundAdjustment_ = std::clamp(mode, 0, 1);
+    const int nextMode = std::clamp(mode, 0, 1);
+    const auto displays = enumerateTaskbarDisplays();
+    const std::wstring targetId = resolveEditingMonitorDeviceName(displays);
+    updateMonitorSettings(targetId, [nextMode](MonitorTaskbarSettings& profile) {
+        profile.dockBackgroundAdjustment = nextMode;
+    });
     publishTaskbarAppearance();
-    logSettingInt(L"dock-background-adjustment", settings_.dockBackgroundAdjustment_);
+    logSettingInt(L"dock-background-adjustment", nextMode);
     saveSettings();
-    if (taskbarHost && !taskbarHost->backgroundBlurAvailable())
+    TaskbarHost* host = findHostForMonitor(targetId);
+    if (host && !host->backgroundBlurAvailable())
         refreshSettingsDialog(true);
 }
 
 void App::applyDockResourceVisibility() {
     if (!taskbarHost)
         return;
-    DockResourceVisibility visibility;
-    visibility.embeddedEnabled = settings_.embeddedResourceMonitor_;
-    visibility.download = settings_.dockResourceDownload_;
-    visibility.upload = settings_.dockResourceUpload_;
-    visibility.gpuUsage = settings_.dockResourceGpuUsage_;
-    visibility.cpuFrequency = settings_.dockResourceCpuFrequency_;
-    visibility.smallFont = settings_.dockResourceSmallFont_;
-    visibility.hideLabels = settings_.dockResourceHideLabels_;
-    visibility.placement = settings_.dockResourcePlacement_;
     publishTaskbarAppearance();
 }
 
 void App::applyEmbeddedResourceMonitor(bool on) {
-    settings_.embeddedResourceMonitor_ = on;
+    const auto displays = enumerateTaskbarDisplays();
+    const std::wstring targetId = resolveEditingMonitorDeviceName(displays);
+    updateMonitorSettings(targetId, [on](MonitorTaskbarSettings& profile) {
+        profile.embeddedResourceMonitor = on;
+    });
     applyDockResourceVisibility();
     publishPresentationFrame(monitor.snapshot(), {.lyricsChanged = true});
     refreshSettingsDialog(true);
@@ -283,43 +328,68 @@ void App::applyEmbeddedResourceMonitor(bool on) {
 }
 
 void App::applyDockResourceGpuUsage(bool on) {
-    settings_.dockResourceGpuUsage_ = on;
+    const auto displays = enumerateTaskbarDisplays();
+    const std::wstring targetId = resolveEditingMonitorDeviceName(displays);
+    updateMonitorSettings(targetId, [on](MonitorTaskbarSettings& profile) {
+        profile.dockResourceGpuUsage = on;
+    });
     applyDockResourceVisibility();
     logSettingBool(L"dock-resource-gpu", on);
     saveSettings();
 }
 
 void App::applyDockResourceNetwork(bool download, bool on) {
-    (download ? settings_.dockResourceDownload_ : settings_.dockResourceUpload_) = on;
+    const auto displays = enumerateTaskbarDisplays();
+    const std::wstring targetId = resolveEditingMonitorDeviceName(displays);
+    updateMonitorSettings(targetId, [download, on](MonitorTaskbarSettings& profile) {
+        (download ? profile.dockResourceDownload : profile.dockResourceUpload) = on;
+    });
     applyDockResourceVisibility();
     logSettingBool(download ? L"dock-resource-download" : L"dock-resource-upload", on);
     saveSettings();
 }
 
 void App::applyDockResourceCpuFrequency(bool on) {
-    settings_.dockResourceCpuFrequency_ = on;
+    const auto displays = enumerateTaskbarDisplays();
+    const std::wstring targetId = resolveEditingMonitorDeviceName(displays);
+    updateMonitorSettings(targetId, [on](MonitorTaskbarSettings& profile) {
+        profile.dockResourceCpuFrequency = on;
+    });
     applyDockResourceVisibility();
     logSettingBool(L"dock-resource-cpu-frequency", on);
     saveSettings();
 }
 
 void App::applyDockResourceSmallFont(bool on) {
-    settings_.dockResourceSmallFont_ = on;
+    const auto displays = enumerateTaskbarDisplays();
+    const std::wstring targetId = resolveEditingMonitorDeviceName(displays);
+    updateMonitorSettings(targetId, [on](MonitorTaskbarSettings& profile) {
+        profile.dockResourceSmallFont = on;
+    });
     applyDockResourceVisibility();
     logSettingBool(L"dock-resource-small-font", on);
     saveSettings();
 }
 
 void App::applyDockResourceHideLabels(bool on) {
-    settings_.dockResourceHideLabels_ = on;
+    const auto displays = enumerateTaskbarDisplays();
+    const std::wstring targetId = resolveEditingMonitorDeviceName(displays);
+    updateMonitorSettings(targetId, [on](MonitorTaskbarSettings& profile) {
+        profile.dockResourceHideLabels = on;
+    });
     applyDockResourceVisibility();
     logSettingBool(L"dock-resource-hide-labels", on);
     saveSettings();
 }
 
 void App::applyDockResourcePlacement(int placement) {
-    settings_.dockResourcePlacement_ =
+    const ResourcePlacement value =
         placement == 0 ? ResourcePlacement::Start : ResourcePlacement::End;
+    const auto displays = enumerateTaskbarDisplays();
+    const std::wstring targetId = resolveEditingMonitorDeviceName(displays);
+    updateMonitorSettings(targetId, [value](MonitorTaskbarSettings& profile) {
+        profile.dockResourcePlacement = value;
+    });
     applyDockResourceVisibility();
     logSettingInt(L"dock-resource-placement", placement == 0 ? 0 : 1);
     saveSettings();
@@ -331,10 +401,12 @@ bool App::isMinimalRenderMode() const { return isRenderMode(RenderMode::Minimal)
 
 bool App::isNormalRenderMode() const { return isRenderMode(RenderMode::Normal); }
 
-TaskbarAppearance App::appearanceForHost(bool vertical, RenderMode mode) const {
+TaskbarAppearance App::appearanceForHost(bool vertical, RenderMode mode,
+                                         const MonitorTaskbarSettings* monitorSettings) const {
     AppearanceContext context;
     context.renderMode = mode;
     context.vertical = vertical;
+    context.monitorSettings = monitorSettings;
     context.lyricAppearance = currentLyricAppearance();
     context.playedColor = effectivePlayedColor();
     context.albumColor = playback_.state().albumColor_;
@@ -344,14 +416,18 @@ TaskbarAppearance App::appearanceForHost(bool vertical, RenderMode mode) const {
 }
 
 TaskbarAppearance App::appearanceForHost(bool vertical) const {
-    return appearanceForHost(vertical, static_cast<RenderMode>(renderMode_));
+    return appearanceForHost(vertical, static_cast<RenderMode>(renderMode_), nullptr);
+}
+
+TaskbarAppearance App::appearanceForHost(const TaskbarHost* host) const {
+    if (!host)
+        return appearanceForHost(taskbarVertical_, static_cast<RenderMode>(renderMode_), nullptr);
+    const MonitorTaskbarSettings profile = monitorSettingsForHost(host);
+    return appearanceForHost(host->isVerticalTaskbar(), effectiveRenderModeForHost(host), &profile);
 }
 
 void App::publishTaskbarAppearance() {
-    forEachHost([&](TaskbarHost* host) {
-        host->applyAppearance(
-            appearanceForHost(host->isVerticalTaskbar(), effectiveRenderModeForHost(host)));
-    });
+    forEachHost([&](TaskbarHost* host) { host->applyAppearance(appearanceForHost(host)); });
 }
 
 void App::applyEffectiveTaskbarSettings() {
@@ -420,8 +496,8 @@ bool App::applyEffectiveRenderMode(int mode) {
         if (taskbarHost) {
             // 切换期间可能没有新的 SMTC 帧，补交当前帧以保留进入停止模式
             // 前的会话可见性；实际显示仍等待宿主完成最新空间探测。
-            forEachHost(
-                [&](TaskbarHost* host) { host->applyPresentationFrame(presentation_.frame()); });
+            const SmtcSnapshot resumeSnap = monitor.snapshot();
+            forEachHost([&](TaskbarHost* host) { applyPresentationFrameToHost(host, resumeSnap); });
         } else {
             // 宿主可能在完全停止期间因任务栏重建或菜单操作被销毁，退出时
             // 按原先的开启状态静默重建，不走“手动开启”的提示流程。
@@ -448,11 +524,12 @@ bool App::applyEffectiveRenderMode(int mode) {
 
 void App::syncHostRenderModes() {
     if (taskbarHost) {
+        const SmtcSnapshot currentSnap = monitor.snapshot();
         forEachHost([&](TaskbarHost* host) {
             const RenderMode hostMode = effectiveRenderModeForHost(host);
             host->setRenderMode(hostMode);
             if (hostMode != RenderMode::Stopped)
-                host->applyPresentationFrame(presentation_.frame());
+                applyPresentationFrameToHost(host, currentSnap);
         });
         applyEffectiveTaskbarSettings();
     }
@@ -528,7 +605,7 @@ void App::applyFullscreenRenderMode(int index) {
 }
 
 void App::applyHoverControls(bool on) {
-    if (taskbarExpandedConfigured() && !taskbarVertical_)
+    if (!anyEmbeddedHostConfigured())
         return;
     settings_.hoverPlaybackControls_ = on;
     logSettingBool(L"hover-playback-controls", on);
@@ -542,7 +619,7 @@ void App::applyTaskbarContextMenu(bool on) {
 }
 
 void App::applyHoverControlStyle(int style) {
-    if (taskbarExpandedConfigured() && !taskbarVertical_)
+    if (!anyEmbeddedHostConfigured())
         return;
     settings_.hoverControlStyle_ =
         style == 1 ? HoverControlStyle::Popup : HoverControlStyle::Inline;
@@ -551,11 +628,10 @@ void App::applyHoverControlStyle(int style) {
 }
 
 void App::applyInlineControlDisplayMode(int mode) {
-    const auto effectiveMode = display_rules::effectiveTaskbarViewMode(
-        settings_.taskbarViewMode_, taskbarVertical_);
-    if (!display_rules::canEditInlineControlDisplayMode(
-            effectiveMode, taskbarVertical_, settings_.hoverPlaybackControls_,
-            settings_.hoverControlStyle_)) {
+    const bool editable = anyHorizontalEmbeddedHostConfigured() &&
+                          settings_.hoverPlaybackControls_ &&
+                          settings_.hoverControlStyle_ == HoverControlStyle::Inline;
+    if (!editable) {
         refreshSettingsDialog(true);
         return;
     }
@@ -823,7 +899,7 @@ void App::applyDoubleLineLyrics(bool on) {
 }
 
 void App::applyLyricAlignment(int alignment) {
-    if (taskbarExpandedConfigured() && !taskbarVertical_)
+    if (!anyHorizontalEmbeddedHostConfigured())
         return;
     settings_.lyricAlignment_ = alignment == 1   ? LyricAlignment::Center
                                 : alignment == 2 ? LyricAlignment::Right
@@ -1277,25 +1353,66 @@ SettingsState App::currentSettingsState() const {
     st.tickTickSyncing =
         idle_.state().tickTickTasksLoading_ || !idle_.state().tickTickCompletingTaskId_.empty();
     st.tickTickStatus = idle_.state().tickTickStatus_;
+    const auto displays = enumerateTaskbarDisplays();
+    const std::wstring editingId = resolveEditingMonitorDeviceName(displays);
+    const auto editingDisplayIt =
+        std::find_if(displays.begin(), displays.end(),
+                     [&](const auto& item) { return item.deviceName == editingId; });
+    const bool editingPrimary =
+        editingDisplayIt != displays.end() ? editingDisplayIt->primary : true;
+    const MonitorTaskbarSettings editingProfile =
+        editingDisplayIt != displays.end() ? monitorSettingsForDisplay(*editingDisplayIt)
+                                           : monitorSettingsForDevice(editingId);
+    const TaskbarHost* editingHost = findHostForMonitor(editingId);
+    const bool editingHasTaskbar =
+        editingDisplayIt != displays.end() ? (editingDisplayIt->taskbarWindow != nullptr) : true;
+    const bool editingVertical =
+        editingHost ? editingHost->isVerticalTaskbar()
+                    : (editingDisplayIt != displays.end()
+                           ? (editingDisplayIt->taskbarWindow && !editingDisplayIt->horizontalTaskbar)
+                           : vertical);
+    int otherEnabledCount = 0;
+    if (displays.size() > 1) {
+        for (const auto& display : displays) {
+            if (display.deviceName == editingId)
+                continue;
+            const auto profile = monitorSettingsForDisplay(display);
+            if (profile.enabled &&
+                (profile.viewMode == TaskbarViewMode::AppBar || display.taskbarWindow != nullptr))
+                ++otherEnabledCount;
+        }
+    }
+    const bool multiMonitor = displays.size() > 1;
+    const bool effectiveMonitorEnabled =
+        !multiMonitor || editingProfile.enabled || (otherEnabledCount == 0 && editingPrimary);
     st.verticalTaskbar = vertical;
-    st.taskbarViewMode = static_cast<int>(settings_.taskbarViewMode_);
+    st.multiMonitorConnected = multiMonitor;
+    st.monitorEnabled = effectiveMonitorEnabled;
+    st.monitorDisableAllowed = multiMonitor && otherEnabledCount > 0;
+    st.editingMonitorHasTaskbar = editingHasTaskbar;
+    st.editingMonitorVertical = editingVertical;
+    st.anyEmbeddedHostActive = anyEmbeddedHostConfigured();
+    st.anyHorizontalEmbeddedHostActive = anyHorizontalEmbeddedHostConfigured();
+    st.taskbarViewMode = static_cast<int>(editingProfile.viewMode);
     st.songTransitionEnabled = settings_.songTransitionEnabled_;
     st.taskbarMonitorLabel = taskbarMonitorLabel();
     st.mediaSessionAlive = monitor.snapshot().sessionAlive;
-    st.appBarEdge = settings_.appBarEdge_ == AppBarEdge::Bottom ? 1 : 0;
-    st.immersiveBackgroundBlur = settings_.immersiveBackgroundBlur_;
-    st.dockBackgroundBlur = settings_.dockBackgroundBlur_;
-    st.immersiveBackgroundAdjustment = settings_.immersiveBackgroundAdjustment_;
-    st.dockBackgroundAdjustment = settings_.dockBackgroundAdjustment_;
-    st.backgroundBlurSupported = !taskbarHost || taskbarHost->backgroundBlurAvailable();
-    st.embeddedResourceMonitor = settings_.embeddedResourceMonitor_;
-    st.dockResourceGpuUsage = settings_.dockResourceGpuUsage_;
-    st.dockResourceDownload = settings_.dockResourceDownload_;
-    st.dockResourceUpload = settings_.dockResourceUpload_;
-    st.dockResourceCpuFrequency = settings_.dockResourceCpuFrequency_;
-    st.dockResourceSmallFont = settings_.dockResourceSmallFont_;
-    st.dockResourceHideLabels = settings_.dockResourceHideLabels_;
-    st.dockResourcePlacement = settings_.dockResourcePlacement_ == ResourcePlacement::Start ? 0 : 1;
+    st.appBarEdge = editingProfile.appBarEdge == AppBarEdge::Bottom ? 1 : 0;
+    st.immersiveBackgroundBlur = editingProfile.immersiveBackgroundBlur;
+    st.dockBackgroundBlur = editingProfile.dockBackgroundBlur;
+    st.immersiveBackgroundAdjustment = editingProfile.immersiveBackgroundAdjustment;
+    st.dockBackgroundAdjustment = editingProfile.dockBackgroundAdjustment;
+    st.backgroundBlurSupported = editingHost ? editingHost->backgroundBlurAvailable()
+                                             : (!taskbarHost || taskbarHost->backgroundBlurAvailable());
+    st.embeddedResourceMonitor = editingProfile.embeddedResourceMonitor;
+    st.dockResourceGpuUsage = editingProfile.dockResourceGpuUsage;
+    st.dockResourceDownload = editingProfile.dockResourceDownload;
+    st.dockResourceUpload = editingProfile.dockResourceUpload;
+    st.dockResourceCpuFrequency = editingProfile.dockResourceCpuFrequency;
+    st.dockResourceSmallFont = editingProfile.dockResourceSmallFont;
+    st.dockResourceHideLabels = editingProfile.dockResourceHideLabels;
+    st.dockResourcePlacement =
+        editingProfile.dockResourcePlacement == ResourcePlacement::Start ? 0 : 1;
     st.songInfoVisible = view.songInfoVisible;
     st.albumCoverVisible = settings_.albumCoverVisible_;
     st.platformIconVisible = settings_.platformIconVisible_;
@@ -1415,6 +1532,8 @@ SettingsActions App::buildSettingsActions() {
     act.onTaskbarViewMode = [this](int mode) { applyTaskbarViewMode(mode); };
     act.onSongTransitionEnabled = [this](bool on) { applySongTransitionEnabled(on); };
     act.onChooseTaskbarMonitor = [this] { showTaskbarMonitorMenu(); };
+    act.onMonitorEnabled = [this](bool on) { applyMonitorEnabled(on); };
+    act.onApplyMonitorSettingsToAll = [this] { applyMonitorSettingsToAll(); };
     act.onAppBarEdge = [this](int edge) { applyAppBarEdge(edge); };
     act.onImmersiveBackgroundBlur = [this](int percent) { applyImmersiveBackgroundBlur(percent); };
     act.onDockBackgroundBlur = [this](int percent) { applyDockBackgroundBlur(percent); };

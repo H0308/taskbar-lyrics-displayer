@@ -95,6 +95,8 @@ inline settings_icon::Kind iconForRow(int id) {
     case kIdTaskbarViewMode:
     case kIdSongTransitionEnabled:
     case kIdTaskbarMonitor:
+    case kIdMonitorEnabled:
+    case kIdApplyMonitorToAll:
     case kIdFullscreenRenderModeMonitor:
         return settings_icon::Kind::Display;
     case kIdAppBarEdge:

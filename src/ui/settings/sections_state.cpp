@@ -84,29 +84,56 @@ void SettingsSections::updateBackgroundAdjustmentPresentation() {
 void SettingsSections::updateImmersiveRowsEnabled() {
     auto* mode = findRow(kIdTaskbarViewMode);
     const int selectedMode = mode ? std::clamp(mode->selected, 0, 2) : 0;
-    const bool immersiveEnabled = !state.verticalTaskbar;
-    const bool appBarEnabled = selectedMode == 2;
-    const bool expandedEnabled = appBarEnabled || (selectedMode == 1 && immersiveEnabled);
+    const bool monitorActive = !state.multiMonitorConnected || state.monitorEnabled;
+    const bool hasTaskbar = state.editingMonitorHasTaskbar;
+    const bool vertical = state.editingMonitorVertical;
+    const bool immersiveEnabled = hasTaskbar && !vertical;
+    const bool appBarEnabled = monitorActive && selectedMode == 2;
+    if (auto* row = findRow(kIdTaskbarMonitor)) {
+        row->enabled = state.multiMonitorConnected;
+        row->hint = state.multiMonitorConnected
+                        ? L"以下展示模式、背景与资源监视配置均仅对当前选中的显示器生效。"
+                        : L"当前仅连接一台显示器；连接多台显示器后可分别为每台显示器设置不同模式与效果。";
+        row->showHint = true;
+    }
+    if (auto* row = findRow(kIdMonitorEnabled)) {
+        row->checked = monitorActive;
+        row->enabled = state.multiMonitorConnected && (!monitorActive || state.monitorDisableAllowed);
+        row->hint = state.multiMonitorConnected
+                        ? (state.monitorDisableAllowed
+                               ? L"关闭后仅隐藏该显示器，并保留它当前的模式与效果设置。"
+                               : L"至少保留一台显示器显示；如需全部关闭，请使用右键菜单中的「关闭任务栏歌词」。")
+                        : L"单显示器下如需关闭，请使用右键菜单中的「关闭任务栏歌词」。";
+        row->showHint = true;
+    }
+    if (auto* row = findRow(kIdApplyMonitorToAll))
+        row->enabled = state.multiMonitorConnected;
     if (mode) {
-        mode->enabled = true;
-        mode->optionEnabled.assign(mode->options.size(), true);
+        mode->enabled = monitorActive;
+        mode->optionEnabled.assign(mode->options.size(), monitorActive);
+        if (mode->optionEnabled.size() > 0)
+            mode->optionEnabled[0] = monitorActive && hasTaskbar;
         if (mode->optionEnabled.size() > 1)
-            mode->optionEnabled[1] = immersiveEnabled;
+            mode->optionEnabled[1] = monitorActive && immersiveEnabled;
+        if (mode->optionEnabled.size() > 2)
+            mode->optionEnabled[2] = monitorActive;
+        mode->hint = hasTaskbar ? L"" : L"当前显示器未开启系统任务栏，仅可使用 Dock 模式。";
+        mode->showHint = !mode->hint.empty();
     }
     if (auto* row = findRow(kIdAppBarEdge))
         row->enabled = appBarEnabled;
-    if (auto* row = findRow(kIdTaskbarMonitor))
-        row->enabled = true;
     if (auto* row = findRow(kIdImmersiveBackgroundAdjustment)) {
         row->selected = std::clamp(state.immersiveBackgroundAdjustment, 0, 1);
-        row->enabled = selectedMode == 1 && immersiveEnabled && state.backgroundBlurSupported;
+        row->enabled =
+            monitorActive && selectedMode == 1 && immersiveEnabled && state.backgroundBlurSupported;
     }
     if (auto* row = findRow(kIdDockBackgroundAdjustment)) {
         row->selected = std::clamp(state.dockBackgroundAdjustment, 0, 1);
         row->enabled = appBarEnabled && state.backgroundBlurSupported;
     }
     if (auto* row = findRow(kIdImmersiveBackgroundBlur)) {
-        row->enabled = selectedMode == 1 && immersiveEnabled && state.backgroundBlurSupported;
+        row->enabled =
+            monitorActive && selectedMode == 1 && immersiveEnabled && state.backgroundBlurSupported;
         row->hint = backgroundAdjustmentHint(state.backgroundBlurSupported);
         row->showHint = !row->hint.empty();
         row->minHeight = kRowTallH;
@@ -120,7 +147,7 @@ void SettingsSections::updateImmersiveRowsEnabled() {
         row->height = row->minHeight;
     }
     updateBackgroundAdjustmentPresentation();
-    const bool embeddedResources = selectedMode == 0;
+    const bool embeddedResources = monitorActive && hasTaskbar && selectedMode == 0;
     if (auto* row = findRow(kIdEmbeddedResourceMonitor))
         row->enabled = embeddedResources;
     if (auto* row = findRow(kIdDockResourcePlacement))
@@ -135,33 +162,32 @@ void SettingsSections::updateImmersiveRowsEnabled() {
         row->enabled = resourceExtrasEnabled;
     if (auto* row = findRow(kIdDockResourceCpuFrequency))
         row->enabled = resourceExtrasEnabled;
+    if (auto* row = findRow(kIdDockResourceSmallFont))
+        row->enabled = resourceExtrasEnabled;
+    if (auto* row = findRow(kIdDockResourceHideLabels))
+        row->enabled = resourceExtrasEnabled;
     updateMediaControlRowsEnabled();
     if (auto* row = findRow(kIdAlignment))
-        row->enabled = !expandedEnabled && !state.verticalTaskbar;
+        row->enabled = state.anyHorizontalEmbeddedHostActive;
 }
 
 void SettingsSections::updateMediaControlRowsEnabled() {
-    const auto* mode = findRow(kIdTaskbarViewMode);
-    const int selectedMode =
-        mode ? std::clamp(mode->selected, 0, 2) : std::clamp(state.taskbarViewMode, 0, 2);
-    const auto effectiveMode = display_rules::effectiveTaskbarViewMode(
-        static_cast<TaskbarViewMode>(selectedMode), state.verticalTaskbar);
-    const bool expandedEnabled = effectiveMode != TaskbarViewMode::Embedded;
+    const bool anyEmbedded = state.anyEmbeddedHostActive;
+    const bool anyHorizontalEmbedded = state.anyHorizontalEmbeddedHostActive;
     const bool minimal = minimalModeActive();
     auto* controls = findRow(kIdHoverControls);
     if (controls)
-        controls->enabled = !expandedEnabled;
+        controls->enabled = anyEmbedded;
     auto* style = findRow(kIdHoverControlStyle);
     if (style)
-        style->enabled = !expandedEnabled && controls && controls->checked && !minimal;
+        style->enabled = anyEmbedded && controls && controls->checked && !minimal;
     if (auto* inlineMode = findRow(kIdInlineControlDisplayMode)) {
         const bool forcedHoverByMinimal = minimal && state.hoverControlStyle == 1;
-        inlineMode->selected = (state.verticalTaskbar || forcedHoverByMinimal)
+        inlineMode->selected = (!anyHorizontalEmbedded || forcedHoverByMinimal)
                                    ? 0
                                    : std::clamp(state.inlineControlDisplayMode, 0, 1);
-        inlineMode->enabled = display_rules::canEditInlineControlDisplayMode(
-            effectiveMode, state.verticalTaskbar, controls && controls->checked,
-            state.hoverControlStyle == 0 ? HoverControlStyle::Inline : HoverControlStyle::Popup);
+        inlineMode->enabled = anyHorizontalEmbedded && controls && controls->checked &&
+                              state.hoverControlStyle == 0;
     }
 }
 
@@ -304,75 +330,46 @@ void SettingsSections::syncDisplayRows(const SettingsState& s) {
 }
 
 void SettingsSections::syncTaskbarModeRows(const SettingsState& s) {
-    const bool vertical = s.verticalTaskbar;
+    const bool vertical = s.editingMonitorVertical;
+    const bool monitorActive = !s.multiMonitorConnected || s.monitorEnabled;
     if (auto* row = findRow(kIdTaskbarViewMode))
         row->selected = std::clamp(s.taskbarViewMode, 0, 2);
     if (auto* row = findRow(kIdTaskbarMonitor)) {
         row->controlText = s.taskbarMonitorLabel;
-        row->enabled = s.taskbarViewMode != 0;
+        row->enabled = s.multiMonitorConnected;
     }
-    if (auto* row = findRow(kIdAppBarEdge)) {
+    if (auto* row = findRow(kIdMonitorEnabled))
+        row->checked = monitorActive;
+    if (auto* row = findRow(kIdAppBarEdge))
         row->selected = std::clamp(s.appBarEdge, 0, 1);
-        row->enabled = s.taskbarViewMode == 2;
-    }
-    if (auto* row = findRow(kIdImmersiveBackgroundAdjustment)) {
+    if (auto* row = findRow(kIdImmersiveBackgroundAdjustment))
         row->selected = std::clamp(s.immersiveBackgroundAdjustment, 0, 1);
-        row->enabled = !vertical && s.taskbarViewMode == 1 && s.backgroundBlurSupported;
-    }
-    if (auto* row = findRow(kIdDockBackgroundAdjustment)) {
+    if (auto* row = findRow(kIdDockBackgroundAdjustment))
         row->selected = std::clamp(s.dockBackgroundAdjustment, 0, 1);
-        row->enabled = s.taskbarViewMode == 2 && s.backgroundBlurSupported;
-    }
-    if (auto* row = findRow(kIdImmersiveBackgroundBlur)) {
+    if (auto* row = findRow(kIdImmersiveBackgroundBlur))
         row->value = std::clamp(s.immersiveBackgroundBlur, 0, 100);
-        row->enabled = !vertical && s.taskbarViewMode == 1 && s.backgroundBlurSupported;
-        row->hint = backgroundAdjustmentHint(s.backgroundBlurSupported);
-        row->showHint = !row->hint.empty();
-    }
-    if (auto* row = findRow(kIdDockBackgroundBlur)) {
+    if (auto* row = findRow(kIdDockBackgroundBlur))
         row->value = std::clamp(s.dockBackgroundBlur, 0, 100);
-        row->enabled = s.taskbarViewMode == 2 && s.backgroundBlurSupported;
-        row->hint = backgroundAdjustmentHint(s.backgroundBlurSupported);
-        row->showHint = !row->hint.empty();
-    }
-    updateBackgroundAdjustmentPresentation();
-    if (auto* row = findRow(kIdEmbeddedResourceMonitor)) {
+    if (auto* row = findRow(kIdEmbeddedResourceMonitor))
         row->checked = s.embeddedResourceMonitor;
-        row->enabled = s.taskbarViewMode == 0;
-    }
     if (auto* row = findRow(kIdDockResourcePlacement)) {
         row->options = vertical ? std::vector<std::wstring>{L"顶部", L"底部"}
                                 : std::vector<std::wstring>{L"左侧", L"右侧"};
         row->selected = std::clamp(s.dockResourcePlacement, 0, 1);
-        row->enabled = s.taskbarViewMode == 0 && s.embeddedResourceMonitor;
     }
-    const bool resourceExtrasEnabled =
-        s.taskbarViewMode == 2 ||
-        (s.taskbarViewMode == 0 && s.embeddedResourceMonitor);
-    if (auto* row = findRow(kIdDockResourceDownload)) {
+    if (auto* row = findRow(kIdDockResourceDownload))
         row->checked = s.dockResourceDownload;
-        row->enabled = resourceExtrasEnabled;
-    }
-    if (auto* row = findRow(kIdDockResourceUpload)) {
+    if (auto* row = findRow(kIdDockResourceUpload))
         row->checked = s.dockResourceUpload;
-        row->enabled = resourceExtrasEnabled;
-    }
-    if (auto* row = findRow(kIdDockResourceGpuUsage)) {
+    if (auto* row = findRow(kIdDockResourceGpuUsage))
         row->checked = s.dockResourceGpuUsage;
-        row->enabled = resourceExtrasEnabled;
-    }
-    if (auto* row = findRow(kIdDockResourceCpuFrequency)) {
+    if (auto* row = findRow(kIdDockResourceCpuFrequency))
         row->checked = s.dockResourceCpuFrequency;
-        row->enabled = resourceExtrasEnabled;
-    }
-    if (auto* row = findRow(kIdDockResourceSmallFont)) {
+    if (auto* row = findRow(kIdDockResourceSmallFont))
         row->checked = s.dockResourceSmallFont;
-        row->enabled = resourceExtrasEnabled;
-    }
-    if (auto* row = findRow(kIdDockResourceHideLabels)) {
+    if (auto* row = findRow(kIdDockResourceHideLabels))
         row->checked = s.dockResourceHideLabels;
-        row->enabled = resourceExtrasEnabled;
-    }
+    updateImmersiveRowsEnabled();
     settings_ui::updateSpectrumRows(rows[kSpectrumPage], s);
 }
 

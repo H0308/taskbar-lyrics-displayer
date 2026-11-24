@@ -213,6 +213,8 @@ private:
     std::unique_ptr<TaskbarHost> taskbarHost; // 具体类型：歌词描边光晕是任务栏独有接口
     std::vector<std::unique_ptr<TaskbarHost>> additionalTaskbarHosts_;
     std::vector<std::wstring> activeTaskbarDisplayIds_;
+    std::wstring settingsEditingMonitorId_; // 设置页「展示模式」当前正在编辑的显示器设备名
+    std::wstring activeMenuMonitorId_;      // 当前弹出右键菜单对应的目标显示器设备名
     std::vector<std::pair<int, std::wstring>> taskbarMonitorMenuItems_;
     std::unordered_map<const TaskbarHost*, std::vector<TaskbarAnchorOption>> taskbarAnchorOptions_;
     std::vector<TaskbarAnchorSpec> activeTaskbarAnchorMenuSpecs_;
@@ -312,6 +314,18 @@ private:
 
     std::vector<TaskbarDisplayInfo> desiredTaskbarDisplays(const SmtcSnapshot& snap) const;
 
+    MonitorTaskbarSettings monitorSettingsForDisplay(const TaskbarDisplayInfo& display) const;
+    MonitorTaskbarSettings monitorSettingsForDevice(const std::wstring& deviceName) const;
+    MonitorTaskbarSettings monitorSettingsForHost(const TaskbarHost* host) const;
+    TaskbarHost* findHostForMonitor(const std::wstring& deviceName) const;
+    std::wstring resolveEditingMonitorDeviceName(
+        const std::vector<TaskbarDisplayInfo>& displays) const;
+    void materializeConnectedMonitorSettings(const std::vector<TaskbarDisplayInfo>& displays);
+    bool updateMonitorSettings(const std::wstring& deviceName,
+                               const std::function<void(MonitorTaskbarSettings&)>& mutator);
+    bool anyEmbeddedHostConfigured() const;
+    bool anyHorizontalEmbeddedHostConfigured() const;
+
     std::wstring taskbarDisplayLabel(const TaskbarDisplayInfo& display) const;
 
     std::wstring taskbarMonitorLabel() const;
@@ -319,6 +333,10 @@ private:
     void selectTaskbarMonitor(const std::wstring& deviceName);
 
     void showTaskbarMonitorMenu();
+
+    void applyMonitorEnabled(bool on);
+
+    void applyMonitorSettingsToAll();
 
     bool fullscreenTargetAllMonitors() const;
 
@@ -390,9 +408,11 @@ private:
     void syncTaskbarView(const SmtcSnapshot& snap);
 
     void applyTaskbarViewMode(int mode);
+    void applyTaskbarViewModeForMonitor(const std::wstring& deviceName, int mode);
     void applySongTransitionEnabled(bool on);
 
     void applyAppBarEdge(int edge);
+    void applyAppBarEdgeForMonitor(const std::wstring& deviceName, int edge);
 
     void applyImmersiveBackgroundBlur(int percent);
 
@@ -431,8 +451,10 @@ private:
     // 各设置字段保存用户的常规配置；极简模式只在推送到宿主时临时覆盖有效值，
     // 退出后重新推送原配置，避免用户切换性能模式时丢失显示偏好。竖向任务栏则
     // 额外关闭不适合窄栏的有效显示，但歌词相关配置仍保留，切回横向即可继续使用。
-    TaskbarAppearance appearanceForHost(bool vertical, RenderMode mode) const;
+    TaskbarAppearance appearanceForHost(bool vertical, RenderMode mode,
+                                        const MonitorTaskbarSettings* monitorSettings = nullptr) const;
     TaskbarAppearance appearanceForHost(bool vertical) const;
+    TaskbarAppearance appearanceForHost(const TaskbarHost* host) const;
     void publishTaskbarAppearance();
     void applyEffectiveTaskbarSettings();
 
@@ -561,8 +583,13 @@ private:
 
     void pickIdleApp();
 
+    IdleFrameInput buildIdleFrameInput(TaskbarViewMode effectiveMode,
+                                       bool embeddedResourceMonitor) const;
+
     const PresentationFrame& preparePresentationFrame(const SmtcSnapshot& snap,
                                                       PresentationUpdate update);
+
+    void applyPresentationFrameToHost(TaskbarHost* host, const SmtcSnapshot& snap);
 
     void publishPresentationFrame(const SmtcSnapshot& snap, PresentationUpdate update);
 
@@ -577,7 +604,8 @@ private:
     bool isLiveTaskbarHost(const TaskbarHost* host) const;
 
     void applyTaskbarAnchor(const TaskbarAnchorSpec& anchor, const wchar_t* logSource,
-                            const TaskbarHost* alreadyAppliedHost = nullptr);
+                            const TaskbarHost* alreadyAppliedHost = nullptr,
+                            const std::wstring& targetMonitorDeviceName = {});
 
     TaskbarCreateResult createTaskbar(HINSTANCE inst, bool allowOverlap = false);
 
@@ -594,7 +622,7 @@ private:
     void showManualSearch(HINSTANCE inst);
 
     // 把当前播放状态同步给某个宿主（新建宿主时避免显示“等待播放…”）
-    void syncHost(ILyricHost* host);
+    void syncHost(TaskbarHost* host);
 
     void onControl(MediaControl c, uint64_t sessionGeneration, int64_t positionMs);
 

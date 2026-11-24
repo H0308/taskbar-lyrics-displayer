@@ -87,36 +87,60 @@ void SettingsSections::createDisplayRows() {
 }
 
 void SettingsSections::createTaskbarModeRows() {
-    const bool vertical = state.verticalTaskbar;
+    const bool vertical = state.editingMonitorVertical;
+    const bool monitorActive = !state.multiMonitorConnected || state.monitorEnabled;
+    addHeader(kTaskbarModePage, L"显示器配置");
+    Row& taskbarMonitor = addButton(
+        kTaskbarModePage, kIdTaskbarMonitor, L"当前配置显示器",
+        state.multiMonitorConnected
+            ? L"以下展示模式、背景与资源监视配置均仅对当前选中的显示器生效。"
+            : L"当前仅连接一台显示器；连接多台显示器后可分别为每台显示器设置不同模式与效果。",
+        state.taskbarMonitorLabel.c_str(), kRowTallH);
+    taskbarMonitor.enabled = state.multiMonitorConnected;
+    Row& monitorEnabled = addRow(
+        kTaskbarModePage, kIdMonitorEnabled, ControlKind::Toggle, L"在此显示器显示",
+        state.multiMonitorConnected
+            ? (state.monitorDisableAllowed
+                   ? L"关闭后仅隐藏该显示器，并保留它当前的模式与效果设置。"
+                   : L"至少保留一台显示器显示；如需全部关闭，请使用右键菜单中的「关闭任务栏歌词」。")
+            : L"单显示器下如需关闭，请使用右键菜单中的「关闭任务栏歌词」。",
+        40.0f, kRowTallH);
+    monitorEnabled.checked = monitorActive;
+    monitorEnabled.enabled =
+        state.multiMonitorConnected && (!monitorActive || state.monitorDisableAllowed);
+    Row& applyAll = addButton(
+        kTaskbarModePage, kIdApplyMonitorToAll, L"同步到全部显示器",
+        L"将当前显示器的模式、背景、Dock 位置与资源监视配置应用到全部已连接显示器。",
+        L"应用到全部", kRowTallH);
+    applyAll.enabled = state.multiMonitorConnected;
     addHeader(kTaskbarModePage, L"展示模式");
     addRadio(kTaskbarModePage, kIdTaskbarViewMode, L"任务栏歌词展示模式", nullptr,
-             {L"内嵌", L"沉浸", L"Dock 模式"}, std::clamp(state.taskbarViewMode, 0, 2), true,
-             kRowTallH);
-    Row& taskbarMonitor = addButton(
-        kTaskbarModePage, kIdTaskbarMonitor, L"目标显示器", nullptr,
-        state.taskbarMonitorLabel.c_str(), kRowTallH);
-    taskbarMonitor.enabled = true;
+             {L"内嵌", L"沉浸", L"Dock 模式"}, std::clamp(state.taskbarViewMode, 0, 2),
+             monitorActive, kRowTallH);
     addRadio(kTaskbarModePage, kIdAppBarEdge, L"Dock 位置", nullptr,
-             {L"顶部", L"底部"}, std::clamp(state.appBarEdge, 0, 1), state.taskbarViewMode == 2,
-             kRowH);
+             {L"顶部", L"底部"}, std::clamp(state.appBarEdge, 0, 1),
+             monitorActive && state.taskbarViewMode == 2, kRowH);
     addHeader(kTaskbarModePage, L"沉浸模式背景");
     addRadio(kTaskbarModePage, kIdImmersiveBackgroundAdjustment, L"调整方式", nullptr,
              {L"模糊程度", L"不透明度"}, std::clamp(state.immersiveBackgroundAdjustment, 0, 1),
-             !vertical && state.taskbarViewMode == 1 && state.backgroundBlurSupported, kRowH);
+             monitorActive && !vertical && state.editingMonitorHasTaskbar &&
+                 state.taskbarViewMode == 1 && state.backgroundBlurSupported,
+             kRowH);
     addSlider(kTaskbarModePage, kIdImmersiveBackgroundBlur,
               backgroundAdjustmentLabel(true, state.immersiveBackgroundAdjustment),
               state.immersiveBackgroundBlur,
-              !vertical && state.taskbarViewMode == 1 && state.backgroundBlurSupported,
+              monitorActive && !vertical && state.editingMonitorHasTaskbar &&
+                  state.taskbarViewMode == 1 && state.backgroundBlurSupported,
               backgroundAdjustmentHint(state.backgroundBlurSupported),
               kRowTallH);
     addHeader(kTaskbarModePage, L"Dock 背景");
     addRadio(kTaskbarModePage, kIdDockBackgroundAdjustment, L"调整方式", nullptr,
              {L"模糊程度", L"不透明度"}, std::clamp(state.dockBackgroundAdjustment, 0, 1),
-             state.taskbarViewMode == 2 && state.backgroundBlurSupported, kRowH);
+             monitorActive && state.taskbarViewMode == 2 && state.backgroundBlurSupported, kRowH);
     addSlider(
         kTaskbarModePage, kIdDockBackgroundBlur,
         backgroundAdjustmentLabel(false, state.dockBackgroundAdjustment), state.dockBackgroundBlur,
-        state.taskbarViewMode == 2 && state.backgroundBlurSupported,
+        monitorActive && state.taskbarViewMode == 2 && state.backgroundBlurSupported,
         backgroundAdjustmentHint(state.backgroundBlurSupported),
         kRowTallH);
     addHeader(kTaskbarModePage, L"资源监视");
@@ -125,12 +149,12 @@ void SettingsSections::createTaskbarModeRows() {
         L"仅内嵌模式生效。首页优先显示 CPU 和内存，多页可用滚轮切换。",
         40.0f, kRowTallH);
     embeddedResources.checked = state.embeddedResourceMonitor;
-    embeddedResources.enabled = state.taskbarViewMode == 0;
+    embeddedResources.enabled = monitorActive && state.taskbarViewMode == 0;
     addRadio(kTaskbarModePage, kIdDockResourcePlacement, L"资源监视位置", nullptr,
              vertical ? std::vector<std::wstring>{L"顶部", L"底部"}
                       : std::vector<std::wstring>{L"左侧", L"右侧"},
              std::clamp(state.dockResourcePlacement, 0, 1),
-             state.taskbarViewMode == 0 && state.embeddedResourceMonitor, kRowH);
+             monitorActive && state.taskbarViewMode == 0 && state.embeddedResourceMonitor, kRowH);
     Row& upload =
         addRow(kTaskbarModePage, kIdDockResourceUpload, ControlKind::Toggle, L"显示上行速度",
                nullptr, 40.0f, kRowTallH);
