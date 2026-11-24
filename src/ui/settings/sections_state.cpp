@@ -158,25 +158,14 @@ void SettingsSections::updateImmersiveRowsEnabled() {
         row->hint =
             (resourceExtrasEnabled && !anyResourceMetric)
                 ? (appBarEnabled
-                       ? L"Dock 模式下当前未开启任何监控项，右侧暂不显示资源监视且不进行采样；请至少开启下方一项。"
-                       : L"当前未开启任何监控项，任务栏暂不显示资源监视且不进行采样；请至少开启下方一项。")
-                : L"仅内嵌模式生效。按下方已开启的监控项顺序显示，多页可用滚轮切换。";
+                       ? L"Dock 模式下当前未勾选任何监控项，右侧暂不显示资源监视且不进行采样；请在下方“显示监控项”中至少勾选一项。"
+                       : L"当前未勾选任何监控项，任务栏暂不显示资源监视且不进行采样；请在下方“显示监控项”中至少勾选一项。")
+                : L"仅内嵌模式生效。按下方已勾选的监控项顺序显示，多页可用滚轮切换。";
         row->showHint = true;
     }
     if (auto* row = findRow(kIdDockResourcePlacement))
         row->enabled = embeddedResources && state.embeddedResourceMonitor && anyResourceMetric;
-    if (auto* row = findRow(kIdDockResourceCpuUsage))
-        row->enabled = resourceExtrasEnabled;
-    if (auto* row = findRow(kIdDockResourceMemoryUsage))
-        row->enabled = resourceExtrasEnabled;
-    if (auto* row = findRow(kIdDockResourceDownload))
-        row->enabled = resourceExtrasEnabled;
-    if (auto* row = findRow(kIdDockResourceUpload))
-        row->enabled = resourceExtrasEnabled;
-    if (auto* row = findRow(kIdDockResourceGpuUsage))
-        row->enabled = resourceExtrasEnabled;
-    if (auto* row = findRow(kIdDockResourceCpuFrequency))
-        row->enabled = resourceExtrasEnabled;
+    syncResourceMetricsRow(resourceExtrasEnabled, appBarEnabled);
     if (auto* row = findRow(kIdDockResourceSmallFont))
         row->enabled = resourceExtrasEnabled && anyResourceMetric;
     if (auto* row = findRow(kIdDockResourceHideLabels))
@@ -184,6 +173,47 @@ void SettingsSections::updateImmersiveRowsEnabled() {
     updateMediaControlRowsEnabled();
     if (auto* row = findRow(kIdAlignment))
         row->enabled = state.anyHorizontalEmbeddedHostActive;
+}
+
+void SettingsSections::syncResourceMetricsRow(bool enabled, bool appBarEnabled) {
+    auto* row = findRow(kIdDockResourceMetrics);
+    if (!row)
+        return;
+    row->enabled = enabled;
+    const bool checked[kDockResourceMetricCount] = {
+        state.dockResourceCpuUsage,  state.dockResourceMemoryUsage,
+        state.dockResourceUpload,    state.dockResourceDownload,
+        state.dockResourceGpuUsage,  state.dockResourceCpuFrequency,
+    };
+    static constexpr const wchar_t* kShortNames[kDockResourceMetricCount] = {
+        L"CPU", L"内存", L"上行", L"下行", L"GPU", L"频率",
+    };
+    std::wstring summary;
+    int selectedCount = 0;
+    for (int i = 0; i < kDockResourceMetricCount; ++i) {
+        if (!checked[i])
+            continue;
+        if (!summary.empty())
+            summary += L"、";
+        summary += kShortNames[i];
+        ++selectedCount;
+    }
+    row->controlText =
+        selectedCount > 0
+            ? (L"已选 " + std::to_wstring(selectedCount) + L"/" +
+               std::to_wstring(kDockResourceMetricCount) + L" 项")
+            : L"选择监控项…";
+    if (selectedCount > 0) {
+        row->hint = L"已选 " + std::to_wstring(selectedCount) + L" 项：" + summary;
+    } else if (enabled) {
+        row->hint =
+            appBarEnabled
+                ? L"未选择任何监控项，Dock 右侧暂不显示资源监视且不进行采样；请点击右侧按钮至少勾选一项。"
+                : L"未选择任何监控项，任务栏暂不显示资源监视且不进行采样；请点击右侧按钮至少勾选一项。";
+    } else {
+        row->hint = L"未选择任何监控项";
+    }
+    row->showHint = true;
 }
 
 void SettingsSections::updateMediaControlRowsEnabled() {
@@ -372,18 +402,6 @@ void SettingsSections::syncTaskbarModeRows(const SettingsState& s) {
                                 : std::vector<std::wstring>{L"左侧", L"右侧"};
         row->selected = std::clamp(s.dockResourcePlacement, 0, 1);
     }
-    if (auto* row = findRow(kIdDockResourceCpuUsage))
-        row->checked = s.dockResourceCpuUsage;
-    if (auto* row = findRow(kIdDockResourceMemoryUsage))
-        row->checked = s.dockResourceMemoryUsage;
-    if (auto* row = findRow(kIdDockResourceDownload))
-        row->checked = s.dockResourceDownload;
-    if (auto* row = findRow(kIdDockResourceUpload))
-        row->checked = s.dockResourceUpload;
-    if (auto* row = findRow(kIdDockResourceGpuUsage))
-        row->checked = s.dockResourceGpuUsage;
-    if (auto* row = findRow(kIdDockResourceCpuFrequency))
-        row->checked = s.dockResourceCpuFrequency;
     if (auto* row = findRow(kIdDockResourceSmallFont))
         row->checked = s.dockResourceSmallFont;
     if (auto* row = findRow(kIdDockResourceHideLabels))

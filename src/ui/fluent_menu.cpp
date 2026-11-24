@@ -33,8 +33,19 @@ float itemTextLeft(const FluentMenuItem& item) {
 }
 constexpr float kCheckRightPad = 28.0f;
 constexpr float kSubmenuCheckRightPad = 48.0f;
+constexpr float kMultiCheckBoxSize = 16.0f;
+constexpr float kMultiCheckRightInset = 16.0f;
+constexpr float kMultiCheckSpace = kMultiCheckRightInset + kMultiCheckBoxSize + 10.0f;
 constexpr float kRightPad = 36.0f;
 constexpr float kRightTextGap = 24.0f;
+
+float itemStateSpace(const FluentMenuItem& item) {
+    if (item.keepOpen)
+        return kMultiCheckSpace;
+    return item.checked
+        ? (item.submenu.empty() ? kCheckRightPad : kSubmenuCheckRightPad) + 10.0f
+        : kRightPad;
+}
 constexpr float kMinWidth = 208.0f;
 constexpr float kSubmenuGap = 6.0f;
 constexpr UINT kTimerSubmenu = 1;
@@ -82,9 +93,7 @@ struct MenuWnd {
             if (item.separator)
                 continue;
             const float textLeft = itemTextLeft(item);
-            const float stateSpace = item.checked
-                ? (item.submenu.empty() ? kCheckRightPad : kSubmenuCheckRightPad) + 10.0f
-                : kRightPad;
+            const float stateSpace = itemStateSpace(item);
             float labelRight = widthDip - stateSpace;
             auto& text = rowText[i];
             if (!item.rightText.empty() &&
@@ -219,9 +228,7 @@ struct MenuWnd {
                     layout) {
                     DWRITE_TEXT_METRICS m{};
                     layout->GetMetrics(&m);
-                    const float stateSpace = it.checked
-                        ? (it.submenu.empty() ? kCheckRightPad : kSubmenuCheckRightPad) + 10.0f
-                        : kRightPad;
+                    const float stateSpace = itemStateSpace(it);
                     maxRow = std::max(maxRow, itemTextLeft(it) + m.width + stateSpace +
                         (it.rightText.empty() ? 0.0f : kRightTextGap));
                     layout->Release();
@@ -316,7 +323,26 @@ struct MenuWnd {
                                       kItemRadius, kItemRadius),
                     brush);
             }
-            if (it.checked) {
+            if (it.keepOpen) {
+                const float boxLeft = wDip - kMultiCheckRightInset - kMultiCheckBoxSize;
+                const float boxTop = y + (kItemH - kMultiCheckBoxSize) * 0.5f;
+                const D2D1_ROUNDED_RECT boxRect = D2D1::RoundedRect(
+                    D2D1::RectF(boxLeft, boxTop, boxLeft + kMultiCheckBoxSize,
+                                boxTop + kMultiCheckBoxSize),
+                    3.5f, 3.5f);
+                if (it.checked) {
+                    brush->SetColor(it.enabled ? p.accent : p.disabled);
+                    rt->FillRoundedRectangle(boxRect, brush);
+                    brush->SetColor(p.textOnAccent);
+                    rt->DrawLine(D2D1::Point2F(boxLeft + 3.6f, boxTop + 8.2f),
+                                 D2D1::Point2F(boxLeft + 6.6f, boxTop + 11.2f), brush, 1.6f);
+                    rt->DrawLine(D2D1::Point2F(boxLeft + 6.6f, boxTop + 11.2f),
+                                 D2D1::Point2F(boxLeft + 12.4f, boxTop + 5.0f), brush, 1.6f);
+                } else {
+                    brush->SetColor(it.enabled ? (hov ? p.text : p.textSecondary) : p.disabled);
+                    rt->DrawRoundedRectangle(boxRect, brush, 1.25f);
+                }
+            } else if (it.checked) {
                 // 图标已经占用左侧识别区，勾选标记移到右侧状态位，避免挤开文字。
                 brush->SetColor(it.enabled ? p.accent : p.disabled);
                 const float checkRightPad = it.submenu.empty() ? kCheckRightPad
@@ -342,9 +368,7 @@ struct MenuWnd {
                     brush, 1.15f);
             }
             brush->SetColor(it.enabled ? p.text : p.disabled);
-            const float stateSpace = it.checked
-                ? (it.submenu.empty() ? kCheckRightPad : kSubmenuCheckRightPad) + 10.0f
-                : kRightPad;
+            const float stateSpace = itemStateSpace(it);
             float labelRight = wDip - stateSpace;
             const auto& text = rowText[static_cast<size_t>(i)];
             if (text.detail) {
@@ -660,6 +684,13 @@ LRESULT MenuWnd::handleMsg(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         }
         int id = items[row].id;
         FluentMenu::Callback cb = root()->cb;
+        if (items[row].keepOpen) {
+            items[row].checked = !items[row].checked;
+            render();
+            if (cb)
+                cb(id);
+            return 0;
+        }
         closeChain();
         if (cb)
             cb(id);
@@ -693,11 +724,19 @@ LRESULT MenuWnd::handleMsg(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             }
             return 0;
         }
-        if (wp == VK_RETURN) {
+        if (wp == VK_RETURN || wp == VK_SPACE) {
             if (selectable(hover)) {
                 if (!items[hover].submenu.empty()) {
-                    openSubmenu();
-                } else {
+                    if (wp == VK_RETURN)
+                        openSubmenu();
+                } else if (items[hover].keepOpen) {
+                    int id = items[hover].id;
+                    FluentMenu::Callback cb = root()->cb;
+                    items[hover].checked = !items[hover].checked;
+                    render();
+                    if (cb)
+                        cb(id);
+                } else if (wp == VK_RETURN) {
                     int id = items[hover].id;
                     FluentMenu::Callback cb = root()->cb;
                     closeChain();

@@ -314,7 +314,7 @@ TEST_CASE("resource_monitor.zero_metrics_layout_and_settings_guard") {
     EXPECT_NEAR(dockEmpty.resourceWidth, 0.0, 1e-4);
     EXPECT_NEAR(dockEmpty.spectrumRight, 1920.0 - 8.0, 1e-4);
 
-    // 开启资源监视但关闭全部 6 项指标：指标开关仍可点击（不锁死），纯样式项置灰且给出明确提示
+    // 开启资源监视但通过多选浮窗取消全部 6 项指标：入口按钮仍可点击（不锁死），纯样式项置灰且给出明确提示
     SettingsSections sections;
     sections.state.taskbarViewMode = 0;
     sections.state.embeddedResourceMonitor = true;
@@ -326,32 +326,43 @@ TEST_CASE("resource_monitor.zero_metrics_layout_and_settings_guard") {
     sections.state.dockResourceCpuFrequency = false;
     sections.create();
 
-    sections.onCommand(settings_ui::kIdDockResourceCpuUsage);
-    sections.onCommand(settings_ui::kIdDockResourceMemoryUsage);
-
     const auto* embedded = sections.findRow(settings_ui::kIdEmbeddedResourceMonitor);
-    const auto* cpuRow = sections.findRow(settings_ui::kIdDockResourceCpuUsage);
-    const auto* memRow = sections.findRow(settings_ui::kIdDockResourceMemoryUsage);
+    const auto* metrics = sections.findRow(settings_ui::kIdDockResourceMetrics);
     const auto* placement = sections.findRow(settings_ui::kIdDockResourcePlacement);
     const auto* smallFont = sections.findRow(settings_ui::kIdDockResourceSmallFont);
     const auto* hideLabels = sections.findRow(settings_ui::kIdDockResourceHideLabels);
-    EXPECT_TRUE(embedded != nullptr && cpuRow != nullptr && memRow != nullptr &&
-                placement != nullptr && smallFont != nullptr && hideLabels != nullptr);
+    EXPECT_TRUE(embedded != nullptr && metrics != nullptr && placement != nullptr &&
+                smallFont != nullptr && hideLabels != nullptr);
+    EXPECT_EQ(metrics->kind, settings_ui::ControlKind::Button);
+    EXPECT_EQ(metrics->controlText, L"已选 2/6 项");
+    EXPECT_TRUE(metrics->hint.find(L"已选 2 项") != std::wstring::npos);
+    EXPECT_EQ(metrics->options.size(), static_cast<size_t>(settings_ui::kDockResourceMetricCount));
+
+    // 取消勾选 CPU 与内存后进入 0 监控项保护状态
+    sections.onCommand(settings_ui::kIdDockResourceMetrics, settings_ui::kDockResourceMetricCpu);
+    sections.onCommand(settings_ui::kIdDockResourceMetrics, settings_ui::kDockResourceMetricMemory);
     EXPECT_TRUE(embedded->checked);
-    EXPECT_TRUE(embedded->hint.find(L"未开启任何监控项") != std::wstring::npos);
-    EXPECT_FALSE(cpuRow->checked);
-    EXPECT_FALSE(memRow->checked);
-    EXPECT_TRUE(cpuRow->enabled);
-    EXPECT_TRUE(memRow->enabled);
+    EXPECT_TRUE(embedded->hint.find(L"未勾选任何监控项") != std::wstring::npos);
+    EXPECT_TRUE(metrics->hint.find(L"未选择任何监控项") != std::wstring::npos);
+    EXPECT_EQ(metrics->controlText, L"选择监控项…");
+    EXPECT_FALSE(sections.state.dockResourceCpuUsage);
+    EXPECT_FALSE(sections.state.dockResourceMemoryUsage);
+    EXPECT_TRUE(metrics->enabled);
     EXPECT_FALSE(placement->enabled);
     EXPECT_FALSE(smallFont->enabled);
     EXPECT_FALSE(hideLabels->enabled);
 
-    // 重新开启任意一项后立即恢复样式项与常规提示
-    sections.onCommand(settings_ui::kIdDockResourceCpuUsage);
-    EXPECT_TRUE(cpuRow->checked);
+    // 重新勾选任意一项后立即恢复样式项、按钮计数与摘要提示
+    sections.onCommand(settings_ui::kIdDockResourceMetrics, settings_ui::kDockResourceMetricCpu);
+    EXPECT_TRUE(sections.state.dockResourceCpuUsage);
+    EXPECT_EQ(metrics->controlText, L"已选 1/6 项");
+    EXPECT_TRUE(metrics->hint.find(L"已选 1 项：CPU") != std::wstring::npos);
     EXPECT_TRUE(placement->enabled);
     EXPECT_TRUE(smallFont->enabled);
     EXPECT_TRUE(hideLabels->enabled);
-    EXPECT_TRUE(embedded->hint.find(L"未开启任何监控项") == std::wstring::npos);
+    EXPECT_TRUE(embedded->hint.find(L"未勾选任何监控项") == std::wstring::npos);
+
+    // 关闭资源监视开关时禁用监控项选择按钮
+    sections.onCommand(settings_ui::kIdEmbeddedResourceMonitor);
+    EXPECT_FALSE(metrics->enabled);
 }

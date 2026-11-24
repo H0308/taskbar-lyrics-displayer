@@ -108,12 +108,7 @@ inline settings_icon::Kind iconForRow(int id) {
     case kIdDockBackgroundAdjustment:
         return settings_icon::Kind::Background;
     case kIdEmbeddedResourceMonitor:
-    case kIdDockResourceCpuUsage:
-    case kIdDockResourceMemoryUsage:
-    case kIdDockResourceGpuUsage:
-    case kIdDockResourceDownload:
-    case kIdDockResourceUpload:
-    case kIdDockResourceCpuFrequency:
+    case kIdDockResourceMetrics:
     case kIdDockResourceHideLabels:
         return settings_icon::Kind::Performance;
     case kIdHoverControls:

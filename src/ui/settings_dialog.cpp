@@ -9,6 +9,7 @@
 #include "ui/dialog_notify.h"
 #include "ui/fluent_controls.h"
 #include "ui/fluent_dialog_surface.h"
+#include "ui/fluent_menu.h"
 #include "ui/fluent_theme.h"
 #include "ui/media_control_icons.h"
 #include "ui/settings/artwork.h"
@@ -161,12 +162,61 @@ struct SettingsDialog::Impl {
     void updateCompactLyricRows() { sections_.updateCompactLyricRows(); }
     const Row* findRow(int id) const { return sections_.findRow(id); }
     void createControls() { sections_.create(); }
+    void openResourceMetricsMenu(const Row& row) {
+        const auto& s = sections_.state;
+        const bool checked[kDockResourceMetricCount] = {
+            s.dockResourceCpuUsage,  s.dockResourceMemoryUsage,
+            s.dockResourceUpload,    s.dockResourceDownload,
+            s.dockResourceGpuUsage,  s.dockResourceCpuFrequency,
+        };
+        static constexpr const wchar_t* kLabels[kDockResourceMetricCount] = {
+            L"CPU 使用率", L"内存使用率", L"上行速度",
+            L"下行速度",   L"GPU 使用率", L"CPU 频率",
+        };
+        static constexpr const wchar_t* kExamples[kDockResourceMetricCount] = {
+            L"CPU: 12%",      L"内存: 48%",  L"上行: 120KB/s",
+            L"下行: 2.4MB/s", L"GPU: 7%",    L"频率: 3.6GHz",
+        };
+        std::vector<fluent::FluentMenuItem> items;
+        items.reserve(kDockResourceMetricCount);
+        for (int i = 0; i < kDockResourceMetricCount; ++i) {
+            fluent::FluentMenuItem item;
+            item.id = i;
+            item.text = kLabels[i];
+            item.rightText = kExamples[i];
+            item.checked = checked[i];
+            item.keepOpen = true;
+            items.push_back(std::move(item));
+        }
+
+        POINT anchor{};
+        if (hwnd && row.controlRect.right > row.controlRect.left) {
+            const float scale = surface.dipScale();
+            anchor.x = static_cast<LONG>(std::lround(row.controlRect.left * scale));
+            anchor.y = static_cast<LONG>(std::lround((row.controlRect.bottom + 4.0f) * scale));
+            ClientToScreen(hwnd, &anchor);
+        } else {
+            GetCursorPos(&anchor);
+        }
+
+        fluent::FluentMenu::show(hwnd, anchor, std::move(items), [this](int metricIndex) {
+            if (!hwnd || !IsWindow(hwnd))
+                return;
+            if (metricIndex >= 0 && metricIndex < kDockResourceMetricCount)
+                onCommand(kIdDockResourceMetrics, metricIndex);
+        });
+    }
+
     void onCommand(int id, int option = -1) {
         hintHeightsDirty = true;
         const auto* row = sections_.findRow(id);
         if ((id == kIdSpectrumColor || id == kIdFloatingCardBackgroundColor) && row &&
             row->enabled) {
             openColorPicker(id);
+            return;
+        }
+        if (id == kIdDockResourceMetrics && option < 0 && row && row->enabled) {
+            openResourceMetricsMenu(*row);
             return;
         }
         sections_.onCommand(id, option);
@@ -2400,6 +2450,7 @@ struct SettingsDialog::Impl {
     }
 
     void destroy() {
+        fluent::FluentMenu::dismiss();
         closeSearchPalette(false, true);
         search_.destroy();
         if (slider_.state().open)

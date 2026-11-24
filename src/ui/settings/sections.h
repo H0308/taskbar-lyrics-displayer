@@ -62,6 +62,7 @@ private:
     void syncIdleRows(const SettingsState& s);
     void syncDisplayRows(const SettingsState& s);
     void syncTaskbarModeRows(const SettingsState& s);
+    void syncResourceMetricsRow(bool enabled, bool appBarEnabled);
     void syncBackgroundRows(const SettingsState& s);
     void syncMediaControlRows(const SettingsState& s);
     void syncPlayerRows(const SettingsState& s);

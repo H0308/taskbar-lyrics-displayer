@@ -22,6 +22,7 @@ struct FluentMenuItem {
     // 可选的应用原生图标；存在时优先于线性矢量图标绘制。
     NativeMenuIcon nativeIcon;
     bool checked = false;
+    bool keepOpen = false;
     bool enabled = true;
     bool separator = false;
     std::vector<FluentMenuItem> submenu;

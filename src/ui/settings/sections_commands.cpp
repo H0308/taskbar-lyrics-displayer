@@ -422,26 +422,38 @@ void SettingsSections::onCommand(int id, int option) {
         if (actions.onEmbeddedResourceMonitor)
             actions.onEmbeddedResourceMonitor(row->checked);
         break;
-    case kIdDockResourceCpuUsage:
-        row->checked = !row->checked;
-        state.dockResourceCpuUsage = row->checked;
-        updateImmersiveRowsEnabled();
-        if (actions.onDockResourceCpuUsage)
-            actions.onDockResourceCpuUsage(row->checked);
-        break;
-    case kIdDockResourceMemoryUsage:
-        row->checked = !row->checked;
-        state.dockResourceMemoryUsage = row->checked;
-        updateImmersiveRowsEnabled();
-        if (actions.onDockResourceMemoryUsage)
-            actions.onDockResourceMemoryUsage(row->checked);
-        break;
-    case kIdDockResourceGpuUsage:
-        row->checked = !row->checked;
-        state.dockResourceGpuUsage = row->checked;
-        updateImmersiveRowsEnabled();
-        if (actions.onDockResourceGpuUsage)
-            actions.onDockResourceGpuUsage(row->checked);
+    case kIdDockResourceMetrics:
+        if (option == kDockResourceMetricCpu) {
+            state.dockResourceCpuUsage = !state.dockResourceCpuUsage;
+            updateImmersiveRowsEnabled();
+            if (actions.onDockResourceCpuUsage)
+                actions.onDockResourceCpuUsage(state.dockResourceCpuUsage);
+        } else if (option == kDockResourceMetricMemory) {
+            state.dockResourceMemoryUsage = !state.dockResourceMemoryUsage;
+            updateImmersiveRowsEnabled();
+            if (actions.onDockResourceMemoryUsage)
+                actions.onDockResourceMemoryUsage(state.dockResourceMemoryUsage);
+        } else if (option == kDockResourceMetricUpload) {
+            state.dockResourceUpload = !state.dockResourceUpload;
+            updateImmersiveRowsEnabled();
+            if (actions.onDockResourceUpload)
+                actions.onDockResourceUpload(state.dockResourceUpload);
+        } else if (option == kDockResourceMetricDownload) {
+            state.dockResourceDownload = !state.dockResourceDownload;
+            updateImmersiveRowsEnabled();
+            if (actions.onDockResourceDownload)
+                actions.onDockResourceDownload(state.dockResourceDownload);
+        } else if (option == kDockResourceMetricGpu) {
+            state.dockResourceGpuUsage = !state.dockResourceGpuUsage;
+            updateImmersiveRowsEnabled();
+            if (actions.onDockResourceGpuUsage)
+                actions.onDockResourceGpuUsage(state.dockResourceGpuUsage);
+        } else if (option == kDockResourceMetricCpuFrequency) {
+            state.dockResourceCpuFrequency = !state.dockResourceCpuFrequency;
+            updateImmersiveRowsEnabled();
+            if (actions.onDockResourceCpuFrequency)
+                actions.onDockResourceCpuFrequency(state.dockResourceCpuFrequency);
+        }
         break;
     case kIdDockResourcePlacement:
         state.dockResourcePlacement = std::clamp(row->selected, 0, 1);
@@ -459,27 +471,6 @@ void SettingsSections::onCommand(int id, int option) {
         state.dockResourceHideLabels = row->checked;
         if (actions.onDockResourceHideLabels)
             actions.onDockResourceHideLabels(row->checked);
-        break;
-    case kIdDockResourceDownload:
-        row->checked = !row->checked;
-        state.dockResourceDownload = row->checked;
-        updateImmersiveRowsEnabled();
-        if (actions.onDockResourceDownload)
-            actions.onDockResourceDownload(row->checked);
-        break;
-    case kIdDockResourceUpload:
-        row->checked = !row->checked;
-        state.dockResourceUpload = row->checked;
-        updateImmersiveRowsEnabled();
-        if (actions.onDockResourceUpload)
-            actions.onDockResourceUpload(row->checked);
-        break;
-    case kIdDockResourceCpuFrequency:
-        row->checked = !row->checked;
-        state.dockResourceCpuFrequency = row->checked;
-        updateImmersiveRowsEnabled();
-        if (actions.onDockResourceCpuFrequency)
-            actions.onDockResourceCpuFrequency(row->checked);
         break;
     case kIdTaskbarBackground:
         if (auto* opacity = findRow(kIdCoverBackgroundOpacity))
