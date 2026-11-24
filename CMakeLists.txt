@@ -179,6 +179,7 @@ add_executable(WindowsTaskbarLyrics
     src/ui/dock_pet.cpp
     src/ui/settings_icons.cpp
     src/ui/media_popup.cpp
+    src/ui/progress_popup.cpp
     src/ui/volume_popup.cpp
     src/ui/dock_backdrop.cpp
     src/ui/song_toast.cpp

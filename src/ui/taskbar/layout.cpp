@@ -8,15 +8,17 @@ struct PinnedTierSpec {
     float radius = 0.0f;
     float spacing = 0.0f;
     float repeatGap = 0.0f;
+    float progressGap = 0.0f;
     float volumeGap = 0.0f;
     float span = 0.0f;
     float slotWidth = 0.0f;
     bool includeRepeat = false;
+    bool includeProgress = false;
     bool includeVolume = false;
 };
 
 PinnedTierSpec buildPinnedTierSpec(PinnedInlineTier tier, float heightDip, bool canRepeat,
-                                   float lyricFontSize, bool canSwitchSource) {
+                                   float lyricFontSize, bool canSwitchSource, bool canSeek) {
     PinnedTierSpec spec{};
     spec.tier = tier;
     if (heightDip <= 0.0f || tier == PinnedInlineTier::FallbackHover)
@@ -39,14 +41,18 @@ PinnedTierSpec buildPinnedTierSpec(PinnedInlineTier tier, float heightDip, bool 
         constexpr float sidePad = 6.0f;
         spec.includeVolume = true;
         spec.includeRepeat = canRepeat;
+        spec.includeProgress = canSeek;
+        spec.span = 2.0f * spec.spacing;
         if (canRepeat) {
             spec.repeatGap = spec.spacing + spec.radius * 0.12f;
-            spec.volumeGap = spec.spacing + spec.radius * 0.22f;
-            spec.span = 2.0f * spec.spacing + spec.repeatGap + spec.volumeGap;
-        } else {
-            spec.volumeGap = spec.spacing + spec.radius * 0.26f;
-            spec.span = 2.0f * spec.spacing + spec.volumeGap;
+            spec.span += spec.repeatGap;
         }
+        if (canSeek) {
+            spec.progressGap = spec.spacing + spec.radius * 0.14f;
+            spec.span += spec.progressGap;
+        }
+        spec.volumeGap = spec.spacing + spec.radius * ((canRepeat || canSeek) ? 0.22f : 0.26f);
+        spec.span += spec.volumeGap;
         finish(spec, sidePad);
         return spec;
     }
@@ -59,14 +65,18 @@ PinnedTierSpec buildPinnedTierSpec(PinnedInlineTier tier, float heightDip, bool 
         spec.spacing = spec.radius * 2.05f;
         spec.includeVolume = true;
         spec.includeRepeat = canRepeat;
+        spec.includeProgress = canSeek;
+        spec.span = 2.0f * spec.spacing;
         if (canRepeat) {
             spec.repeatGap = spec.spacing + spec.radius * 0.10f;
-            spec.volumeGap = spec.spacing + spec.radius * 0.20f;
-            spec.span = 2.0f * spec.spacing + spec.repeatGap + spec.volumeGap;
-        } else {
-            spec.volumeGap = spec.spacing + spec.radius * 0.24f;
-            spec.span = 2.0f * spec.spacing + spec.volumeGap;
+            spec.span += spec.repeatGap;
         }
+        if (canSeek) {
+            spec.progressGap = spec.spacing + spec.radius * 0.12f;
+            spec.span += spec.progressGap;
+        }
+        spec.volumeGap = spec.spacing + spec.radius * ((canRepeat || canSeek) ? 0.20f : 0.24f);
+        spec.span += spec.volumeGap;
         finish(spec, sidePad);
         return spec;
     }
@@ -160,7 +170,7 @@ LayoutMetrics horizontalLayout(const HorizontalLayoutInput& input) {
 VerticalLayout verticalLayout(float width, float height, DisplayScene scene, bool albumCoverVisible,
                               bool showControls, bool canSwitchSource, float resourceHeight,
                               bool songInfoVisible, ResourcePlacement resourcePlacement,
-                              bool resourceOnly) {
+                              bool resourceOnly, bool canSeek) {
 
     VerticalLayout layout;
     layout.w = width;
@@ -237,28 +247,47 @@ VerticalLayout verticalLayout(float width, float height, DisplayScene scene, boo
         // 与横向内嵌控件复用同一套视觉节奏：按钮中心间距约为 2.8r。
         const float transportPitch = layout.controlRadius * 2.8f;
         const float transportGap = std::max(kVerticalControlsGap, transportPitch - diameter);
-        // 音量是独立的辅助操作，与上一首/播放/下一首之间留出更明显的层级间距。
+        // 音量与进度是独立的辅助操作，与上一首/播放/下一首之间留出更明显的层级间距。
         const float volumeGap = transportGap + layout.controlRadius * 0.9f;
-        const float sourcePitch = diameter + transportGap;
-        const float blockH = diameter * 4.0f + transportGap * 2.0f + volumeGap +
-                             (canSwitchSource ? sourcePitch : 0.0f);
+        const float auxPitch = diameter + transportGap;
+        const float baseBlockH = diameter * 4.0f + transportGap * 2.0f + volumeGap +
+                                 (canSwitchSource ? auxPitch : 0.0f);
+        bool includeProgress = canSeek;
+        float blockH = baseBlockH + (includeProgress ? auxPitch : 0.0f);
         if (resourceHeight > 0.0f &&
             resourceContentBottom - layout.lyricY > blockH + 2.0f * kVerticalLyricGap)
             reserveResourceArea();
+        else if (includeProgress && resourceHeight > 0.0f &&
+                 resourceContentBottom - layout.lyricY > baseBlockH + 2.0f * kVerticalLyricGap) {
+            includeProgress = false;
+            blockH = baseBlockH;
+            reserveResourceArea();
+        }
         const float controlsTop = layout.lyricY;
         const float controlsBottom = layout.lyricBottom;
-        const float freeSpace = controlsBottom - controlsTop - blockH;
+        float freeSpace = controlsBottom - controlsTop - blockH;
+        if (includeProgress &&
+            (freeSpace < 0.0f || controlsTop + std::max(0.0f, freeSpace) * 0.5f - kVerticalLyricGap <= layout.lyricY)) {
+            includeProgress = false;
+            blockH = baseBlockH;
+            freeSpace = controlsBottom - controlsTop - blockH;
+        }
         const float groupTop = controlsTop + std::max(0.0f, freeSpace) * 0.5f;
         const float firstY = groupTop + layout.controlRadius;
         if (freeSpace >= 0.0f && groupTop - kVerticalLyricGap > layout.lyricY) {
             for (int i = 0; i < 3; ++i)
                 layout.controlCenters[i] =
                     D2D1::Point2F(layout.w * 0.5f, firstY + i * transportPitch);
-            layout.controlCenters[3] = D2D1::Point2F(
-                layout.w * 0.5f, firstY + transportPitch * 2.0f + diameter + volumeGap);
+            float auxY = firstY + transportPitch * 2.0f + diameter + volumeGap;
+            if (includeProgress) {
+                layout.showProgressControl = true;
+                layout.controlCenters[5] = D2D1::Point2F(layout.w * 0.5f, auxY);
+                auxY += auxPitch;
+            }
+            layout.controlCenters[3] = D2D1::Point2F(layout.w * 0.5f, auxY);
             if (canSwitchSource)
                 layout.controlCenters[4] =
-                    D2D1::Point2F(layout.w * 0.5f, layout.controlCenters[3].y + sourcePitch);
+                    D2D1::Point2F(layout.w * 0.5f, layout.controlCenters[3].y + auxPitch);
             layout.lyricBottom = groupTop - kVerticalLyricGap;
         } else {
             layout.showControls = false;
@@ -293,11 +322,11 @@ ExpandedSideLayout expandedSideLayout(float w, bool dock, float resourceWidth) {
 }
 
 float pinnedInlineControlsIdealWidth(float heightDip, bool canRepeat, float lyricFontSize,
-                                     bool canSwitchSource) {
+                                     bool canSwitchSource, bool canSeek) {
     if (heightDip <= 0.0f)
         return 0.0f;
     return buildPinnedTierSpec(PinnedInlineTier::Full, heightDip, canRepeat, lyricFontSize,
-                               canSwitchSource)
+                               canSwitchSource, canSeek)
         .slotWidth;
 }
 
@@ -326,8 +355,9 @@ PinnedInlineControlsLayout planPinnedInlineControls(const PinnedInlineControlsIn
 
     PinnedTierSpec chosen{};
     for (const auto& candidate : candidates) {
-        const PinnedTierSpec spec = buildPinnedTierSpec(candidate.tier, input.height, input.canRepeat,
-                                                        input.lyricFontSize, input.canSwitchSource);
+        const PinnedTierSpec spec = buildPinnedTierSpec(
+            candidate.tier, input.height, input.canRepeat, input.lyricFontSize,
+            input.canSwitchSource, input.canSeek);
         // 预留 1 DIP 浮点与像素取整容差，避免最小安全宽度下误降级。
         if (effW - start - spec.slotWidth + 1.0f >= candidate.minKeep) {
             chosen = spec;
@@ -353,20 +383,25 @@ PinnedInlineControlsLayout planPinnedInlineControls(const PinnedInlineControlsIn
         result.visible[i] = true;
         result.centerX[i] = firstX + static_cast<float>(i) * chosen.spacing;
     }
+    int previous = 2;
     if (chosen.includeVolume) {
         if (chosen.includeRepeat) {
             result.visible[3] = true;
-            result.centerX[3] = result.centerX[2] + chosen.repeatGap;
-            result.visible[4] = true;
-            result.centerX[4] = result.centerX[3] + chosen.volumeGap;
-        } else {
-            result.visible[4] = true;
-            result.centerX[4] = result.centerX[2] + chosen.volumeGap;
+            result.centerX[3] = result.centerX[previous] + chosen.repeatGap;
+            previous = 3;
         }
+        if (chosen.includeProgress) {
+            result.visible[kInlineProgressControl] = true;
+            result.centerX[kInlineProgressControl] =
+                result.centerX[previous] + chosen.progressGap;
+            previous = kInlineProgressControl;
+        }
+        result.visible[4] = true;
+        result.centerX[4] = result.centerX[previous] + chosen.volumeGap;
+        previous = 4;
     }
     if (input.canSwitchSource) {
         result.visible[kInlineSourceControl] = true;
-        const int previous = chosen.includeVolume ? 4 : 2;
         result.centerX[kInlineSourceControl] =
             result.centerX[previous] + chosen.spacing + chosen.radius * 0.14f;
     }
@@ -375,23 +410,32 @@ PinnedInlineControlsLayout planPinnedInlineControls(const PinnedInlineControlsIn
 
 void layoutInlineHoverControls(float left, float width, float height, bool canRepeat,
                                bool canSwitchSource, float (&centers)[kInlineControlCount],
-                               float& cy, float& radius) {
+                               float& cy, float& radius, bool canSeek) {
     constexpr float pitch = 2.8f;
     constexpr float margin = 6.0f;
     const float repeatExtra = canRepeat ? 0.3f : 0.0f;
-    const float volumeExtra = canRepeat ? 0.4f : 0.9f;
+    const float progressExtra = canSeek ? 0.3f : 0.0f;
+    const float volumeExtra = (canRepeat || canSeek) ? 0.4f : 0.9f;
     const float sourceExtra = canSwitchSource ? 0.3f : 0.0f;
-    const int gaps = 3 + static_cast<int>(canRepeat) + static_cast<int>(canSwitchSource);
-    const float span = pitch * gaps + repeatExtra + volumeExtra + sourceExtra;
+    const int gaps = 3 + static_cast<int>(canRepeat) + static_cast<int>(canSeek) +
+                     static_cast<int>(canSwitchSource);
+    const float span = pitch * gaps + repeatExtra + progressExtra + volumeExtra + sourceExtra;
     cy = height * 0.5f;
     radius = std::min(height * 0.26f, std::max(0.0f, width - margin * 2.0f) / (span + 2.0f));
 
     const float start = left + (width - span * radius) * 0.5f;
     for (int i = 0; i < 3; ++i)
         centers[i] = start + i * pitch * radius;
-    if (canRepeat)
-        centers[3] = centers[2] + (pitch + repeatExtra) * radius;
-    centers[4] = centers[canRepeat ? 3 : 2] + (pitch + volumeExtra) * radius;
+    int previous = 2;
+    if (canRepeat) {
+        centers[3] = centers[previous] + (pitch + repeatExtra) * radius;
+        previous = 3;
+    }
+    if (canSeek) {
+        centers[kInlineProgressControl] = centers[previous] + (pitch + progressExtra) * radius;
+        previous = kInlineProgressControl;
+    }
+    centers[4] = centers[previous] + (pitch + volumeExtra) * radius;
     if (canSwitchSource)
         centers[kInlineSourceControl] = centers[4] + (pitch + sourceExtra) * radius;
 }

@@ -67,6 +67,7 @@ using taskbar_detail::VerticalLayout;
 #include "ui/taskbar/cover_image.h"
 #include "dock_backdrop.h"
 #include "platform_icon.h"
+#include "progress_popup.h"
 #include "settings_icons.h"
 #include "volume_popup.h"
 
@@ -148,12 +149,14 @@ constexpr int kImmersiveControlNext = 2;
 constexpr int kImmersiveControlRepeat = 3;
 constexpr int kImmersiveControlVolume = 4;
 using taskbar_detail::kInlineControlCount;
+using taskbar_detail::kInlineProgressControl;
 using taskbar_detail::kInlineSourceControl;
 constexpr int kImmersiveControlExit = 6;
 // Dock 的快捷应用入口使用独立图标和命中项，沉浸模式不显示。
 constexpr int kDockControlQuickApps = 7;
 constexpr int kImmersiveControlMenu = 8;
-constexpr int kExpandedControlCount = 9;
+constexpr int kImmersiveControlProgress = 9;
+constexpr int kExpandedControlCount = 10;
 constexpr float kAppBarHeightDip = 48.0f;
 constexpr float kImmersiveControlRadiusFactor = 0.24f;
 constexpr float kImmersiveControlMinRadius = 8.0f;
@@ -551,6 +554,25 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     VolumePopup volumePopup_;
     std::function<void(AppVolumeRequest)> onAppVolume;
     bool volumeHover_ = false;
+    // 播放进度（内嵌控件进度图标 + 悬停单行滑块浮窗）
+    ProgressPopup progressPopup_;
+    bool progressHover_ = false;
+
+    bool inlineProgressAvailable() const {
+        return scene_ != DisplayScene::Idle && scene_ != DisplayScene::NoPlayback &&
+               media.canSeek && media.durationMs > 0;
+    }
+
+    void syncProgressPopup() {
+        progressPopup_.setProgress(media.sessionGeneration, positionMs_, media.durationMs,
+                                   inlineProgressAvailable());
+    }
+
+    void hideProgressPopup() {
+        progressHover_ = false;
+        progressPopup_.onAnchorLeave();
+        progressPopup_.hide();
+    }
 
     KaraokeTracker karaoke_;
     TextScroll scroll_;
@@ -860,6 +882,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return false;
         if (index == kImmersiveControlRepeat)
             return media.canRepeat;
+        if (index == kImmersiveControlProgress)
+            return inlineProgressAvailable();
         if (index == kInlineSourceControl)
             return media.canSwitchSource;
         if (index == kDockControlQuickApps)
@@ -976,9 +1000,12 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         bool dominantColorChanged =
             info.hasDominantColor != media.hasDominantColor ||
             (info.hasDominantColor && info.dominantColor != media.dominantColor);
+        const bool previousSeekAvailable = media.canSeek && media.durationMs > 0;
+        const bool nextSeekAvailable = info.canSeek && info.durationMs > 0;
+        const bool canSeekChanged = previousSeekAvailable != nextSeekAvailable;
         bool durationChanged = info.durationMs != media.durationMs;
         media = info;
-        if ((canRepeatChanged || canSwitchSourceChanged) &&
+        if ((canRepeatChanged || canSwitchSourceChanged || canSeekChanged) &&
             (isExpandedView() || pinnedInlineControlsConfigured())) {
             requestInvalidation(RenderInvalidation::Layout);
             if (drag_.dragging())
@@ -988,6 +1015,12 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             inlineControlHover_ = -1;
             volumeHover_ = false;
             volumePopup_.hide();
+            hideProgressPopup();
+        }
+        if (!nextSeekAvailable) {
+            hideProgressPopup();
+            if (inlineControlHover_ == kInlineProgressControl)
+                inlineControlHover_ = -1;
         }
         if (canSwitchSourceChanged) {
             hoverTip_.hide();
@@ -1228,6 +1261,12 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             runtime_log::writef(L"[taskbar] media popup creation failed");
         if (!volumePopup_.create(inst))
             runtime_log::writef(L"[taskbar] volume popup creation failed");
+        if (!progressPopup_.create(inst))
+            runtime_log::writef(L"[taskbar] progress popup creation failed");
+        progressPopup_.setCallback([this](uint64_t generation, int64_t posMs) {
+            if (onControl)
+                onControl(MediaControl::Seek, generation, posMs);
+        });
         updateResourceColumnWidths();
         adjustPosition();
         startProbe(); // 避让探测（阻塞型跨进程调用）全程在工作线程执行
@@ -1366,6 +1405,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         immersiveControlHover_ = -1;
         inlineControlHover_ = -1;
         volumePopup_.hide();
+        hideProgressPopup();
         mediaPopup.hideImmediate();
     }
 
@@ -1461,7 +1501,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         }
         if (!vertical && pinnedInlineControlsForScene(scene_)) {
             const float pinnedExtra = taskbar_detail::pinnedInlineControlsIdealWidth(
-                dip(crossPx), media.canRepeat, pinnedInlineLyricFontSize(), media.canSwitchSource);
+                dip(crossPx), media.canRepeat, pinnedInlineLyricFontSize(), media.canSwitchSource,
+                inlineProgressAvailable());
             if (pinnedExtra > 0.0f) {
                 const int extra = (int)std::lround(pinnedExtra * scale());
                 minW += extra;
@@ -1814,6 +1855,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         immersiveControlHover_ = -1;
         inlineControlHover_ = -1;
         volumePopup_.hide();
+        hideProgressPopup();
         mediaPopup.onAnchorLeave();
         mediaPopup.hideImmediate();
         updateDragPreviewPlacement();
@@ -2246,6 +2288,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         inlineControlHover_ = -1;
         volumeHover_ = false;
         volumePopup_.hide();
+        hideProgressPopup();
         syncMediaPopupEnabled();
         requestInvalidation(toMask(RenderInvalidation::Layout) | toMask(RenderInvalidation::Paint));
         adjustPosition();
@@ -2259,6 +2302,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         inlineControlHover_ = -1;
         volumeHover_ = false;
         volumePopup_.hide();
+        hideProgressPopup();
         syncMediaPopupEnabled();
         requestInvalidation(toMask(RenderInvalidation::Layout) | toMask(RenderInvalidation::Paint));
         adjustPosition();
@@ -2272,6 +2316,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         inlineControlHover_ = -1;
         volumeHover_ = false;
         volumePopup_.hide();
+        hideProgressPopup();
         syncMediaPopupEnabled();
         requestInvalidation(toMask(RenderInvalidation::Layout) | toMask(RenderInvalidation::Paint));
         adjustPosition();
@@ -2505,6 +2550,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         immersiveControlHover_ = -1;
         inlineControlHover_ = -1;
         volumePopup_.hide();
+        hideProgressPopup();
         mediaPopup.onAnchorLeave();
         mediaPopup.hideImmediate();
         syncMediaPopupEnabled();
@@ -2791,6 +2837,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         syncLyricEffectClock(patch.actualPositionMs, patch.playing);
         syncKaraokePlayback(patch.actualPositionMs, patch.playing);
         positionMs_ = patch.actualPositionMs;
+        syncProgressPopup();
         mediaPopup.beginPresentationUpdate();
         mediaPopup.setProgress(patch.actualPositionMs);
         const bool playingChanged = media.playing != patch.playing;
@@ -3044,6 +3091,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             stopPlacementTimer();
         reconcileWindowVisibility();
         syncMediaPopupEnabled();
+        syncProgressPopup();
 
         if (isWindowVisible() &&
             (wasVisible != isWindowVisible() || trackChanged || mediaChanged || lyricsChanged ||
@@ -4409,7 +4457,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             widthDip, dip(height), scene_, albumCoverVisible_,
             hovered && controlsOnHover_ && hoverControlStyle_ == HoverControlStyle::Inline,
             media.canSwitchSource, resourceHeight, songInfoVisible_,
-            resourcePanel_.visibility().placement, verticalResourceOnly());
+            resourcePanel_.visibility().placement, verticalResourceOnly(),
+            inlineProgressAvailable());
     }
 
     bool pinnedInlineControlsConfigured() const {
@@ -4438,7 +4487,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return taskbar_detail::planPinnedInlineControls(
             {width, height, scene, songInfoVisible_, albumCoverVisible_, media.canRepeat,
              spectrumExtraForScene(scene, width), coverSlotWidth(height),
-             pinnedInlineLyricFontSize(), media.canSwitchSource, embeddedResourceLeftOffset()});
+             pinnedInlineLyricFontSize(), media.canSwitchSource, embeddedResourceLeftOffset(),
+             inlineProgressAvailable()});
     }
 
     taskbar_detail::PinnedInlineControlsLayout pinnedInlineControlsLayout() const {
@@ -4580,7 +4630,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             return false;
         const float controlsW = std::max(1.0f, layout.rightW - embeddedResourceRightExtra());
         taskbar_detail::layoutInlineHoverControls(layout.leftW, controlsW, layout.h, media.canRepeat,
-                                                  media.canSwitchSource, centers, cy, r);
+                                                  media.canSwitchSource, centers, cy, r,
+                                                  inlineProgressAvailable());
         return r > 0.0f;
     }
 
@@ -4606,11 +4657,16 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const float groupLeft =
             layout.leftW + start + std::max(0.0f, (layout.immersiveControlsW - groupW) * 0.5f);
         cy = layout.h * 0.5f;
+        constexpr int order[kExpandedControlCount] = {
+            kImmersiveControlPrevious, kImmersiveControlPlayPause, kImmersiveControlNext,
+            kImmersiveControlRepeat,   kImmersiveControlProgress,  kImmersiveControlVolume,
+            kInlineSourceControl,      kImmersiveControlExit,      kDockControlQuickApps,
+            kImmersiveControlMenu};
         int visibleIndex = 0;
-        for (int i = 0; i < kExpandedControlCount; ++i) {
-            if (!expandedControlVisible(i))
+        for (int slot : order) {
+            if (!expandedControlVisible(slot))
                 continue;
-            centers[i] = D2D1::Point2F(groupLeft + r + visibleIndex * pitch, cy);
+            centers[slot] = D2D1::Point2F(groupLeft + r + visibleIndex * pitch, cy);
             ++visibleIndex;
         }
         return true;
@@ -4643,6 +4699,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 break;
             case kImmersiveControlRepeat:
                 enabled = media.canRepeat;
+                break;
+            case kImmersiveControlProgress:
+                enabled = inlineProgressAvailable();
                 break;
             case kDockControlQuickApps:
                 enabled = idle.quickStartEnabled && static_cast<bool>(onDockQuickApps);
@@ -4734,6 +4793,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         drawButton(kImmersiveControlNext, centers[kImmersiveControlNext], r);
         if (expandedControlVisible(kImmersiveControlRepeat))
             drawRepeatButton(centers[kImmersiveControlRepeat], r);
+        if (expandedControlVisible(kImmersiveControlProgress))
+            drawProgressButton(centers[kImmersiveControlProgress], r);
         drawVolumeButton(centers[kImmersiveControlVolume], r);
         if (media.canSwitchSource)
             drawSwitchSourceButton(centers[kInlineSourceControl], r);
@@ -4866,6 +4927,16 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         media_control::drawVolume(rt, c, r * 0.8f, brush, level);
     }
 
+    void drawProgressButton(const D2D1_POINT_2F& c, float r) {
+        auto* rt = drawTarget();
+        if (!rt)
+            return;
+        const bool enabled = inlineProgressAvailable();
+        drawInlineControlBackground(kInlineProgressControl, c, r, enabled);
+        ID2D1SolidColorBrush* brush = enabled ? brushBtn_.Get() : brushBtnDisabled_.Get();
+        media_control::drawProgress(rt, c, r * 0.8f, brush);
+    }
+
     void drawPinnedInlineControls(const taskbar_detail::PinnedInlineControlsLayout& pinned) {
         if (!pinned.active())
             return;
@@ -4875,6 +4946,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         }
         if (pinned.visible[3] && media.canRepeat)
             drawRepeatButton(D2D1::Point2F(pinned.centerX[3], pinned.centerY), pinned.radius);
+        if (pinned.visible[kInlineProgressControl] && inlineProgressAvailable())
+            drawProgressButton(D2D1::Point2F(pinned.centerX[kInlineProgressControl], pinned.centerY),
+                               pinned.radius);
         if (pinned.visible[4])
             drawVolumeButton(D2D1::Point2F(pinned.centerX[4], pinned.centerY), pinned.radius);
         if (pinned.visible[kInlineSourceControl])
@@ -4900,6 +4974,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             drawButton(i, D2D1::Point2F(centers[i], cy), radius);
         if (media.canRepeat)
             drawRepeatButton(D2D1::Point2F(centers[3], cy), radius);
+        if (inlineProgressAvailable())
+            drawProgressButton(D2D1::Point2F(centers[kInlineProgressControl], cy), radius);
         drawVolumeButton(D2D1::Point2F(centers[4], cy), radius);
         if (media.canSwitchSource)
             drawSwitchSourceButton(D2D1::Point2F(centers[kInlineSourceControl], cy), radius);
@@ -4949,6 +5025,9 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             case 3:
                 enabled = media.canRepeat;
                 break;
+            case kInlineProgressControl:
+                enabled = inlineProgressAvailable();
+                break;
             default:
                 break;
             }
@@ -4968,6 +5047,62 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (isExpandedView())
             return hitImmersiveControl(x, y) == kImmersiveControlVolume;
         return hitInlineControl(x, y) == kImmersiveControlVolume;
+    }
+
+    bool hitProgressButton(float x, float y) const {
+        if (isExpandedView())
+            return hitImmersiveControl(x, y) == kImmersiveControlProgress;
+        return hitInlineControl(x, y) == kInlineProgressControl;
+    }
+
+    // 进度按钮的屏幕坐标矩形（进度滑块浮窗的锚点）
+    RECT progressButtonScreenRect() const {
+        if (isExpandedView()) {
+            D2D1_POINT_2F centers[kExpandedControlCount]{};
+            float cy = 0.0f;
+            float r = 0.0f;
+            if (immersiveControlsLayout(centers, cy, r)) {
+                const float s = scale();
+                POINT pt = logicalDipToClientPoint(centers[kImmersiveControlProgress].x,
+                                                   centers[kImmersiveControlProgress].y);
+                ClientToScreen(hwnd, &pt);
+                const int half = static_cast<int>(std::lround((r + 6.0f) * s));
+                return RECT{pt.x - half, pt.y - half, pt.x + half, pt.y + half};
+            }
+        }
+        if (isVerticalTaskbar()) {
+            const VerticalLayout layout = verticalLayout();
+            if (layout.showControls && layout.showProgressControl) {
+                const float s = scale();
+                POINT pt =
+                    logicalDipToClientPoint(layout.controlCenters[5].x, layout.controlCenters[5].y);
+                ClientToScreen(hwnd, &pt);
+                const int half = static_cast<int>(std::lround((layout.controlRadius + 6.0f) * s));
+                return RECT{pt.x - half, pt.y - half, pt.x + half, pt.y + half};
+            }
+        }
+        if (const auto pinned = pinnedInlineControlsLayout();
+            pinned.active() && pinned.visible[kInlineProgressControl]) {
+            const float s = scale();
+            POINT pt =
+                logicalDipToClientPoint(pinned.centerX[kInlineProgressControl], pinned.centerY);
+            ClientToScreen(hwnd, &pt);
+            const int half = static_cast<int>(std::lround((pinned.radius + 5.0f) * s));
+            return RECT{pt.x - half, pt.y - half, pt.x + half, pt.y + half};
+        }
+        float centers[kInlineControlCount]{};
+        float cy = 0.0f;
+        float r = 0.0f;
+        if (!inlineControlsLayout(centers, cy, r)) {
+            RECT rc{};
+            GetWindowRect(hwnd, &rc);
+            return rc;
+        }
+        const float s = scale();
+        POINT pt = logicalDipToClientPoint(centers[kInlineProgressControl], cy);
+        ClientToScreen(hwnd, &pt);
+        const int half = static_cast<int>(std::lround((r + 6.0f) * s));
+        return RECT{pt.x - half, pt.y - half, pt.x + half, pt.y + half};
     }
 
     // 音量按钮的屏幕坐标矩形（音量滑块浮窗的锚点）
@@ -5024,6 +5159,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         immersiveControlHover_ = -1;
         volumePopup_.onAnchorLeave();
         volumePopup_.hide();
+        hideProgressPopup();
         mediaPopup.onAnchorLeave();
         mediaPopup.hideImmediate();
         requestFrameAndFlush();
@@ -5125,6 +5261,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         immersiveControlHover_ = -1;
         volumePopup_.onAnchorLeave();
         volumePopup_.hide();
+        hideProgressPopup();
         animateImmersivePresence(from, 0.0f, kImmersiveHideMs);
         startImmersivePresenceTimer();
         requestFrameAndFlush();
@@ -5153,6 +5290,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         volumeHover_ = false;
         volumePopup_.onAnchorLeave();
         volumePopup_.hide();
+        hideProgressPopup();
         reconcileWindowVisibility();
     }
 
@@ -5242,8 +5380,19 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             if (onControl)
                 onControl(static_cast<MediaControl>(index), media.sessionGeneration, 0);
             break;
+        case kImmersiveControlProgress:
+            if (inlineProgressAvailable()) {
+                volumeHover_ = false;
+                volumePopup_.onAnchorLeave();
+                volumePopup_.hide();
+                syncProgressPopup();
+                progressPopup_.onAnchorEnter();
+                progressPopup_.showNear(progressButtonScreenRect(), false, taskbarEdge_ == ABE_LEFT);
+            }
+            break;
         case kImmersiveControlVolume:
             if (appVolume_.available) {
+                hideProgressPopup();
                 volumePopup_.onAnchorEnter();
                 volumePopup_.showNear(volumeButtonScreenRect(), false, taskbarEdge_ == ABE_LEFT);
             }
@@ -5302,15 +5451,18 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         clientPointToLogicalDip(x, y, logicalX, logicalY);
         const bool enabled[kInlineControlCount] = {
             media.canPrev, media.canPlayPause, media.canNext, media.canRepeat, true,
-            media.canSwitchSource};
+            media.canSwitchSource, inlineProgressAvailable()};
         int hit = -1;
         if (isVerticalTaskbar()) {
             const VerticalLayout layout = verticalLayout();
             if (!layout.showControls)
                 return -1;
-            constexpr int slots[] = {0, 1, 2, kImmersiveControlVolume, kInlineSourceControl};
+            constexpr int slots[] = {0, 1, 2, kImmersiveControlVolume, kInlineSourceControl,
+                                     kInlineProgressControl};
             float nearest = layout.controlRadius + 4.0f;
             for (size_t i = 0; i < std::size(slots); ++i) {
+                if (slots[i] == kInlineProgressControl && !layout.showProgressControl)
+                    continue;
                 const auto& center = layout.controlCenters[i];
                 const float distance = std::hypot(logicalX - center.x, logicalY - center.y);
                 if (enabled[slots[i]] && distance <= nearest) {
@@ -6758,6 +6910,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (layout.showControls) {
             for (int i = 0; i < 3; ++i)
                 drawButton(i, layout.controlCenters[i], layout.controlRadius);
+            if (layout.showProgressControl && inlineProgressAvailable())
+                drawProgressButton(layout.controlCenters[5], layout.controlRadius);
             drawVolumeButton(layout.controlCenters[3], layout.controlRadius);
             if (media.canSwitchSource)
                 drawSwitchSourceButton(layout.controlCenters[4], layout.controlRadius);
@@ -7515,6 +7669,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             inlineControlHover_ = -1;
             volumeHover_ = false;
             volumePopup_.hide();
+            hideProgressPopup();
             mediaPopupEnabled_ = false;
             mediaPopup.setEnabled(false);
             releaseCoverBackgroundResources();
@@ -7529,6 +7684,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             inlineControlHover_ = -1;
             volumeHover_ = false;
             volumePopup_.hide();
+            hideProgressPopup();
             mediaPopupEnabled_ = false;
             mediaPopup.setEnabled(false);
             reconcileWindowVisibility();
@@ -7760,6 +7916,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 volumeHover_ = false;
                 volumePopup_.hide();
             }
+            if (progressHover_ && !isExpandedView() && !isVerticalTaskbar() &&
+                pinnedInlineControlsConfigured() &&
+                !pinnedInlineControlsLayout().visible[kInlineProgressControl]) {
+                hideProgressPopup();
+            }
             return DefWindowProcW(hwnd, msg, wp, lp);
         case WM_SHOWWINDOW:
             if (!wp)
@@ -7882,6 +8043,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             }
             const bool volHover = (isExpandedView() ? immersiveHover : inlineHover) ==
                                   kImmersiveControlVolume;
+            const bool progHover = isExpandedView() ? (immersiveHover == kImmersiveControlProgress)
+                                                    : (inlineHover == kInlineProgressControl);
             if (inlineHover != inlineControlHover_) {
                 inlineControlHover_ = inlineHover;
                 requestFrameAndFlush();
@@ -7891,12 +8054,29 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                 if (!volHover)
                     volumePopup_.onAnchorLeave();
             }
+            if (progHover != progressHover_) {
+                progressHover_ = progHover;
+                if (!progHover)
+                    progressPopup_.onAnchorLeave();
+            }
             if (volHover && appVolume_.available && immersiveYieldAllowedState()) {
                 if (inPinnedControls)
                     mediaPopup.hideImmediate();
+                hideProgressPopup();
                 volumePopup_.onAnchorEnter();
                 volumePopup_.showNear(volumeButtonScreenRect(), isVerticalTaskbar(),
                                       taskbarEdge_ == ABE_LEFT);
+            }
+            if (progHover && inlineProgressAvailable() && immersiveYieldAllowedState()) {
+                if (inPinnedControls)
+                    mediaPopup.hideImmediate();
+                volumeHover_ = false;
+                volumePopup_.onAnchorLeave();
+                volumePopup_.hide();
+                syncProgressPopup();
+                progressPopup_.onAnchorEnter();
+                progressPopup_.showNear(progressButtonScreenRect(), isVerticalTaskbar(),
+                                        taskbarEdge_ == ABE_LEFT);
             }
             return 0;
         }
@@ -7911,14 +8091,16 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             verticalResourceHovered_ = false;
             trackingLeave_ = false;
             volumeHover_ = false;
+            progressHover_ = false;
             immersiveControlHover_ = -1;
             inlineControlHover_ = -1;
             volumePopup_.onAnchorLeave();
+            progressPopup_.onAnchorLeave();
             mediaPopup.onAnchorLeave();
             requestFrameAndFlush();
             return 0;
         case WM_MOUSEWHEEL: {
-            // 滚轮消息使用屏幕坐标；音量图标上滚动直接调整应用音量（每格 ±2）
+            // 滚轮消息使用屏幕坐标；音量/进度图标上滚动直接微调
             POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
             ScreenToClient(hwnd, &pt);
             const int delta = GET_WHEEL_DELTA_WPARAM(wp);
@@ -7937,6 +8119,16 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                     mediaPopup.setAppVolume(appVolume_);
                     requestFrameAndFlush();
                     onAppVolume(request);
+                }
+                return 0;
+            }
+            if (inlineProgressAvailable() && onControl &&
+                hitProgressButton(static_cast<float>(pt.x), static_cast<float>(pt.y))) {
+                sourceWheelRemainder_ = 0;
+                const int steps = delta / WHEEL_DELTA;
+                if (steps != 0) {
+                    syncProgressPopup();
+                    progressPopup_.seekBy(static_cast<int64_t>(steps) * 5000);
                 }
                 return 0;
             }
@@ -8051,12 +8243,24 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             // 循环按钮点击后先记下期望模式，等回读结果出来再显示提示词。
             if (btn == static_cast<int>(MediaControl::Repeat))
                 armRepeatHint(SmtcSnapshot::nextPlayMode(media.repeatMode));
+            if (btn == kInlineProgressControl) {
+                if (inlineProgressAvailable()) {
+                    volumeHover_ = false;
+                    volumePopup_.onAnchorLeave();
+                    volumePopup_.hide();
+                    syncProgressPopup();
+                    progressPopup_.onAnchorEnter();
+                    progressPopup_.showNear(progressButtonScreenRect(), isVerticalTaskbar(),
+                                            taskbarEdge_ == ABE_LEFT);
+                }
+                return 0;
+            }
             if (btn >= 0 && btn != kImmersiveControlVolume && onControl)
                 onControl(static_cast<MediaControl>(btn), media.sessionGeneration, 0);
             // 卡片的当前页面自己判断是否为点击展开；这样无播放时的每日一言卡片
             // 可以独立于媒体控件样式使用点击展开。
             else if (!pointInPinnedControlsZone(mx, my) && !hitVolumeButton(mx, my) &&
-                     !isMinimalMode() && !isExpandedView())
+                     !hitProgressButton(mx, my) && !isMinimalMode() && !isExpandedView())
                 mediaPopup.onAnchorClick();
             return 0;
         }
@@ -8151,6 +8355,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             dragAnchors_.clear();
             drag_.end();
             volumePopup_.destroy();
+            progressPopup_.destroy();
             mediaPopup.destroy();
             releaseAll();
             hwnd = nullptr;

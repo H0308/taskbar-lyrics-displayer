@@ -28,6 +28,10 @@ void draw(ID2D1RenderTarget* target, const Geometry& geometry, int index, bool p
 void drawVolume(ID2D1RenderTarget* target, const D2D1_POINT_2F& center, float radius,
                 ID2D1Brush* brush, int level);
 
+// 进度图标（Fluent 风格圆形时钟表盘与指针，用于内嵌控件弹出进度浮窗的入口）。
+void drawProgress(ID2D1RenderTarget* target, const D2D1_POINT_2F& center, float radius,
+                  ID2D1Brush* brush);
+
 // 播放模式图标：字形直接取自 Windows 自带图标字体（Segoe Fluent Icons，
 // 回退 Segoe MDL2 Assets），不是手绘路径；字体缺失时退回矢量兜底画法。
 // mode 0 顺序播放 / 2 单曲循环 / 3 随机播放 各自一个字形；

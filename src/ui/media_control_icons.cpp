@@ -1,5 +1,6 @@
 #include "media_control_icons.h"
 
+#include <algorithm>
 #include <cmath>
 #include <dwrite.h>
 
@@ -541,6 +542,41 @@ void drawMusicNote(ID2D1RenderTarget* target, const D2D1_POINT_2F& center, float
         return;
     }
     drawMusicNoteFallback(target, center, size, brush);
+}
+
+void drawProgress(ID2D1RenderTarget* target, const D2D1_POINT_2F& center, float radius,
+                  ID2D1Brush* brush) {
+    if (!target || !brush || radius <= 0.0f)
+        return;
+
+    const float stroke = std::clamp(radius * 0.20f, 1.35f, 2.0f);
+    const float ringR = std::max(2.0f, radius * 0.88f - stroke * 0.5f);
+    target->DrawEllipse(D2D1::Ellipse(center, ringR, ringR), brush, stroke);
+
+    const D2D1_POINT_2F minuteTip{center.x, center.y - ringR * 0.54f};
+    const D2D1_POINT_2F hourTip{center.x + ringR * 0.42f, center.y + ringR * 0.24f};
+
+    ID2D1Factory* factory = nullptr;
+    target->GetFactory(&factory);
+    ID2D1StrokeStyle* roundStyle = nullptr;
+    if (factory) {
+        const D2D1_STROKE_STYLE_PROPERTIES props = D2D1::StrokeStyleProperties(
+            D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND,
+            D2D1_LINE_JOIN_ROUND);
+        factory->CreateStrokeStyle(props, nullptr, 0, &roundStyle);
+        factory->Release();
+    }
+
+    target->DrawLine(minuteTip, center, brush, stroke, roundStyle);
+    target->DrawLine(center, hourTip, brush, stroke, roundStyle);
+    if (roundStyle) {
+        roundStyle->Release();
+    } else {
+        const float capR = stroke * 0.5f;
+        target->FillEllipse(D2D1::Ellipse(minuteTip, capR, capR), brush);
+        target->FillEllipse(D2D1::Ellipse(center, capR, capR), brush);
+        target->FillEllipse(D2D1::Ellipse(hourTip, capR, capR), brush);
+    }
 }
 
 } // namespace media_control

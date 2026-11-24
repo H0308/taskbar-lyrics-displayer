@@ -18,7 +18,8 @@ inline float songInfoStart(bool coverVisible, float coverSize) {
 inline constexpr float kVerticalControlsGap = 4.0f;
 inline constexpr float kVerticalLyricGap = 6.0f;
 inline constexpr int kInlineSourceControl = static_cast<int>(MediaControl::NextSource);
-inline constexpr int kInlineControlCount = kInlineSourceControl + 1;
+inline constexpr int kInlineProgressControl = kInlineSourceControl + 1;
+inline constexpr int kInlineControlCount = kInlineProgressControl + 1;
 struct LayoutMetrics {
     float w = 0.0f;
     float h = 0.0f;
@@ -45,6 +46,7 @@ struct PinnedInlineControlsInput {
     float lyricFontSize = 0.0f;
     bool canSwitchSource = false;
     float leadingOffset = 0.0f;
+    bool canSeek = false;
 };
 
 struct PinnedInlineControlsLayout {
@@ -71,8 +73,9 @@ struct VerticalLayout {
     float lyricBottom = 0.0f;
     D2D1_RECT_F resources{};
     bool showControls = false;
+    bool showProgressControl = false;
     float controlRadius = 0.0f;
-    D2D1_POINT_2F controlCenters[5]{};
+    D2D1_POINT_2F controlCenters[6]{};
 };
 
 struct HorizontalLayoutInput {
@@ -112,11 +115,11 @@ float expandedSpectrumWidth(float hostWidth);
 float expandedClockWidth(float hostWidth);
 ExpandedSideLayout expandedSideLayout(float hostWidth, bool dock, float resourceWidth);
 float pinnedInlineControlsIdealWidth(float heightDip, bool canRepeat, float lyricFontSize = 0.0f,
-                                     bool canSwitchSource = false);
+                                     bool canSwitchSource = false, bool canSeek = false);
 PinnedInlineControlsLayout planPinnedInlineControls(const PinnedInlineControlsInput& input);
 void layoutInlineHoverControls(float left, float width, float height, bool canRepeat,
                                bool canSwitchSource, float (&centers)[kInlineControlCount],
-                               float& cy, float& radius);
+                               float& cy, float& radius, bool canSeek = false);
 
 // 纯几何计算。渲染与命中检测读取同一份布局，窗口句柄和设备资源不进入计算。
 LayoutMetrics horizontalLayout(const HorizontalLayoutInput& input);
@@ -124,5 +127,5 @@ VerticalLayout verticalLayout(float width, float height, DisplayScene scene, boo
                               bool showControls, bool canSwitchSource = false,
                               float resourceHeight = 0.0f, bool songInfoVisible = true,
                               ResourcePlacement resourcePlacement = ResourcePlacement::End,
-                              bool resourceOnly = false);
+                              bool resourceOnly = false, bool canSeek = false);
 } // namespace taskbar_detail
