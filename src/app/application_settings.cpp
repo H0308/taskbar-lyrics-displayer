@@ -1280,10 +1280,7 @@ SettingsState App::currentSettingsState() const {
     st.verticalTaskbar = vertical;
     st.taskbarViewMode = static_cast<int>(settings_.taskbarViewMode_);
     st.songTransitionEnabled = settings_.songTransitionEnabled_;
-    if (settings_.taskbarViewMode_ == TaskbarViewMode::Embedded)
-        st.taskbarMonitorLabel = L"主显示器";
-    else
-        st.taskbarMonitorLabel = taskbarMonitorLabel();
+    st.taskbarMonitorLabel = taskbarMonitorLabel();
     st.mediaSessionAlive = monitor.snapshot().sessionAlive;
     st.appBarEdge = settings_.appBarEdge_ == AppBarEdge::Bottom ? 1 : 0;
     st.immersiveBackgroundBlur = settings_.immersiveBackgroundBlur_;

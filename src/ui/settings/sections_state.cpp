@@ -96,7 +96,7 @@ void SettingsSections::updateImmersiveRowsEnabled() {
     if (auto* row = findRow(kIdAppBarEdge))
         row->enabled = appBarEnabled;
     if (auto* row = findRow(kIdTaskbarMonitor))
-        row->enabled = selectedMode != 0;
+        row->enabled = true;
     if (auto* row = findRow(kIdImmersiveBackgroundAdjustment)) {
         row->selected = std::clamp(state.immersiveBackgroundAdjustment, 0, 1);
         row->enabled = selectedMode == 1 && immersiveEnabled && state.backgroundBlurSupported;

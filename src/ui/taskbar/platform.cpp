@@ -271,9 +271,41 @@ void queryKugouTaskbarWindows(HWND taskbar, std::vector<RECT>& out) {
               out.end());
 }
 
+namespace {
+IUIAutomationCondition* createStringPropertyCondition(IUIAutomation* uia, PROPERTYID propertyId,
+                                                      const wchar_t* value) {
+    if (!uia || !value)
+        return nullptr;
+    VARIANT prop{};
+    prop.vt = VT_BSTR;
+    prop.bstrVal = SysAllocString(value);
+    if (!prop.bstrVal)
+        return nullptr;
+    IUIAutomationCondition* cond = nullptr;
+    uia->CreatePropertyCondition(propertyId, prop, &cond);
+    VariantClear(&prop);
+    return cond;
+}
+
+IUIAutomationCondition* combineOrCondition(IUIAutomation* uia, IUIAutomationCondition* first,
+                                           IUIAutomationCondition* second) {
+    if (!first)
+        return second;
+    if (!second)
+        return first;
+    IUIAutomationCondition* combined = nullptr;
+    const HRESULT hr = uia->CreateOrCondition(first, second, &combined);
+    first->Release();
+    second->Release();
+    return SUCCEEDED(hr) ? combined : nullptr;
+}
+} // namespace
+
 // 通过 UI Automation 取任务栏 XAML 部件（开始/搜索/任务视图/小组件/固定与运行中的
 // 应用图标）的屏幕包围矩形。这些按钮是 XAML 元素而非窗口，HWND 枚举看不到，
 // 但 UIA 的 TaskbarFrame 子树完整暴露；小组件等后续新增的按钮同样作为其子元素出现。
+// 副屏任务栏（Shell_SecondaryTrayWnd）通常没有 TrayNotifyWnd 子窗口，因此在缺少
+// TrayNotifyWnd 时额外补查系统托盘/时钟 UIA 元素，避免内嵌歌词压住副屏时钟。
 // uia 实例由探测工作线程创建与持有
 void queryTaskbarButtonsUia(IUIAutomation* uia, HWND taskbar, std::vector<RECT>& out) {
     out.clear();
@@ -282,46 +314,95 @@ void queryTaskbarButtonsUia(IUIAutomation* uia, HWND taskbar, std::vector<RECT>&
     IUIAutomationElement* tb = nullptr;
     if (FAILED(uia->ElementFromHandle(taskbar, &tb)) || !tb)
         return;
-    VARIANT aid{};
-    aid.vt = VT_BSTR;
-    aid.bstrVal = SysAllocString(L"TaskbarFrame");
-    IUIAutomationCondition* cond = nullptr;
-    uia->CreatePropertyCondition(UIA_AutomationIdPropertyId, aid, &cond);
-    VariantClear(&aid);
+
+    IUIAutomationCondition* frameCond =
+        createStringPropertyCondition(uia, UIA_AutomationIdPropertyId, L"TaskbarFrame");
     IUIAutomationElement* frame = nullptr;
-    if (cond) {
-        tb->FindFirst(TreeScope_Descendants, cond, &frame);
-        cond->Release();
+    if (frameCond) {
+        tb->FindFirst(TreeScope_Descendants, frameCond, &frame);
+        frameCond->Release();
+    }
+    if (frame) {
+        IUIAutomationCondition* trueCond = nullptr;
+        uia->CreateTrueCondition(&trueCond);
+        IUIAutomationElementArray* arr = nullptr;
+        if (trueCond) {
+            frame->FindAll(TreeScope_Children, trueCond, &arr);
+            trueCond->Release();
+        }
+        frame->Release();
+        if (arr) {
+            int n = 0;
+            arr->get_Length(&n);
+            for (int i = 0; i < n; ++i) {
+                IUIAutomationElement* el = nullptr;
+                arr->GetElement(i, &el);
+                if (!el)
+                    continue;
+                BOOL offscreen = FALSE;
+                RECT rc{};
+                el->get_CurrentIsOffscreen(&offscreen);
+                el->get_CurrentBoundingRectangle(&rc);
+                el->Release();
+                if (!offscreen && rc.right > rc.left && rc.bottom > rc.top)
+                    out.push_back(rc);
+            }
+            arr->Release();
+        }
+    }
+
+    // 副屏任务栏通常没有 TrayNotifyWnd，补充读取时钟/托盘按钮矩形；过滤掉占满整栏的布局容器。
+    RECT taskbarRect{};
+    if (!FindWindowExW(taskbar, nullptr, L"TrayNotifyWnd", nullptr) &&
+        GetWindowRect(taskbar, &taskbarRect)) {
+        const int tbW = taskbarRect.right - taskbarRect.left;
+        const int tbH = taskbarRect.bottom - taskbarRect.top;
+        const bool vertical = tbH > tbW;
+        const int tbMajor = vertical ? tbH : tbW;
+        IUIAutomationCondition* trayCond = nullptr;
+        trayCond = combineOrCondition(
+            uia, trayCond,
+            createStringPropertyCondition(uia, UIA_AutomationIdPropertyId, L"SystemTrayIcon"));
+        trayCond = combineOrCondition(
+            uia, trayCond,
+            createStringPropertyCondition(uia, UIA_AutomationIdPropertyId, L"ClockButton"));
+        trayCond = combineOrCondition(
+            uia, trayCond,
+            createStringPropertyCondition(uia, UIA_ClassNamePropertyId,
+                                          L"SystemTray.DateTimeIconContent"));
+        trayCond = combineOrCondition(
+            uia, trayCond,
+            createStringPropertyCondition(uia, UIA_ClassNamePropertyId, L"SystemTray.NormalButton"));
+        if (trayCond) {
+            IUIAutomationElementArray* trayArr = nullptr;
+            tb->FindAll(TreeScope_Descendants, trayCond, &trayArr);
+            trayCond->Release();
+            if (trayArr) {
+                int n = 0;
+                trayArr->get_Length(&n);
+                for (int i = 0; i < n; ++i) {
+                    IUIAutomationElement* el = nullptr;
+                    trayArr->GetElement(i, &el);
+                    if (!el)
+                        continue;
+                    BOOL offscreen = FALSE;
+                    RECT rc{};
+                    el->get_CurrentIsOffscreen(&offscreen);
+                    el->get_CurrentBoundingRectangle(&rc);
+                    el->Release();
+                    RECT clipped{};
+                    if (offscreen || !IntersectRect(&clipped, &rc, &taskbarRect))
+                        continue;
+                    const int elemMajor =
+                        vertical ? (clipped.bottom - clipped.top) : (clipped.right - clipped.left);
+                    if (tbMajor > 0 && elemMajor > 0 && elemMajor < (tbMajor * 3) / 4)
+                        out.push_back(clipped);
+                }
+                trayArr->Release();
+            }
+        }
     }
     tb->Release();
-    if (!frame)
-        return;
-    IUIAutomationCondition* trueCond = nullptr;
-    uia->CreateTrueCondition(&trueCond);
-    IUIAutomationElementArray* arr = nullptr;
-    if (trueCond) {
-        frame->FindAll(TreeScope_Children, trueCond, &arr);
-        trueCond->Release();
-    }
-    frame->Release();
-    if (!arr)
-        return;
-    int n = 0;
-    arr->get_Length(&n);
-    for (int i = 0; i < n; ++i) {
-        IUIAutomationElement* el = nullptr;
-        arr->GetElement(i, &el);
-        if (!el)
-            continue;
-        BOOL offscreen = FALSE;
-        RECT rc{};
-        el->get_CurrentIsOffscreen(&offscreen);
-        el->get_CurrentBoundingRectangle(&rc);
-        el->Release();
-        if (!offscreen && rc.right > rc.left && rc.bottom > rc.top)
-            out.push_back(rc);
-    }
-    arr->Release();
 }
 
 std::vector<TaskbarDisplayInfo> enumerateDisplays() {

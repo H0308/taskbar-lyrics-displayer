@@ -95,7 +95,7 @@ void SettingsSections::createTaskbarModeRows() {
     Row& taskbarMonitor = addButton(
         kTaskbarModePage, kIdTaskbarMonitor, L"目标显示器", nullptr,
         state.taskbarMonitorLabel.c_str(), kRowTallH);
-    taskbarMonitor.enabled = state.taskbarViewMode != 0;
+    taskbarMonitor.enabled = true;
     addRadio(kTaskbarModePage, kIdAppBarEdge, L"Dock 位置", nullptr,
              {L"顶部", L"底部"}, std::clamp(state.appBarEdge, 0, 1), state.taskbarViewMode == 2,
              kRowH);

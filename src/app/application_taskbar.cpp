@@ -10,9 +10,6 @@ std::vector<TaskbarDisplayInfo> App::desiredTaskbarDisplays(const SmtcSnapshot& 
     if (primary == displays.end())
         primary = displays.begin();
 
-    if (settings_.taskbarViewMode_ == TaskbarViewMode::Embedded)
-        return {*primary};
-
     if (settings_.taskbarMonitorId_ == L"all") {
         if (settings_.taskbarViewMode_ == TaskbarViewMode::Immersive) {
             std::vector<TaskbarDisplayInfo> horizontal;
@@ -21,6 +18,13 @@ std::vector<TaskbarDisplayInfo> App::desiredTaskbarDisplays(const SmtcSnapshot& 
                 [](const auto& item) { return item.taskbarWindow && item.horizontalTaskbar; });
             return horizontal.empty() ? std::vector<TaskbarDisplayInfo>{*primary}
                                       : std::move(horizontal);
+        }
+        if (settings_.taskbarViewMode_ == TaskbarViewMode::Embedded) {
+            std::vector<TaskbarDisplayInfo> withTaskbar;
+            std::copy_if(displays.begin(), displays.end(), std::back_inserter(withTaskbar),
+                         [](const auto& item) { return item.taskbarWindow != nullptr; });
+            return withTaskbar.empty() ? std::vector<TaskbarDisplayInfo>{*primary}
+                                       : std::move(withTaskbar);
         }
         return displays;
     }
@@ -33,7 +37,7 @@ std::vector<TaskbarDisplayInfo> App::desiredTaskbarDisplays(const SmtcSnapshot& 
         if (found != displays.end())
             selected = found;
     }
-    if (settings_.taskbarViewMode_ == TaskbarViewMode::Immersive && !selected->taskbarWindow)
+    if (settings_.taskbarViewMode_ != TaskbarViewMode::AppBar && !selected->taskbarWindow)
         selected = primary;
     return {*selected};
 }
@@ -86,15 +90,19 @@ void App::showTaskbarMonitorMenu() {
     all.icon = settings_icon::Kind::Display;
     all.checked = settings_.taskbarMonitorId_ == L"all";
     items.push_back(std::move(all));
+    const bool requiresTaskbar = settings_.taskbarViewMode_ != TaskbarViewMode::AppBar;
     for (size_t i = 0; i < displays.size(); ++i) {
         const auto& display = displays[i];
         fluent::FluentMenuItem item;
         item.id = kCmdTaskbarMonitorBase + static_cast<int>(i);
-        item.text = taskbarDisplayLabel(display);
+        const bool checked = settings_.taskbarMonitorId_.empty()
+                                 ? display.primary
+                                 : settings_.taskbarMonitorId_ == display.deviceName;
+        const bool unavailable = requiresTaskbar && !display.taskbarWindow;
+        item.text = taskbarDisplayLabel(display) + (unavailable ? L"（无任务栏）" : L"");
         item.icon = settings_icon::Kind::Display;
-        item.checked = settings_.taskbarMonitorId_.empty()
-                           ? display.primary
-                           : settings_.taskbarMonitorId_ == display.deviceName;
+        item.checked = checked;
+        item.enabled = !unavailable || checked;
         taskbarMonitorMenuItems_.emplace_back(item.id, display.deviceName);
         items.push_back(std::move(item));
     }
@@ -566,10 +574,17 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
     syncTaskbarOrientation();
     applyEffectiveTaskbarSettings();
     syncSpectrumWithMode();
-    const TaskbarPlacementStatus placementStatus = taskbarHost->refreshPlacement();
-    for (auto& host : additionalTaskbarHosts_)
-        host->refreshPlacement();
-    if (placementStatus == TaskbarPlacementStatus::NoSpace) {
+    bool anyHostHasSpace = false;
+    bool anyHostUnavailable = false;
+    forEachHost([&](TaskbarHost* host) {
+        const TaskbarPlacementStatus status = host->refreshPlacement();
+        if (status != TaskbarPlacementStatus::NoSpace &&
+            status != TaskbarPlacementStatus::Unavailable)
+            anyHostHasSpace = true;
+        if (status == TaskbarPlacementStatus::Unavailable)
+            anyHostUnavailable = true;
+    });
+    if (!anyHostHasSpace && !anyHostUnavailable) {
         taskbarAutoClosedForNoSpace_ = true;
         taskbarSpectrumSuppressedForNoSpace_ = true;
         spectrum_.stop();
@@ -577,7 +592,13 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
         taskbarSpectrumRestoring_ = true;
         forEachHost([](TaskbarHost* host) { host->setSpectrumVisible(false); });
         taskbarSpectrumRestoring_ = wasRestoringSpectrum;
-        if (taskbarHost->placementStatus() != TaskbarPlacementStatus::NoSpace) {
+        bool recovered = false;
+        forEachHost([&](TaskbarHost* host) {
+            if (host->placementStatus() != TaskbarPlacementStatus::NoSpace &&
+                host->placementStatus() != TaskbarPlacementStatus::Unavailable)
+                recovered = true;
+        });
+        if (recovered) {
             // 释放频谱占用后已有足够空间，继续保留宿主但不需要进入无空间状态。
             taskbarAutoClosedForNoSpace_ = false;
             taskbarSpectrumSuppressedForNoSpace_ = false;
@@ -591,7 +612,7 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
         updateTrayIcon();
         return TaskbarCreateResult::NoSpace;
     }
-    if (placementStatus == TaskbarPlacementStatus::Unavailable) {
+    if (!anyHostHasSpace && anyHostUnavailable) {
         runtime_log::writef(L"[taskbar] placement unavailable after creation");
         destroyTaskbar();
         // AppBar 的注册失败属于真正的创建失败，不作为 Explorer 未就绪处理。
@@ -638,14 +659,24 @@ bool App::taskbarEnabledForUserAction() {
         return false;
     if (!taskbarHost)
         return taskbarPendingDisplayRebuild_;
-    const TaskbarPlacementStatus status = taskbarHost->placementStatus();
-    if (status == TaskbarPlacementStatus::NoSpace || status == TaskbarPlacementStatus::Unavailable)
+    bool anyAvailable = false;
+    bool anyDisplayed = false;
+    forEachHost([&](TaskbarHost* host) {
+        const TaskbarPlacementStatus status = host->placementStatus();
+        if (status != TaskbarPlacementStatus::NoSpace &&
+            status != TaskbarPlacementStatus::Unavailable) {
+            anyAvailable = true;
+            if (host->isDisplayed())
+                anyDisplayed = true;
+        }
+    });
+    if (!anyAvailable)
         return false;
     // AppBar 在无媒体且关闭空闲入口时会主动隐藏并释放工作区，
     // 但宿主与用户选择仍是开启状态，托盘操作不能把它误判为关闭。
     if (settings_.taskbarViewMode_ == TaskbarViewMode::AppBar)
         return true;
-    if (taskbarHost->isDisplayed()) {
+    if (anyDisplayed) {
         taskbarEnabledBeforeStopped_ = false;
         return true;
     }
@@ -662,9 +693,14 @@ void App::toggleTaskbar() {
         cancelTaskbarDisplayRebuildRetry();
         destroyTaskbar();
     } else {
+        bool anyHostNoSpace = false;
+        forEachHost([&](TaskbarHost* host) {
+            if (host->placementStatus() == TaskbarPlacementStatus::NoSpace)
+                anyHostNoSpace = true;
+        });
         const bool noSpaceAlreadyKnown =
             !isRenderMode(RenderMode::Stopped) &&
-            ((taskbarHost && taskbarHost->placementStatus() == TaskbarPlacementStatus::NoSpace) ||
+            (anyHostNoSpace ||
              (!taskbarHost && taskbarAutoClosedForNoSpace_ && taskbarAutoRestorePending_));
         if (noSpaceAlreadyKnown) {
             // 无空间状态已经由当前宿主确认，保留宿主直接提示；用户确认后
@@ -755,6 +791,24 @@ void App::handleTaskbarNoSpace() {
     if (!taskbarHost || taskbarAllowOverlap_)
         return;
 
+    // 多显示器内嵌时，只要还有其他屏幕存在可用空间，就不停掉全局频谱或弹窗，
+    // 空间不足的单块屏由其自身宿主安全隐藏并在空间恢复后自动重现。
+    bool anyOtherHostAvailable = false;
+    for (const auto& host : additionalTaskbarHosts_) {
+        const TaskbarPlacementStatus status = host->placementStatus();
+        if (status != TaskbarPlacementStatus::NoSpace &&
+            status != TaskbarPlacementStatus::Unavailable) {
+            anyOtherHostAvailable = true;
+            break;
+        }
+    }
+    if (anyOtherHostAvailable) {
+        taskbarAutoClosedForNoSpace_ = false;
+        taskbarSpectrumSuppressedForNoSpace_ = false;
+        syncSpectrumWithMode();
+        return;
+    }
+
     taskbarAutoClosedForNoSpace_ = true;
     spectrum_.stop();
     const bool wasRestoringSpectrum = taskbarSpectrumRestoring_;
@@ -763,7 +817,14 @@ void App::handleTaskbarNoSpace() {
     taskbarSpectrumRestoring_ = wasRestoringSpectrum;
     // 关闭频谱本身可能已经释放了占用空间；此时不再进入无空间处理，
     // 避免把刚恢复的宿主再次标记为自动隐藏。
-    if (taskbarHost->placementStatus() != TaskbarPlacementStatus::NoSpace) {
+    bool anyHostRecovered = false;
+    forEachHost([&](TaskbarHost* host) {
+        const TaskbarPlacementStatus status = host->placementStatus();
+        if (status != TaskbarPlacementStatus::NoSpace &&
+            status != TaskbarPlacementStatus::Unavailable)
+            anyHostRecovered = true;
+    });
+    if (anyHostRecovered) {
         taskbarAutoClosedForNoSpace_ = false;
         taskbarSpectrumSuppressedForNoSpace_ = false;
         return;

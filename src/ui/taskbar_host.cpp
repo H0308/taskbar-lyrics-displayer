@@ -458,6 +458,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     AppBarRegistration appBar_;
     AppBarEdge appBarEdge_ = AppBarEdge::Top;
     HWND notify_ = nullptr;
+    bool notifyIsSecondaryClock_ = false;
     HWND start_ = nullptr;
     RECT rcTaskbar_{};        // 任务栏屏幕坐标（缓存）
     RECT rcNotify_{};         // 通知区屏幕坐标（缓存）
@@ -1077,6 +1078,11 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (!taskbar_ && !isAppBarView())
             return false;
         notify_ = taskbar_ ? FindWindowExW(taskbar_, nullptr, L"TrayNotifyWnd", nullptr) : nullptr;
+        notifyIsSecondaryClock_ = false;
+        if (!notify_ && taskbar_) {
+            notify_ = FindWindowExW(taskbar_, nullptr, L"ClockButton", nullptr);
+            notifyIsSecondaryClock_ = notify_ != nullptr;
+        }
         start_ = taskbar_ ? FindWindowExW(taskbar_, nullptr, L"Start", nullptr) : nullptr;
         dpi_ = taskbar_ ? GetDpiForWindow(taskbar_) : GetDpiForSystem();
         if (dpi_ == 0)
@@ -1091,13 +1097,21 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         return true;
     }
 
+    bool notifyWindowActive() const {
+        return notify_ != nullptr && (!notifyIsSecondaryClock_ || IsWindowVisible(notify_));
+    }
+
     void updateRects() {
         if (taskbar_)
             GetWindowRect(taskbar_, &rcTaskbar_);
-        if (notify_)
+        if (notifyWindowActive())
             GetWindowRect(notify_, &rcNotify_);
+        else
+            rcNotify_ = {};
         if (start_)
             GetWindowRect(start_, &rcStart_);
+        else
+            rcStart_ = {};
     }
 
     void scheduleTaskbarAttachRetry() {
@@ -1283,7 +1297,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     // 不可用时兜底。
     std::vector<std::pair<int, int>> occupiedIntervals() const {
         return taskbar_detail::occupiedIntervals(
-            {isVerticalTaskbar(), notify_ != nullptr, start_ != nullptr, rcNotify_, rcStart_,
+            {isVerticalTaskbar(), notifyWindowActive(), start_ != nullptr, rcNotify_, rcStart_,
              rcTrafficMonitor_, uiaButtons_, kugouTaskbarWindows_});
     }
 
@@ -1905,7 +1919,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
         RECT rcTaskbar{}, rcNotify{};
         GetWindowRect(taskbar_, &rcTaskbar);
-        if (notify_)
+        if (notifyWindowActive())
             GetWindowRect(notify_, &rcNotify);
         UINT dpi = GetDpiForWindow(taskbar_);
         bool center = isTaskbarCenterAlign();

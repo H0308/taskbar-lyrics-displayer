@@ -513,6 +513,8 @@ LRESULT CALLBACK App::trayWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         return DefWindowProcW(h, msg, wp, lp);
     if (msg == WM_SETTINGCHANGE || msg == WM_THEMECHANGED) {
         app->refreshTheme();
+        if (msg == WM_SETTINGCHANGE)
+            app->syncTaskbarView(app->monitor.snapshot());
         return 0;
     }
     if (msg == WM_QUERYENDSESSION)
