@@ -9,6 +9,7 @@ struct UiDispatcher::State {
     std::mutex mutex;
     std::deque<std::function<void()>> actions;
     HWND window = nullptr;
+    bool notified = false;
 };
 
 UiDispatcher::UiDispatcher() : state_(std::make_shared<State>()) {
@@ -35,6 +36,7 @@ void UiDispatcher::close() {
     std::lock_guard<std::mutex> lock(state_->mutex);
     state_->window = nullptr;
     state_->actions.clear();
+    state_->notified = false;
 }
 
 bool UiDispatcher::postTo(const std::shared_ptr<State>& state, std::function<void()> action,
@@ -45,9 +47,12 @@ bool UiDispatcher::postTo(const std::shared_ptr<State>& state, std::function<voi
     if (!state->window)
         return false;
     state->actions.push_back(std::move(action));
-    if (notify && !PostMessageW(state->window, kRun, 0, 0)) {
-        state->actions.pop_back();
-        return false;
+    if (notify && !state->notified) {
+        if (!PostMessageW(state->window, kRun, 0, 0)) {
+            state->actions.pop_back();
+            return false;
+        }
+        state->notified = true;
     }
     return true;
 }
@@ -79,6 +84,7 @@ void UiDispatcher::drain() {
     {
         std::lock_guard<std::mutex> lock(state->mutex);
         batch.swap(state->actions);
+        state->notified = false;
     }
     // 只消费进入本次消息前的任务，避免持续的播放回调饿死绘制和输入消息。
     for (auto& action : batch) {

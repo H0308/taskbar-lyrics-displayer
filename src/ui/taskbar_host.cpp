@@ -1901,8 +1901,29 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             ReleaseCapture();
         SetCursor(LoadCursorW(nullptr, IDC_ARROW));
 
-        if (!wasDragging)
+        if (!wasDragging) {
+            POINT cursor{};
+            RECT windowRect{};
+            const bool inside = hwnd && GetCursorPos(&cursor) && GetWindowRect(hwnd, &windowRect) &&
+                                PtInRect(&windowRect, cursor);
+            trackingLeave_ = false;
+            if (inside) {
+                trackMouseLeave();
+            } else if (mouseOver_) {
+                mouseOver_ = false;
+                resourceHovered_ = false;
+                verticalResourceHovered_ = false;
+                volumeHover_ = false;
+                progressHover_ = false;
+                immersiveControlHover_ = -1;
+                inlineControlHover_ = -1;
+                volumePopup_.onAnchorLeave();
+                progressPopup_.onAnchorLeave();
+                mediaPopup.onAnchorLeave();
+                requestFrameAndFlush();
+            }
             return;
+        }
         trackingLeave_ = false;
         mouseOver_ = false;
         immersiveControlHover_ = -1;
@@ -2855,18 +2876,20 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         syncKaraokePlayback(patch.actualPositionMs, patch.playing);
         positionMs_ = patch.actualPositionMs;
         syncProgressPopup();
-        mediaPopup.beginPresentationUpdate();
-        mediaPopup.setProgress(patch.actualPositionMs);
         const bool playingChanged = media.playing != patch.playing;
         if (playingChanged) {
             media.playing = patch.playing;
             vinyl_.resetClock(monotonicNowMs());
             updateVinylRotation();
+            mediaPopup.beginPresentationUpdate();
+            mediaPopup.setProgress(patch.actualPositionMs);
             mediaPopup.setMedia(media, mediaPopupAvailable(isSessionVisible()));
             mediaPopup.setPresentationMode(scene_, mediaPopupAvailable(isSessionVisible()),
                                            hoverControlStyle_ == HoverControlStyle::Inline);
+            mediaPopup.endPresentationUpdate();
+        } else {
+            mediaPopup.setProgress(patch.actualPositionMs);
         }
-        mediaPopup.endPresentationUpdate();
         if (playingChanged) {
             // 悬浮控制按钮的播放/暂停图标随状态变化，直接提交一帧；弹窗自身
             // 的完整展示帧已在上面的批量更新中提交。

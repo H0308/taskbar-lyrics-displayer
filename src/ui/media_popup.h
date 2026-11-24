@@ -3,6 +3,7 @@
 #include "lyric_window.h"
 #include "ui/ui_dispatcher.h"
 
+#include <atomic>
 #include <functional>
 #include <memory>
 
@@ -66,8 +67,12 @@ public:
 private:
     struct Impl;
     void enqueue(std::function<void()> action);
+    void logEnqueueFailure();
     std::unique_ptr<UiThread> thread_;
     std::unique_ptr<Impl> impl_;
     unsigned updateDepth_ = 0;
     std::vector<std::function<void()>> updateActions_;
+    std::atomic<int64_t> pendingProgressMs_{-1};
+    std::atomic<bool> progressDispatchQueued_{false};
+    ULONGLONG lastEnqueueFailureLogMs_ = 0;
 };

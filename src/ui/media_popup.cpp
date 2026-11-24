@@ -208,6 +208,11 @@ struct MediaPopup::Impl {
 
     CompositionRenderer renderer{false};
     fluent::CompositedScrollView idleScrollView;
+    struct PendingIdleScrollSync {
+        enum class Action { None, Hide, Show } action = Action::None;
+        float widthDip = 0.0f;
+    };
+    PendingIdleScrollSync pendingIdleScrollSync_;
     uint64_t deviceGeneration = 0;
     DockPet pet{DockPet::WalkMirror::Disabled};
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushBackground;
@@ -1245,51 +1250,25 @@ struct MediaPopup::Impl {
             if (updateHitTest) {
                 idleListRect = {};
                 idleScrollMax = 0.0f;
-                idleScrollView.setVisible(false);
+                pendingIdleScrollSync_ = {PendingIdleScrollSync::Action::Hide, 0.0f};
             }
             return;
         }
+        const bool composited = updateHitTest && visibility.visible() && idleMode &&
+                                !visibility.animating() && !categoryTransition.active() &&
+                                !quickExpandTransition.active();
+        if (composited && idleScrollView.animating())
+            idleScrollOffset = idleScrollView.offset();
         layoutIdleList(w, top, &content);
         const float progress = idleQuickExpandProgress(content);
         media_popup_paint::drawIdleQuickTabs(pagePaintContext(), rt, w,
                                              idleQuickTabTop(top, progress, content), progress,
                                              content, updateHitTest);
-        const bool composited = updateHitTest && visibility.visible() && idleMode &&
-                                !visibility.animating() && !categoryTransition.active() &&
-                                !quickExpandTransition.active();
         if (composited) {
-            // 收尾预绘制时保持滚动内容透明，避免它叠在仍可见的转场快照上。
-            idleScrollView.setContentVisible(!categoryTransition.hasLayers() &&
-                                             !quickExpandTransition.hasLayers());
-            const float offsetXDip = dip(cardOffsetXPx);
-            const float offsetYDip = dip(cardOffsetYPx);
-            idleScrollView.layout(
-                D2D1::RectF(idleListRect.left + offsetXDip,
-                            idleListRect.top + cardOriginDip + offsetYDip,
-                            idleListRect.right + offsetXDip,
-                            idleListRect.bottom + cardOriginDip + offsetYDip),
-                idleQuickListContentHeight(content), dpi, false);
-            if (!idleScrollView.animating())
-                idleScrollView.setOffset(idleScrollOffset);
-            idleScrollOffset = idleScrollView.offset();
-            idleScrollView.paint([&](fluent::FluentDialogSurface::Painter& painter,
-                                     const D2D1_RECT_F& bounds, float position) {
-                auto* target = static_cast<ID2D1DeviceContext*>(painter.target());
-                D2D1_MATRIX_3X2_F saved{};
-                target->GetTransform(&saved);
-                target->SetTransform(D2D1::Matrix3x2F::Translation(
-                    offsetXDip, cardOriginDip + offsetYDip) * saved);
-                const auto localBounds = D2D1::RectF(
-                    bounds.left - offsetXDip, bounds.top - cardOriginDip - offsetYDip,
-                    bounds.right - offsetXDip, bounds.bottom - cardOriginDip - offsetYDip);
-                const float previous = idleScrollOffset;
-                idleScrollOffset = position;
-                media_popup_paint::drawIdleQuickListContent(pagePaintContext(), target, w, content,
-                                                            &localBounds);
-                idleScrollOffset = previous;
-                target->SetTransform(saved);
-            });
-            idleScrollView.setVisible(true);
+            // 子滚动层与主弹窗共享 D2D/DComp 设备：不能在父表面 BeginDraw 尚未
+            // EndDraw 时嵌套子层绘制、Commit 或 WaitForCommitCompletion。
+            // 这里先登记同步请求，待 endSurfaceDraw() 结束后统一更新子层并提交。
+            pendingIdleScrollSync_ = {PendingIdleScrollSync::Action::Show, w};
             if (idleScrollMax > 0.0f) {
                 const float previousOpacity = brushSecondary->GetOpacity();
                 rt->FillRoundedRectangle(D2D1::RoundedRect(idleScrollTrackRect, 1.5f, 1.5f),
@@ -1302,9 +1281,50 @@ struct MediaPopup::Impl {
         } else {
             // 离屏快照只负责绘制，不能提前隐藏仍在屏幕上显示的滚动层。
             if (updateHitTest)
-                idleScrollView.setVisible(false);
+                pendingIdleScrollSync_ = {PendingIdleScrollSync::Action::Hide, 0.0f};
             media_popup_paint::drawIdleQuickListContent(pagePaintContext(), rt, w, content);
         }
+    }
+
+    void syncIdleScrollViewAfterSurfaceDraw() {
+        const auto sync = std::exchange(pendingIdleScrollSync_, {});
+        if (sync.action == PendingIdleScrollSync::Action::None)
+            return;
+        if (sync.action == PendingIdleScrollSync::Action::Hide) {
+            idleScrollView.setVisible(false);
+            return;
+        }
+        // 收尾预绘制时保持滚动内容透明，避免它叠在仍可见的转场快照上。
+        idleScrollView.setContentVisible(!categoryTransition.hasLayers() &&
+                                         !quickExpandTransition.hasLayers());
+        const float offsetXDip = dip(cardOffsetXPx);
+        const float offsetYDip = dip(cardOffsetYPx);
+        idleScrollView.layout(
+            D2D1::RectF(idleListRect.left + offsetXDip,
+                        idleListRect.top + cardOriginDip + offsetYDip,
+                        idleListRect.right + offsetXDip,
+                        idleListRect.bottom + cardOriginDip + offsetYDip),
+            idleQuickListContentHeight(idle), dpi, false);
+        if (!idleScrollView.animating())
+            idleScrollView.setOffset(idleScrollOffset);
+        idleScrollOffset = idleScrollView.offset();
+        idleScrollView.paint([&](fluent::FluentDialogSurface::Painter& painter,
+                                 const D2D1_RECT_F& bounds, float position) {
+            auto* target = static_cast<ID2D1DeviceContext*>(painter.target());
+            D2D1_MATRIX_3X2_F saved{};
+            target->GetTransform(&saved);
+            target->SetTransform(D2D1::Matrix3x2F::Translation(
+                offsetXDip, cardOriginDip + offsetYDip) * saved);
+            const auto localBounds = D2D1::RectF(
+                bounds.left - offsetXDip, bounds.top - cardOriginDip - offsetYDip,
+                bounds.right - offsetXDip, bounds.bottom - cardOriginDip - offsetYDip);
+            const float previous = idleScrollOffset;
+            idleScrollOffset = position;
+            media_popup_paint::drawIdleQuickListContent(pagePaintContext(), target, sync.widthDip,
+                                                        idle, &localBounds);
+            idleScrollOffset = previous;
+            target->SetTransform(saved);
+        });
     }
 
     void drawIdle(ID2D1DeviceContext* rt, float w, bool updateHitTest) {
@@ -2045,6 +2065,7 @@ struct MediaPopup::Impl {
             return true;
         }
 
+        pendingIdleScrollSync_ = {};
         auto* rt = renderer.beginSurfaceDraw(hwnd, pxW, pxH);
         if (!rt) {
             releaseDrawingResources(L"surface-begin-failed");
@@ -2059,9 +2080,13 @@ struct MediaPopup::Impl {
         const bool drawnSuccessfully = renderer.endSurfaceDraw(rt);
         const auto renderDrawn = runtime_log::uiTimeMs();
         if (!drawnSuccessfully) {
+            pendingIdleScrollSync_ = {};
             releaseDrawingResources(L"surface-draw-failed");
             return false;
         }
+        const bool showIdleScrollView =
+            pendingIdleScrollSync_.action == PendingIdleScrollSync::Action::Show;
+        syncIdleScrollViewAfterSurfaceDraw();
         if (songTransitionPending) {
             songTransitionPending = false;
             resetRootVisual();
@@ -2077,6 +2102,8 @@ struct MediaPopup::Impl {
             releaseDrawingResources(L"render-commit-failed");
             return false;
         }
+        if (showIdleScrollView)
+            idleScrollView.setVisible(true);
         const auto renderPresented = runtime_log::uiTimeMs();
         if (renderPresented - renderStarted >= 24) {
             runtime_log::writef(
@@ -2116,6 +2143,26 @@ struct MediaPopup::Impl {
             return;
         }
         render();
+    }
+
+    void applyProgress(int64_t nextPositionMs) {
+        nextPositionMs = std::max<int64_t>(nextPositionMs, 0);
+        // 层转场期间新页内容承载在静态合成层快照上：进度只挂起不应用，
+        // 由 finishLayerTransition 在撤层交接后再落到 positionMs 并重绘。
+        if (categoryTransition.active() || quickExpandTransition.active()) {
+            deferredPositionMs = nextPositionMs;
+            return;
+        }
+        if (positionMs == nextPositionMs)
+            return;
+        positionMs = nextPositionMs;
+        // 每日一言/快捷启动页不展示播放进度，仅保留状态供切回媒体页使用，不触发重绘。
+        if (visibility.visible() && !idleMode) {
+            if (presentationUpdateDepth > 0 || visibility.animating())
+                renderOrDefer();
+            else
+                InvalidateRect(hwnd, nullptr, FALSE);
+        }
     }
 
     // 层转场收尾（页面互切与快速打开展开/收起共用）：先保留终点层并把最终页面
@@ -3486,11 +3533,20 @@ MediaPopup::~MediaPopup() {
     thread_->invoke([this] { impl_.reset(); });
 }
 
+void MediaPopup::logEnqueueFailure() {
+    const DWORD error = GetLastError();
+    const ULONGLONG now = GetTickCount64();
+    if (lastEnqueueFailureLogMs_ == 0 || now - lastEnqueueFailureLogMs_ >= 5000) {
+        lastEnqueueFailureLogMs_ = now;
+        runtime_log::writef(L"[media-popup] enqueue failed error=%lu", error);
+    }
+}
+
 void MediaPopup::enqueue(std::function<void()> action) {
     if (updateDepth_ != 0) {
         updateActions_.push_back(std::move(action));
     } else if (!thread_->post(std::move(action))) {
-        throw std::runtime_error("Media popup thread is closed");
+        logEnqueueFailure();
     }
 }
 
@@ -3987,24 +4043,26 @@ void MediaPopup::setPresentationMode(DisplayScene scene, bool available, bool in
 }
 
 void MediaPopup::setProgress(int64_t positionMs) {
-    enqueue([=, this]() mutable {
-        const int64_t nextPositionMs = std::max<int64_t>(positionMs, 0);
-        // 层转场期间新页内容承载在静态合成层快照上：进度只挂起不应用，
-        // 由 finishLayerTransition 在撤层交接后再落到 positionMs 并重绘。
-        if (impl_->categoryTransition.active() || impl_->quickExpandTransition.active()) {
-            impl_->deferredPositionMs = nextPositionMs;
-            return;
-        }
-        if (impl_->positionMs == nextPositionMs)
-            return;
-        impl_->positionMs = nextPositionMs;
-        if (impl_->visibility.visible()) {
-            if (impl_->presentationUpdateDepth > 0 || impl_->visibility.animating())
-                impl_->renderOrDefer();
-            else
-                InvalidateRect(impl_->hwnd, nullptr, FALSE);
-        }
-    });
+    const int64_t nextPositionMs = std::max<int64_t>(positionMs, 0);
+    if (updateDepth_ != 0) {
+        // 完整帧批次中的进度直接按序落地，同时作废待处理的独立高频进度，
+        // 避免旧进度晚于本次批次覆盖新曲目进度。
+        pendingProgressMs_.store(-1, std::memory_order_relaxed);
+        enqueue([this, nextPositionMs] { impl_->applyProgress(nextPositionMs); });
+        return;
+    }
+    pendingProgressMs_.store(nextPositionMs, std::memory_order_relaxed);
+    if (progressDispatchQueued_.exchange(true, std::memory_order_acq_rel))
+        return;
+    if (!thread_->post([this] {
+        progressDispatchQueued_.store(false, std::memory_order_release);
+        const int64_t latest = pendingProgressMs_.exchange(-1, std::memory_order_acq_rel);
+        if (latest >= 0)
+            impl_->applyProgress(latest);
+    })) {
+        progressDispatchQueued_.store(false, std::memory_order_release);
+        logEnqueueFailure();
+    }
 }
 
 void MediaPopup::setAnchor(HWND anchor) {
