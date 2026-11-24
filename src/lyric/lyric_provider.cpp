@@ -1,6 +1,7 @@
 #include "lyric_provider.h"
 
 #include "logging/runtime_logger.h"
+#include "lyric/custom_local_lyric_index.h"
 #include "lyric/local_lyric_index.h"
 #include "lyric/lyric_http.h"
 #include "lyric/lyric_matching.h"
@@ -117,6 +118,14 @@ struct LyricProvider::Impl {
     uint64_t qqLocalConfigGeneration = 0;
     std::chrono::steady_clock::time_point qqLocalIndexRefreshedAt{};
     std::condition_variable qqLocalIndexCv;
+    bool customLocalLyricsEnabled = false;
+    std::wstring customLocalLyricsDir;
+    std::wstring customLocalLyricOrderDir;
+    std::shared_ptr<const lyric_detail::CustomLocalLyricIndex> customLocalIndex;
+    bool customLocalIndexBuilding = false;
+    uint64_t customLocalConfigGeneration = 0;
+    std::chrono::steady_clock::time_point customLocalIndexRefreshedAt{};
+    std::condition_variable customLocalIndexCv;
     std::list<std::wstring> lru; // 前 = 最近使用
     std::unordered_map<std::wstring, std::list<std::wstring>::iterator> lruIt;
     std::atomic<uint64_t> generation{0};
@@ -134,6 +143,8 @@ struct LyricProvider::Impl {
             std::lock_guard<std::mutex> lk(mtx);
             qqLocalIndexBuilding = false;
             qqLocalIndexCv.notify_all();
+            customLocalIndexBuilding = false;
+            customLocalIndexCv.notify_all();
         }
         for (auto& w : workers) {
             if (w.thread.joinable())
@@ -273,6 +284,134 @@ struct LyricProvider::Impl {
             return false;
         return lyric_detail::writeLocalOrderOverride(index->bundles[candidates.front()],
                                                    onlineFirst);
+    }
+
+    // 调用方需已持有 mtx；目录或开关变化时异步重建单层目录索引。
+    void rebuildCustomLocalIndexLocked() {
+        ++customLocalConfigGeneration;
+        customLocalIndex.reset();
+        if (!customLocalLyricsEnabled || customLocalLyricsDir.empty()) {
+            customLocalIndexBuilding = false;
+            customLocalIndexRefreshedAt = {};
+            customLocalIndexCv.notify_all();
+            return;
+        }
+
+        const uint64_t configGeneration = customLocalConfigGeneration;
+        const std::wstring root = customLocalLyricsDir;
+        customLocalIndexBuilding = true;
+        Worker worker;
+        auto done = worker.done;
+        Impl* impl = this;
+        worker.thread = std::thread([impl, root, configGeneration, done]() {
+            DoneFlag flag{done};
+            auto index = lyric_detail::buildCustomLocalLyricIndex(root);
+            std::lock_guard<std::mutex> lk(impl->mtx);
+            if (impl->customLocalConfigGeneration != configGeneration)
+                return;
+            impl->customLocalIndex = std::move(index);
+            impl->customLocalIndexBuilding = false;
+            impl->customLocalIndexRefreshedAt = std::chrono::steady_clock::now();
+            runtime_log::writef(L"[lyric][custom-local-index] root=\"%ls\" entries=%zu",
+                                root.c_str(), impl->customLocalIndex->entries.size());
+            impl->customLocalIndexCv.notify_all();
+        });
+        workers.push_back(std::move(worker));
+    }
+
+    bool acquireCustomLocalIndex(
+        std::shared_ptr<const lyric_detail::CustomLocalLyricIndex>& index) {
+        {
+            std::unique_lock<std::mutex> lk(mtx);
+            while (true) {
+                if (lyric_detail::isLyricShuttingDown() || !customLocalLyricsEnabled ||
+                    customLocalLyricsDir.empty())
+                    return false;
+                if (!customLocalIndexBuilding) {
+                    index = customLocalIndex;
+                    break;
+                }
+                customLocalIndexCv.wait(lk, [this] {
+                    return lyric_detail::isLyricShuttingDown() || !customLocalIndexBuilding;
+                });
+            }
+        }
+        return static_cast<bool>(index);
+    }
+
+    bool refreshCustomLocalIndex(
+        std::shared_ptr<const lyric_detail::CustomLocalLyricIndex>& index) {
+        {
+            std::lock_guard<std::mutex> lk(mtx);
+            if (lyric_detail::isLyricShuttingDown() || !customLocalLyricsEnabled ||
+                customLocalLyricsDir.empty())
+                return false;
+
+            const auto now = std::chrono::steady_clock::now();
+            if (!customLocalIndexBuilding &&
+                customLocalIndexRefreshedAt.time_since_epoch().count() != 0 &&
+                now - customLocalIndexRefreshedAt < std::chrono::seconds(2)) {
+                index = customLocalIndex;
+                return static_cast<bool>(index);
+            }
+            if (!customLocalIndexBuilding)
+                rebuildCustomLocalIndexLocked();
+        }
+        return acquireCustomLocalIndex(index);
+    }
+
+    bool lookupCustomLocalLyrics(const std::wstring& title, const std::wstring& artist,
+                                 int64_t durationMs, std::vector<LyricLine>& out, SongInfo& info) {
+        std::shared_ptr<const lyric_detail::CustomLocalLyricIndex> index;
+        if (!acquireCustomLocalIndex(index))
+            return false;
+        if (lyric_detail::lookupCustomLocalLyric(*index, title, artist, durationMs, out, info))
+            return true;
+        if (!refreshCustomLocalIndex(index))
+            return false;
+        const bool hit =
+            lyric_detail::lookupCustomLocalLyric(*index, title, artist, durationMs, out, info);
+        if (!hit) {
+            runtime_log::writef(L"[lyric][custom-local-no-match] title=\"%ls\" artist=\"%ls\" "
+                                L"indexed-entries=%zu",
+                                title.c_str(), artist.c_str(), index->entries.size());
+        }
+        return hit;
+    }
+
+    std::vector<SearchCandidate> searchCustomLocalLyrics(const std::wstring& title,
+                                                         const std::wstring& artist) {
+        std::shared_ptr<const lyric_detail::CustomLocalLyricIndex> index;
+        if (!refreshCustomLocalIndex(index) && !acquireCustomLocalIndex(index))
+            return {};
+        return lyric_detail::searchCustomLocalCandidates(*index, title, artist);
+    }
+
+    bool customLocalOrderOnlineFirst(const std::wstring& key, const std::wstring& title,
+                                     const std::wstring& artist, SmtcPlayerType player) {
+        std::wstring orderDir;
+        {
+            std::lock_guard<std::mutex> lk(mtx);
+            orderDir = customLocalLyricOrderDir;
+        }
+        if (orderDir.empty())
+            return false;
+        return lyric_detail::readCustomLocalOrderOverride(
+            lyric_detail::customLocalOrderPath(orderDir, key, title, artist, player));
+    }
+
+    bool setCustomLocalOrderOverride(const std::wstring& key, const std::wstring& title,
+                                     const std::wstring& artist, SmtcPlayerType player,
+                                     bool onlineFirst) {
+        std::wstring orderDir;
+        {
+            std::lock_guard<std::mutex> lk(mtx);
+            orderDir = customLocalLyricOrderDir;
+        }
+        if (orderDir.empty())
+            return false;
+        return lyric_detail::writeCustomLocalOrderOverride(
+            lyric_detail::customLocalOrderPath(orderDir, key, title, artist, player), onlineFirst);
     }
 
     bool cacheGet(const std::wstring& key, CacheEntry& out) {
@@ -573,11 +712,17 @@ LyricProvider::~LyricProvider() = default;
 
 void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& artist,
                                  int64_t durationMs, ReadyCallback cb, RequestSource source,
-                                 bool persistOrder, const std::wstring& album) {
-    // Spotify、椒盐音乐与 Generic 使用带专辑的曲目键走通用在线多源路径；其它来源沿用 QQ 键。
+                                 bool persistOrder, const std::wstring& album,
+                                 OrderPreference order) {
+    // Spotify、椒盐音乐与 Generic 使用带专辑的曲目键走通用多源路径；其它来源沿用 QQ 键。
     const bool sampled = source == RequestSource::Spotify ||
                          source == RequestSource::SaltPlayer ||
                          source == RequestSource::Generic;
+    const OrderPreference effectiveOrder =
+        order != OrderPreference::Default       ? order
+        : source == RequestSource::PreferOnline ? OrderPreference::PreferOnline
+        : source == RequestSource::PreferLocal  ? OrderPreference::PreferLocal
+                                                : OrderPreference::Default;
     const SmtcPlayerType requestPlayer =
         source == RequestSource::SaltPlayer ? SmtcPlayerType::SaltPlayer
         : source == RequestSource::Spotify  ? SmtcPlayerType::Spotify
@@ -596,7 +741,7 @@ void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& 
     Impl::Worker worker;
     auto done = worker.done;
     worker.thread = std::thread([impl, gen, key, title, artist, album, durationMs,
-                                 cb = std::move(cb), sampled, source, persistOrder, done,
+                                 cb = std::move(cb), sampled, effectiveOrder, persistOrder, done,
                                  requestPlayer]() mutable {
         DoneFlag flag{done};
         const lyric_detail::LyricRequest request{impl->generation, gen};
@@ -609,7 +754,8 @@ void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& 
         runtime_log::writef(L"[lyric][request][%ls] title=\"%ls\" artist=\"%ls\" duration=%lldms",
                             requestSource, title.c_str(), artist.c_str(),
                             static_cast<long long>(durationMs));
-        bool localConfigured = false;
+        bool customLocalConfigured = false;
+        bool qqLocalConfigured = false;
         LyricResult ready;
         {
             std::lock_guard<std::mutex> lk(impl->mtx);
@@ -621,9 +767,11 @@ void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& 
                 runtime_log::writef(L"[lyric][source=manual][%ls] title=\"%ls\" artist=\"%ls\"",
                                     requestSource, title.c_str(), artist.c_str());
             } else {
-                localConfigured = !sampled && impl->qqLocalLyricsEnabled &&
-                                  !impl->qqLocalLyricsDir.empty();
-                if (!localConfigured && impl->cacheGet(key, entry)) {
+                customLocalConfigured =
+                    impl->customLocalLyricsEnabled && !impl->customLocalLyricsDir.empty();
+                qqLocalConfigured =
+                    !sampled && impl->qqLocalLyricsEnabled && !impl->qqLocalLyricsDir.empty();
+                if (!customLocalConfigured && !qqLocalConfigured && impl->cacheGet(key, entry)) {
                     ready = {true, std::move(entry.lines), std::move(entry.info)};
                     ready.fromCache = true;
                     runtime_log::writef(L"[lyric][source=online-cache][%ls] title=\"%ls\" artist=\"%ls\"",
@@ -636,18 +784,48 @@ void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& 
                 cb(std::move(ready));
             return;
         }
+        const bool anyLocalConfigured = customLocalConfigured || qqLocalConfigured;
         std::vector<LyricLine> result;
         SongInfo info;
         bool fromCache = false;
 
         // 本地索引可能仍在构建，顺序标记的读写必须留在工作线程，不能阻塞 UI 线程。
-        if (persistOrder && !sampled)
-            impl->setLocalOrderOverride(title, artist, source == RequestSource::PreferOnline);
+        if (persistOrder && (effectiveOrder == OrderPreference::PreferOnline ||
+                             effectiveOrder == OrderPreference::PreferLocal)) {
+            const bool wantOnlineFirst = effectiveOrder == OrderPreference::PreferOnline;
+            if (customLocalConfigured)
+                impl->setCustomLocalOrderOverride(key, title, artist, player, wantOnlineFirst);
+            if (qqLocalConfigured)
+                impl->setLocalOrderOverride(title, artist, wantOnlineFirst);
+        }
 
-        bool onlineFirst = source == RequestSource::PreferOnline;
-        if (source == RequestSource::Default && localConfigured)
-            onlineFirst = impl->localOrderOnlineFirst(title, artist);
-        const bool useLocalLyrics = localConfigured && !onlineFirst;
+        bool onlineFirst = effectiveOrder == OrderPreference::PreferOnline;
+        if (effectiveOrder == OrderPreference::Default && anyLocalConfigured) {
+            onlineFirst = (customLocalConfigured &&
+                           impl->customLocalOrderOnlineFirst(key, title, artist, player)) ||
+                          (qqLocalConfigured && impl->localOrderOnlineFirst(title, artist));
+        }
+        const bool useLocalLyrics = anyLocalConfigured && !onlineFirst;
+
+        auto loadLocal = [&]() -> bool {
+            if (customLocalConfigured &&
+                impl->lookupCustomLocalLyrics(title, artist, durationMs, result, info)) {
+                runtime_log::writef(
+                    L"[lyric][source=custom-local][%ls] format=%ls title=\"%ls\" artist=\"%ls\" "
+                    L"lines=%zu",
+                    requestSource,
+                    info.lyricOrigin == LyricOrigin::LocalAudio ? L"audio-tag" : L"lrc",
+                    title.c_str(), artist.c_str(), result.size());
+                return true;
+            }
+            if (qqLocalConfigured && impl->lookupLocalLyrics(title, artist, result, info)) {
+                runtime_log::writef(L"[lyric][source=local][QQ] title=\"%ls\" artist=\"%ls\" "
+                                    L"lines=%zu",
+                                    title.c_str(), artist.c_str(), result.size());
+                return true;
+            }
+            return false;
+        };
 
         auto loadOnline = [&]() -> bool {
             {
@@ -679,21 +857,17 @@ void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& 
         bool localHit = false;
         bool ok = false;
         if (useLocalLyrics) {
-            localHit = impl->lookupLocalLyrics(title, artist, result, info);
+            localHit = loadLocal();
             ok = localHit;
-            if (localHit) {
-                runtime_log::writef(L"[lyric][source=local][QQ] title=\"%ls\" artist=\"%ls\" "
-                                    L"lines=%zu",
-                                    title.c_str(), artist.c_str(), result.size());
-            } else {
-                runtime_log::writef(L"[lyric][local-miss][QQ] title=\"%ls\" artist=\"%ls\" "
+            if (!localHit) {
+                runtime_log::writef(L"[lyric][local-miss][%ls] title=\"%ls\" artist=\"%ls\" "
                                     L"fallback=online",
-                                    title.c_str(), artist.c_str());
+                                    requestSource, title.c_str(), artist.c_str());
                 ok = loadOnline();
             }
         } else {
             ok = loadOnline();
-            if (!ok && onlineFirst && localConfigured) {
+            if (!ok && onlineFirst && anyLocalConfigured) {
                 {
                     std::lock_guard<std::mutex> lk(impl->mtx);
                     if (impl->generation != gen)
@@ -702,13 +876,8 @@ void LyricProvider::requestAsync(const std::wstring& title, const std::wstring& 
                 // 在线优先失败时，按“手动 -> 在线 -> 本地”继续尝试本地歌词。
                 result.clear();
                 info = SongInfo{};
-                localHit = impl->lookupLocalLyrics(title, artist, result, info);
+                localHit = loadLocal();
                 ok = localHit;
-                if (localHit)
-                    runtime_log::writef(
-                        L"[lyric][source=local][QQ] title=\"%ls\" artist=\"%ls\" "
-                        L"fallback=online lines=%zu",
-                        title.c_str(), artist.c_str(), result.size());
             }
         }
 
@@ -731,7 +900,8 @@ void LyricProvider::requestNeteaseAsync(const std::wstring& songId,
                                         const std::wstring& title,
                                         const std::wstring& artist,
                                         const std::wstring& album,
-                                        int64_t durationMs, ReadyCallback cb) {
+                                        int64_t durationMs, ReadyCallback cb,
+                                        OrderPreference order, bool persistOrder) {
     runtime_log::writef(L"[lyric][request][Netease] songid=\"%ls\" title=\"%ls\" "
                         L"artist=\"%ls\" duration=%lldms",
                         songId.c_str(), title.c_str(), artist.c_str(),
@@ -744,10 +914,11 @@ void LyricProvider::requestNeteaseAsync(const std::wstring& songId,
     Impl::Worker worker;
     auto done = worker.done;
     worker.thread = std::thread([impl, gen, key, songId, title, artist, album, durationMs,
-                                 cb = std::move(cb), done]() mutable {
+                                 cb = std::move(cb), order, persistOrder, done]() mutable {
         DoneFlag flag{done};
         const lyric_detail::LyricRequest request{impl->generation, gen};
         lyric_detail::RequestDiagnosticsScope diagnostics(cb);
+        bool customLocalConfigured = false;
         LyricResult ready;
         {
             std::lock_guard<std::mutex> lk(impl->mtx);
@@ -759,11 +930,15 @@ void LyricProvider::requestNeteaseAsync(const std::wstring& songId,
                 ready = {true, std::move(entry.lines), std::move(entry.info), false, true};
                 runtime_log::writef(L"[lyric][source=manual][Netease] songid=\"%ls\"",
                                     songId.c_str());
-            } else if (impl->cacheGet(key, entry)) {
-                ready = {true, std::move(entry.lines), std::move(entry.info)};
-                ready.fromCache = true;
-                runtime_log::writef(L"[lyric][source=online-cache][Netease] songid=\"%ls\"",
-                                    songId.c_str());
+            } else {
+                customLocalConfigured =
+                    impl->customLocalLyricsEnabled && !impl->customLocalLyricsDir.empty();
+                if (!customLocalConfigured && impl->cacheGet(key, entry)) {
+                    ready = {true, std::move(entry.lines), std::move(entry.info)};
+                    ready.fromCache = true;
+                    runtime_log::writef(L"[lyric][source=online-cache][Netease] songid=\"%ls\"",
+                                        songId.c_str());
+                }
             }
         }
         if (ready.ok) {
@@ -771,28 +946,97 @@ void LyricProvider::requestNeteaseAsync(const std::wstring& songId,
                 cb(std::move(ready));
             return;
         }
+
+        if (persistOrder && customLocalConfigured &&
+            (order == OrderPreference::PreferOnline || order == OrderPreference::PreferLocal)) {
+            impl->setCustomLocalOrderOverride(key, title, artist, SmtcPlayerType::NetEase,
+                                              order == OrderPreference::PreferOnline);
+        }
+
+        bool onlineFirst = order == OrderPreference::PreferOnline;
+        if (order == OrderPreference::Default && customLocalConfigured) {
+            onlineFirst = impl->customLocalOrderOnlineFirst(key, title, artist,
+                                                            SmtcPlayerType::NetEase);
+        }
+        const bool useLocalLyrics = customLocalConfigured && !onlineFirst;
+
         std::vector<LyricLine> result;
         SongInfo info;
-        bool ok = !songId.empty() && impl->fetchNetease(songId, result, info);
-        if (ok) {
-            info.matchedTitle = title;
-            info.matchedArtist = artist;
-            info.matchedDurationMs = durationMs;
+        bool fromCache = false;
+
+        auto loadLocal = [&]() -> bool {
+            if (customLocalConfigured &&
+                impl->lookupCustomLocalLyrics(title, artist, durationMs, result, info)) {
+                runtime_log::writef(
+                    L"[lyric][source=custom-local][Netease] format=%ls title=\"%ls\" "
+                    L"artist=\"%ls\" lines=%zu",
+                    info.lyricOrigin == LyricOrigin::LocalAudio ? L"audio-tag" : L"lrc",
+                    title.c_str(), artist.c_str(), result.size());
+                return true;
+            }
+            return false;
+        };
+
+        auto loadOnline = [&]() -> bool {
+            {
+                std::lock_guard<std::mutex> lk(impl->mtx);
+                if (impl->generation != gen)
+                    return false;
+                CacheEntry cached;
+                if (impl->cacheGet(key, cached)) {
+                    result = std::move(cached.lines);
+                    info = std::move(cached.info);
+                    fromCache = true;
+                    runtime_log::writef(L"[lyric][source=online-cache][Netease] songid=\"%ls\"",
+                                        songId.c_str());
+                    return true;
+                }
+            }
+            bool ok = !songId.empty() && impl->fetchNetease(songId, result, info);
+            if (ok) {
+                info.matchedTitle = title;
+                info.matchedArtist = artist;
+                info.matchedDurationMs = durationMs;
+            }
+            runtime_log::writef(L"[lyric][source=netease] result=%s songid=\"%ls\" lines=%zu",
+                                ok ? L"success" : L"failed", songId.c_str(), result.size());
+            if (!ok) {
+                ok = impl->fetchOnline(title, artist, album, durationMs, result, info,
+                                       SmtcPlayerType::NetEase, request);
+            }
+            return ok;
+        };
+
+        bool localHit = false;
+        bool ok = false;
+        if (useLocalLyrics) {
+            localHit = loadLocal();
+            ok = localHit;
+            if (!localHit)
+                ok = loadOnline();
+        } else {
+            ok = loadOnline();
+            if (!ok && onlineFirst && customLocalConfigured) {
+                {
+                    std::lock_guard<std::mutex> lk(impl->mtx);
+                    if (impl->generation != gen)
+                        return;
+                }
+                result.clear();
+                info = SongInfo{};
+                localHit = loadLocal();
+                ok = localHit;
+            }
         }
-        runtime_log::writef(L"[lyric][source=netease] result=%s songid=\"%ls\" lines=%zu",
-                            ok ? L"success" : L"failed", songId.c_str(), result.size());
-        if (!ok)
-            ok = impl->fetchOnline(title, artist, album, durationMs, result, info,
-                                   SmtcPlayerType::NetEase, request);
         {
             std::lock_guard<std::mutex> lk(impl->mtx);
             if (impl->generation != gen)
                 return;
-            if (ok)
+            if (ok && !localHit)
                 impl->cachePut(key, CacheEntry{result, info});
         }
         if (cb)
-            cb(LyricResult{ok, std::move(result), std::move(info)});
+            cb(LyricResult{ok, std::move(result), std::move(info), localHit, false, fromCache});
     });
     std::lock_guard<std::mutex> lk(impl_->mtx);
     impl_->sweepFinished();
@@ -843,12 +1087,13 @@ void LyricProvider::searchCandidatesAsync(const std::wstring& title, const std::
                                           SearchCallback cb, SmtcPlayerType player) {
     runtime_log::writef(L"[action][manual-search] request title=\"%ls\" artist=\"%ls\"",
                         title.c_str(), artist.c_str());
+    Impl* impl = impl_.get();
     Impl::Worker worker;
     auto done = worker.done;
-    worker.thread = std::thread([title, artist, cb = std::move(cb), done, player]() mutable {
+    worker.thread = std::thread([impl, title, artist, cb = std::move(cb), done, player]() mutable {
         DoneFlag flag{done};
+        std::vector<SearchCandidate> result = impl->searchCustomLocalLyrics(title, artist);
         CURL* curl = curl_easy_init();
-        std::vector<SearchCandidate> result;
         std::vector<lyric_detail::SearchVariant> queries;
         lyric_detail::addSearchVariant(queries, title, artist);
         lyric_detail::addSearchVariant(queries, lyric_detail::simplifiedChinese(title),
@@ -958,6 +1203,10 @@ void LyricProvider::searchCandidatesAsync(const std::wstring& title, const std::
             case LyricSource::Lrclib:
                 id = std::to_wstring(candidate.lrclibId);
                 break;
+            case LyricSource::LocalLrc:
+            case LyricSource::LocalAudio:
+                id = candidate.localPath;
+                break;
             }
             return !seen.insert(std::to_wstring(static_cast<int>(candidate.source)) + L"|" + id)
                         .second;
@@ -1014,6 +1263,26 @@ void LyricProvider::fetchLyricAsync(const SearchCandidate& cand, FetchCallback c
     auto done = worker.done;
     worker.thread = std::thread([cand, cb = std::move(cb), done, playbackDurationMs]() mutable {
         DoneFlag flag{done};
+        if (cand.source == LyricSource::LocalLrc || cand.source == LyricSource::LocalAudio) {
+            std::vector<LyricLine> lines;
+            SongInfo info;
+            const bool ok = lyric_detail::loadCustomLocalLyricFile(
+                std::filesystem::path(cand.localPath),
+                cand.source == LyricSource::LocalLrc ? lyric_detail::CustomLocalKind::LrcFile
+                                                     : lyric_detail::CustomLocalKind::AudioEmbedded,
+                lines, info);
+            if (info.matchedTitle.empty())
+                info.matchedTitle = cand.name;
+            if (info.matchedArtist.empty())
+                info.matchedArtist = cand.singer;
+            runtime_log::writef(L"[action][manual-search] preview-local name=\"%ls\" "
+                                L"source=%d result=%s lines=%zu",
+                                cand.name.c_str(), static_cast<int>(cand.source),
+                                ok ? L"success" : L"failed", lines.size());
+            if (cb)
+                cb(ok, std::move(lines), info);
+            return;
+        }
         CURL* curl = curl_easy_init();
         std::vector<LyricLine> lines;
         bool ok = false;
@@ -1072,6 +1341,12 @@ void LyricProvider::fetchLyricAsync(const SearchCandidate& cand, FetchCallback c
         case LyricSource::Lrclib:
             info.lyricOrigin = LyricOrigin::Lrclib;
             break;
+        case LyricSource::LocalLrc:
+            info.lyricOrigin = LyricOrigin::LocalLrc;
+            break;
+        case LyricSource::LocalAudio:
+            info.lyricOrigin = LyricOrigin::LocalAudio;
+            break;
         }
         if (cb)
             cb(ok, std::move(lines), info);
@@ -1083,17 +1358,18 @@ void LyricProvider::fetchLyricAsync(const SearchCandidate& cand, FetchCallback c
 
 void LyricProvider::requestSodaAsync(const std::wstring& title, const std::wstring& artist,
                                      const std::wstring& album, int64_t durationMs,
-                                     ReadyCallback cb) {
+                                     ReadyCallback cb, OrderPreference order, bool persistOrder) {
     const std::wstring key = L"soda|" + makeKey(title, artist, durationMs);
     const uint64_t gen = ++impl_->generation;
     Impl* impl = impl_.get();
     Impl::Worker worker;
     auto done = worker.done;
     worker.thread = std::thread([impl, gen, key, title, artist, album, durationMs,
-                                 cb = std::move(cb), done]() mutable {
+                                 cb = std::move(cb), order, persistOrder, done]() mutable {
         DoneFlag flag{done};
         const lyric_detail::LyricRequest request{impl->generation, gen};
         lyric_detail::RequestDiagnosticsScope diagnostics(cb);
+        bool customLocalConfigured = false;
         LyricResult ready;
         {
             std::lock_guard<std::mutex> lock(impl->mtx);
@@ -1102,36 +1378,98 @@ void LyricProvider::requestSodaAsync(const std::wstring& title, const std::wstri
             CacheEntry entry;
             if (impl->manualOverrideGet(key, title, artist, SmtcPlayerType::Soda, entry)) {
                 ready = {true, std::move(entry.lines), std::move(entry.info), false, true};
-            } else if (impl->cacheGet(key, entry)) {
-                ready = {true, std::move(entry.lines), std::move(entry.info)};
-                ready.fromCache = true;
+            } else {
+                customLocalConfigured =
+                    impl->customLocalLyricsEnabled && !impl->customLocalLyricsDir.empty();
+                if (!customLocalConfigured && impl->cacheGet(key, entry)) {
+                    ready = {true, std::move(entry.lines), std::move(entry.info)};
+                    ready.fromCache = true;
+                }
             }
         }
         if (!ready.ok) {
-            // Soda 的歌名和真实时长通常分两批到达，合并这段事件再联网。
-            // 缓存和手动覆盖不等待；新代次同时让旧请求在 curl 中止或循环边界退出。
-            std::this_thread::sleep_for(std::chrono::milliseconds(250));
-            if (request.cancelled())
-                return;
-            runtime_log::writef(L"[lyric][request][Soda Music] title=\"%ls\" artist=\"%ls\" duration=%lldms",
-                                title.c_str(), artist.c_str(), static_cast<long long>(durationMs));
-            ready.ok = lyric_detail::fetchSodaLyrics(title, artist, durationMs, ready.lines, request,
-                                                     ready.info);
-            if (ready.ok)
-                ready.info.lyricOrigin = LyricOrigin::Soda;
-            if (!ready.ok) {
-                ready.ok = impl->fetchOnline(title, artist, album, durationMs, ready.lines,
-                                             ready.info, SmtcPlayerType::Soda, request);
+            if (persistOrder && customLocalConfigured &&
+                (order == OrderPreference::PreferOnline || order == OrderPreference::PreferLocal)) {
+                impl->setCustomLocalOrderOverride(key, title, artist, SmtcPlayerType::Soda,
+                                                  order == OrderPreference::PreferOnline);
+            }
+            bool onlineFirst = order == OrderPreference::PreferOnline;
+            if (order == OrderPreference::Default && customLocalConfigured) {
+                onlineFirst = impl->customLocalOrderOnlineFirst(key, title, artist,
+                                                                SmtcPlayerType::Soda);
+            }
+            const bool useLocalLyrics = customLocalConfigured && !onlineFirst;
+
+            auto loadLocal = [&]() -> bool {
+                if (customLocalConfigured &&
+                    impl->lookupCustomLocalLyrics(title, artist, durationMs, ready.lines,
+                                                  ready.info)) {
+                    ready.fromLocal = true;
+                    runtime_log::writef(
+                        L"[lyric][source=custom-local][Soda Music] format=%ls title=\"%ls\" "
+                        L"artist=\"%ls\" lines=%zu",
+                        ready.info.lyricOrigin == LyricOrigin::LocalAudio ? L"audio-tag" : L"lrc",
+                        title.c_str(), artist.c_str(), ready.lines.size());
+                    return true;
+                }
+                return false;
+            };
+
+            auto loadOnline = [&]() -> bool {
+                {
+                    std::lock_guard<std::mutex> lock(impl->mtx);
+                    if (request.cancelled())
+                        return false;
+                    CacheEntry cached;
+                    if (impl->cacheGet(key, cached)) {
+                        ready.lines = std::move(cached.lines);
+                        ready.info = std::move(cached.info);
+                        ready.fromCache = true;
+                        return true;
+                    }
+                }
+                // Soda 的歌名和真实时长通常分两批到达，合并这段事件再联网。
+                // 缓存、本地和手动覆盖不等待；新代次同时让旧请求在 curl 中止或循环边界退出。
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                if (request.cancelled())
+                    return false;
+                runtime_log::writef(L"[lyric][request][Soda Music] title=\"%ls\" artist=\"%ls\" duration=%lldms",
+                                    title.c_str(), artist.c_str(), static_cast<long long>(durationMs));
+                bool ok = lyric_detail::fetchSodaLyrics(title, artist, durationMs, ready.lines,
+                                                        request, ready.info);
+                if (ok)
+                    ready.info.lyricOrigin = LyricOrigin::Soda;
+                if (!ok) {
+                    ok = impl->fetchOnline(title, artist, album, durationMs, ready.lines,
+                                           ready.info, SmtcPlayerType::Soda, request);
+                }
+                return ok;
+            };
+
+            if (useLocalLyrics) {
+                ready.ok = loadLocal();
+                if (!ready.ok)
+                    ready.ok = loadOnline();
+            } else {
+                ready.ok = loadOnline();
+                if (!ready.ok && onlineFirst && customLocalConfigured && !request.cancelled()) {
+                    ready.lines.clear();
+                    ready.info = SongInfo{};
+                    ready.ok = loadLocal();
+                }
             }
             std::lock_guard<std::mutex> lock(impl->mtx);
             if (request.cancelled())
                 return;
-            if (ready.ok)
+            if (ready.ok && !ready.fromLocal)
                 impl->cachePut(key, CacheEntry{ready.lines, ready.info});
         }
         runtime_log::writef(L"[lyric][Soda Music] result=%ls source=%ls lines=%zu",
                             ready.ok ? L"success" : L"failed",
-                            ready.fromManual ? L"manual" : L"online", ready.lines.size());
+                            ready.fromManual  ? L"manual"
+                            : ready.fromLocal ? L"local"
+                                              : L"online",
+                            ready.lines.size());
         if (!request.cancelled() && cb)
             cb(std::move(ready));
     });
@@ -1187,4 +1525,20 @@ void LyricProvider::setQqLyricOrderDir(const std::wstring& dir) {
         return;
     impl_->qqLocalLyricOrderDir = dir;
     impl_->rebuildLocalIndexLocked();
+}
+
+void LyricProvider::setCustomLocalLyricsConfig(bool enabled, const std::wstring& dir) {
+    std::lock_guard<std::mutex> lk(impl_->mtx);
+    if (impl_->customLocalLyricsEnabled == enabled && impl_->customLocalLyricsDir == dir)
+        return;
+    impl_->customLocalLyricsEnabled = enabled;
+    impl_->customLocalLyricsDir = dir;
+    ++impl_->generation;
+    impl_->sweepFinished();
+    impl_->rebuildCustomLocalIndexLocked();
+}
+
+void LyricProvider::setCustomLocalLyricOrderDir(const std::wstring& dir) {
+    std::lock_guard<std::mutex> lk(impl_->mtx);
+    impl_->customLocalLyricOrderDir = dir;
 }

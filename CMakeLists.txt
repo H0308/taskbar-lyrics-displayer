@@ -40,6 +40,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(CURL REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(TagLib CONFIG REQUIRED)
 find_package(yaml-cpp CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
 
@@ -59,6 +60,7 @@ set(WINDOWS_TASKBAR_LYRICS_CORE_SOURCES
     src/graphics/pixel_luminance.cpp
     src/logging/runtime_logger.cpp
     src/lyric/cover_provider.cpp
+    src/lyric/custom_local_lyric_index.cpp
     src/lyric/local_lyric_index.cpp
     src/lyric/lrc_parser.cpp
     src/lyric/lyric_http.cpp
@@ -111,6 +113,7 @@ target_compile_options(WindowsTaskbarLyricsCore PUBLIC /utf-8 /EHsc)
 target_link_libraries(WindowsTaskbarLyricsCore PUBLIC
     CURL::libcurl
     nlohmann_json::nlohmann_json
+    TagLib::tag
     yaml-cpp::yaml-cpp
     ZLIB::ZLIB
     windowsapp

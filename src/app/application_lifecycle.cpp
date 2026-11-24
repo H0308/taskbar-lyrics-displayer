@@ -85,6 +85,12 @@ void App::dispatchThreadMessage(const MSG& msg) {
         qqLocalLyricsPickerOpen_ = false;
         if (payload)
             applyQqLocalLyricsPath(payload->path);
+    } else if (msg.message == kMsgCustomLocalFolderReady) {
+        auto payload = std::unique_ptr<QqLocalFolderPayload>(
+            reinterpret_cast<QqLocalFolderPayload*>(msg.lParam));
+        customLocalLyricsPickerOpen_ = false;
+        if (payload)
+            applyCustomLocalLyricsPath(payload->path);
     } else if (msg.message == kMsgIdleAppReady) {
         auto payload =
             std::unique_ptr<IdleAppPayload>(reinterpret_cast<IdleAppPayload*>(msg.lParam));

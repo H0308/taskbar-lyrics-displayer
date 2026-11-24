@@ -9,7 +9,7 @@
 #include <vector>
 
 
-enum class LyricOrigin { Unknown, QqMusic, Kugou, Netease, Soda, Lrclib };
+enum class LyricOrigin { Unknown, QqMusic, Kugou, Netease, Soda, Lrclib, LocalLrc, LocalAudio };
 
 struct LyricRequestDiagnostic {
     std::wstring source;
@@ -50,7 +50,9 @@ enum class LyricSource {
     Lrc, // QQ 音乐整行歌词
     Yrc, // 网易云音乐逐字歌词
     Soda, // 汽水原生歌词（逐字或 LRC，由歌词接口确定）
-    Lrclib // LRCLIB 词级／逐行歌词
+    Lrclib, // LRCLIB 词级／逐行歌词
+    LocalLrc, // 自定义本地目录 LRC 歌词
+    LocalAudio // 自定义本地目录音频内嵌歌词
 };
 
 // 手动搜索返回的候选歌曲
@@ -70,6 +72,7 @@ struct SearchCandidate {
     std::wstring album;
     int64_t lrclibId = 0;
     bool lrclibWordSync = false;
+    std::wstring localPath; // 自定义本地目录候选文件路径（LocalLrc / LocalAudio 使用）
 };
 
 // 自动匹配优先取原生歌词，随后按酷狗、QQ 音乐、LRCLIB 和剩余来源查找。
@@ -92,24 +95,30 @@ public:
     // 带专辑曲目键走通用在线多源路径，不读取 QQ 本地歌词索引。
     enum class RequestSource { Default, PreferOnline, PreferLocal, Spotify, SaltPlayer, Generic };
 
+    // 跨播放器通用的本地/在线顺序偏好，用于单曲手动切换。
+    enum class OrderPreference { Default, PreferOnline, PreferLocal };
+
     // 异步请求歌词；优先按版本标注匹配，无合适结果时按匹配分排序。
     // persistOrder 在后台保存单曲的本地/在线顺序标记，不阻塞调用线程。
     void requestAsync(const std::wstring& title, const std::wstring& artist, int64_t durationMs,
                       ReadyCallback cb, RequestSource source = RequestSource::Default,
-                      bool persistOrder = false, const std::wstring& album = {});
+                      bool persistOrder = false, const std::wstring& album = {},
+                      OrderPreference order = OrderPreference::Default);
 
     // 按网易云歌曲 ID 异步取歌词：优先 YRC，失败后回退网易云 LRC。
-    // 曲目元数据用于手动覆盖和原生未命中后的通用匹配。
+    // 曲目元数据用于手动覆盖、自定义本地歌词和原生未命中后的通用匹配。
     void requestNeteaseAsync(const std::wstring& songId, const std::wstring& title,
                              const std::wstring& artist, const std::wstring& album,
-                             int64_t durationMs,
-                             ReadyCallback cb);
+                             int64_t durationMs, ReadyCallback cb,
+                             OrderPreference order = OrderPreference::Default,
+                             bool persistOrder = false);
 
     // 汽水优先搜索原生逐字/LRC，试听片段按原生的试听起点对齐。
-    // 联网前合并切歌元数据事件，新请求使旧请求取消；手动覆盖和缓存立即返回。
-    // 手动覆盖独立保存，不读取 QQ 本地 QRC。
+    // 联网前合并切歌元数据事件，新请求使旧请求取消；手动覆盖、自定义本地和缓存立即返回。
     void requestSodaAsync(const std::wstring& title, const std::wstring& artist,
-                            const std::wstring& album, int64_t durationMs, ReadyCallback cb);
+                            const std::wstring& album, int64_t durationMs, ReadyCallback cb,
+                            OrderPreference order = OrderPreference::Default,
+                            bool persistOrder = false);
 
     // 仅按当前元数据查询 QQ songmid/albummid，不读取或替换当前歌词。
     void requestQqSongInfoAsync(const std::wstring& title, const std::wstring& artist,
@@ -136,6 +145,12 @@ public:
 
     // 设置 QQ 版本顺序标记目录；只保存 *_qm.order.json，不保存歌词内容。
     void setQqLyricOrderDir(const std::wstring& dir);
+
+    // 设置自定义本地歌词目录（单目录不递归，支持 .lrc 与音频内嵌歌词，适用于所有播放器）。
+    void setCustomLocalLyricsConfig(bool enabled, const std::wstring& dir);
+
+    // 设置自定义本地歌词单曲版本顺序标记目录；只保存 *.order.json，不保存歌词内容。
+    void setCustomLocalLyricOrderDir(const std::wstring& dir);
 
     // 缓存/覆盖键：标题 + 歌手 + 时长（5 秒分桶），区分同名不同版本
     static std::wstring makeKey(const std::wstring& title, const std::wstring& artist,

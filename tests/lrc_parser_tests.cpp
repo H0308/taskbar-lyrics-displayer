@@ -39,6 +39,61 @@ TEST_CASE("lrc_parser.timestamp_boundaries_and_utf8_text") {
     EXPECT_EQ(lines[0].text, std::wstring(L"晴天 - 周杰伦"));
 }
 
+TEST_CASE("lrc_parser.local_encoding_offset_bilingual_and_enhanced_words") {
+    // UTF-8 BOM + [ti:]/[ar:]/[offset:] + 冒号毫秒 + 同时间戳双语合并 + 增强型词级时间轴
+    const std::string utf8Bom =
+        "\xEF\xBB\xBF"
+        "[ti:晴天]\r\n"
+        "[ar:周杰伦]\r\n"
+        "[al:叶惠美]\r\n"
+        "[offset:+500]\r\n"
+        "[00:02:00]Hello\r\n"
+        "[00:02.00]你好\r\n"
+        "[00:05.00]<00:05.00>刮<00:05.50>风<00:06.00>\r\n";
+    const auto doc = parseLocalLrcBytes(utf8Bom);
+    EXPECT_EQ(doc.title, std::wstring(L"晴天"));
+    EXPECT_EQ(doc.artist, std::wstring(L"周杰伦"));
+    EXPECT_EQ(doc.album, std::wstring(L"叶惠美"));
+    EXPECT_TRUE(doc.hasOffset);
+    EXPECT_EQ(doc.appliedOffsetMs, -500);
+    EXPECT_EQ(doc.lines.size(), 2u);
+    EXPECT_EQ(doc.lines[0].ms, 1500);
+    EXPECT_EQ(doc.lines[0].text, std::wstring(L"Hello"));
+    EXPECT_EQ(doc.lines[0].translation, std::wstring(L"你好"));
+    EXPECT_EQ(doc.lines[1].ms, 4500);
+    EXPECT_EQ(doc.lines[1].text, std::wstring(L"刮风"));
+    EXPECT_EQ(doc.lines[1].chars.size(), 2u);
+    EXPECT_EQ(doc.lines[1].chars[0].startMs, 4500);
+    EXPECT_EQ(doc.lines[1].chars[0].endMs, 5000);
+    EXPECT_EQ(doc.lines[1].chars[1].startMs, 5000);
+    EXPECT_EQ(doc.lines[1].chars[1].endMs, 5500);
+
+    // UTF-16 LE BOM 解码
+    const std::wstring wideLrc = L"[00:01.00]故事的小黄花\r\n";
+    std::string utf16Le("\xFF\xFE", 2);
+    for (wchar_t ch : wideLrc) {
+        utf16Le.push_back(static_cast<char>(ch & 0xFF));
+        utf16Le.push_back(static_cast<char>((ch >> 8) & 0xFF));
+    }
+    const auto wideDoc = parseLocalLrcBytes(utf16Le);
+    EXPECT_EQ(wideDoc.lines.size(), 1u);
+    EXPECT_EQ(wideDoc.lines[0].ms, 1000);
+    EXPECT_EQ(wideDoc.lines[0].text, std::wstring(L"故事的小黄花"));
+
+    // GB18030（“晴天”的 GBK/GB18030 字节为 C7 E7 CC EC）
+    const std::string gbkLrc = "[00:03.25]\xC7\xE7\xCC\xEC\n";
+    const auto gbkDoc = parseLocalLrcBytes(gbkLrc);
+    EXPECT_EQ(gbkDoc.lines.size(), 1u);
+    EXPECT_EQ(gbkDoc.lines[0].ms, 3250);
+    EXPECT_EQ(gbkDoc.lines[0].text, std::wstring(L"晴天"));
+
+    // 时间戳后紧跟非时间方括号（如 [合唱]、[男]）应保留为歌词正文
+    const auto bracketDoc = parseLocalLrcUtf8("[00:01.00][合唱] 一起唱\n");
+    EXPECT_EQ(bracketDoc.lines.size(), 1u);
+    EXPECT_EQ(bracketDoc.lines[0].ms, 1000);
+    EXPECT_EQ(bracketDoc.lines[0].text, std::wstring(L"[合唱] 一起唱"));
+}
+
 TEST_CASE("qrc_decoder.parse_unwrapped_qrc_text_and_zero_duration_clamp") {
     std::vector<LyricLine> out;
     const std::string qrc =

@@ -882,6 +882,8 @@ struct ManualSearchDialog::Impl {
                 addCandidate(i);
             }
         };
+        addGroup(L"本地目录歌词（LRC）", LyricSource::LocalLrc);
+        addGroup(L"本地音频内嵌歌词", LyricSource::LocalAudio);
         if (targetIsSoda())
             addGroup(L"汽水音乐歌词（逐字／LRC）", LyricSource::Soda);
         if (targetIsNetease())

@@ -229,10 +229,15 @@ std::vector<fluent::FluentMenuItem> App::buildMenuItems(bool fullTrayMenu,
         }
         items.push_back(std::move(sources));
     }
+    const bool customLocalAvailable =
+        settings_.customLocalLyricsEnabled_ && !settings_.customLocalLyricsPath_.empty();
+    const bool qqLocalAvailable = snap.player == SmtcPlayerType::QQMusic &&
+                                  settings_.qqLocalLyricsEnabled_ &&
+                                  !settings_.qqLocalLyricsPath_.empty();
     const bool canSwitchLyricSource =
-        snap.sessionAlive && snap.player == SmtcPlayerType::QQMusic &&
-        !playback_.state().lyricLoading_ && !playback_.state().currentLyrics_.empty() &&
-        settings_.qqLocalLyricsEnabled_ && !settings_.qqLocalLyricsPath_.empty() &&
+        snap.sessionAlive && !playback_.state().lyricLoading_ &&
+        !playback_.state().currentLyrics_.empty() &&
+        (customLocalAvailable || qqLocalAvailable) &&
         !playback_.state().currentLyricsFromManual_;
     addItem(kCmdManualSearch, L"手动搜索歌词", settings_icon::Kind::Search);
     // 歌词来源切换与当前播放内容直接相关，托盘菜单和任务栏歌词右键菜单都应提供。
@@ -461,9 +466,9 @@ void App::onMenuCommand(int cmd, const wchar_t* source) {
         break;
     case kCmdSwitchLyricSource:
         if (playback_.state().currentLyricsFromLocal_)
-            playback_.reloadCurrentQqLyrics(true, false, settings_.qqLocalLyricsPersistOrder_);
+            playback_.reloadCurrentLyrics(true, false, settings_.qqLocalLyricsPersistOrder_);
         else if (!playback_.state().currentLyricsFromManual_)
-            playback_.reloadCurrentQqLyrics(false, true, settings_.qqLocalLyricsPersistOrder_);
+            playback_.reloadCurrentLyrics(false, true, settings_.qqLocalLyricsPersistOrder_);
         break;
     case kCmdRuntimeLog:
         showRuntimeLog();

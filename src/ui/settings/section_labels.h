@@ -201,8 +201,10 @@ inline settings_icon::Kind iconForRow(int id) {
     case kIdSecondaryType:
         return settings_icon::Kind::Language;
     case kIdQqLocalLyricsEnabled:
+    case kIdCustomLocalLyricsEnabled:
         return settings_icon::Kind::LocalLyrics;
     case kIdQqLocalLyricsPath:
+    case kIdCustomLocalLyricsPath:
         return settings_icon::Kind::Folder;
     case kIdQqLocalLyricsPersistOrder:
         return settings_icon::Kind::Persist;

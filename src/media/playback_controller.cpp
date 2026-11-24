@@ -433,21 +433,24 @@ void PlaybackController::startLyricRequest(const SmtcSnapshot& snap, bool forceO
         if (!PostThreadMessageW(threadId, kMsgLyricReady, 0, reinterpret_cast<LPARAM>(payload)))
             delete payload;
     };
+    using Order = LyricProvider::OrderPreference;
+    const Order order = forceLocal    ? Order::PreferLocal
+                        : forceOnline ? Order::PreferOnline
+                                      : Order::Default;
     if (snap.player == SmtcPlayerType::NetEase) {
         provider.requestNeteaseAsync(snap.neteaseSongId, snap.title, snap.artist, snap.album,
-                                     durationMs, postLyricResult);
+                                     durationMs, postLyricResult, order, persistOrder);
     } else if (snap.player == SmtcPlayerType::Soda) {
-        provider.requestSodaAsync(snap.title, snap.artist, snap.album, durationMs, postLyricResult);
+        provider.requestSodaAsync(snap.title, snap.artist, snap.album, durationMs, postLyricResult,
+                                  order, persistOrder);
     } else {
         using Source = LyricProvider::RequestSource;
         const Source source = snap.player == SmtcPlayerType::SaltPlayer ? Source::SaltPlayer
                               : snap.player == SmtcPlayerType::Spotify  ? Source::Spotify
                               : snap.player == SmtcPlayerType::Generic  ? Source::Generic
-                              : forceLocal                              ? Source::PreferLocal
-                              : forceOnline                             ? Source::PreferOnline
                                                                         : Source::Default;
         provider.requestAsync(snap.title, snap.artist, durationMs, postLyricResult, source,
-                              persistOrder, snap.album);
+                              persistOrder, snap.album, order);
     }
 }
 
@@ -508,8 +511,7 @@ void PlaybackController::onLyricReady(std::unique_ptr<LyricPayload> payload) {
     state_.lyricDiagnostics_ = payload->result.diagnostics;
     if (payload->result.ok) {
         state_.currentLyrics_ = std::move(payload->result.lines);
-        state_.currentLyricsFromLocal_ =
-            snap.player == SmtcPlayerType::QQMusic && payload->result.fromLocal;
+        state_.currentLyricsFromLocal_ = payload->result.fromLocal;
         state_.currentLyricsFromManual_ = payload->result.fromManual;
         state_.currentLyricOrigin_ = payload->result.info.lyricOrigin;
         state_.currentLyricInfo_ = payload->result.info;
@@ -595,13 +597,13 @@ void PlaybackController::onCoverReady(std::unique_ptr<CoverPayload> payload) {
     logState_(snap);
 }
 
-void PlaybackController::reloadCurrentQqLyrics(bool forceOnline, bool forceLocal,
-                                               bool persistOrder) {
+void PlaybackController::reloadCurrentLyrics(bool forceOnline, bool forceLocal,
+                                             bool persistOrder) {
     const SmtcSnapshot snap = snapshot_();
     if (!snap.sessionAlive || snap.sessionGeneration != currentSessionGeneration_ ||
-        snap.sourceAppUserModelId != currentSourceAppId_ ||
-        snap.player != SmtcPlayerType::QQMusic || state_.currentKey.empty() ||
-        snap.title.empty() || snap.timelineStale || makeTrackKey(snap) != state_.currentKey ||
+        snap.sourceAppUserModelId != currentSourceAppId_ || state_.currentKey.empty() ||
+        (snap.title.empty() && snap.neteaseSongId.empty()) || snap.timelineStale ||
+        makeTrackKey(snap) != state_.currentKey ||
         (forceOnline && !state_.currentLyricsFromLocal_) ||
         (forceLocal && (state_.currentLyricsFromLocal_ || state_.currentLyricsFromManual_)))
         return;

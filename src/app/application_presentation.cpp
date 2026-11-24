@@ -52,7 +52,11 @@ void App::updateRuntimeLogState(const SmtcSnapshot& snap) {
         const bool words = std::any_of(state.currentLyrics_.begin(), state.currentLyrics_.end(),
                                        [](const LyricLine& value) { return !value.chars.empty(); });
         format = words ? L"逐字" : L"逐行";
-        if (state.currentLyricsFromLocal_)
+        if (state.currentLyricOrigin_ == LyricOrigin::LocalLrc)
+            format += L" LRC";
+        else if (state.currentLyricOrigin_ == LyricOrigin::LocalAudio)
+            format += L" 音频内嵌";
+        else if (state.currentLyricsFromLocal_)
             format += L" QRC";
         else if (state.currentLyricOrigin_ == LyricOrigin::Kugou)
             format += L" KRC";
@@ -77,7 +81,10 @@ void App::updateRuntimeLogState(const SmtcSnapshot& snap) {
     std::wstring method = state.currentLyrics_.empty() && !state.lyricLoading_ ? L"未命中"
         : state.lyricLoading_ ? L"加载中"
         : state.currentLyricsFromManual_ ? L"已保存的手动选择"
-        : state.currentLyricsFromLocal_ ? L"本地 QRC"
+        : state.currentLyricsFromLocal_
+            ? (state.currentLyricOrigin_ == LyricOrigin::LocalLrc     ? L"本地 LRC"
+               : state.currentLyricOrigin_ == LyricOrigin::LocalAudio ? L"本地音频内嵌"
+                                                                      : L"本地 QRC")
         : state.currentLyricsFromCache_ ? L"内存缓存" : L"在线请求";
     if (!state.lyricLoading_ && !state.currentLyricsFromManual_)
         method += L" · " + std::to_wstring(state.currentLyricLoadMs_) + L" ms";
@@ -138,8 +145,13 @@ void App::updateRuntimeLogState(const SmtcSnapshot& snap) {
         runtimeLogger_.setLyricSource(L"加载中…");
     else if (playback_.state().currentLyricsFromManual_)
         runtimeLogger_.setLyricSource(L"本地歌词（手动搜索）");
-    else if (playback_.state().currentLyricsFromLocal_)
-        runtimeLogger_.setLyricSource(L"本地歌词（QQ音乐本地）");
+    else if (playback_.state().currentLyricsFromLocal_) {
+        const auto origin = playback_.state().currentLyricOrigin_;
+        runtimeLogger_.setLyricSource(
+            origin == LyricOrigin::LocalLrc     ? L"本地歌词（自定义 LRC）"
+            : origin == LyricOrigin::LocalAudio ? L"本地歌词（音频内嵌）"
+                                                : L"本地歌词（QQ音乐本地）");
+    }
     else if (!playback_.state().currentLyrics_.empty())
         runtimeLogger_.setLyricSource(onlineLyricSourceName(playback_.state().currentLyricOrigin_));
     else

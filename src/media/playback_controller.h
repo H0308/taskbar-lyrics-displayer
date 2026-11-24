@@ -92,8 +92,8 @@ public:
     void onLyricReady(std::unique_ptr<LyricPayload> payload);
     void onQqCoverInfoReady(std::unique_ptr<QqCoverInfoPayload> payload);
     void onCoverReady(std::unique_ptr<CoverPayload> payload);
-    void reloadCurrentQqLyrics(bool forceOnline = false, bool forceLocal = false,
-                               bool persistOrder = false);
+    void reloadCurrentLyrics(bool forceOnline = false, bool forceLocal = false,
+                             bool persistOrder = false);
 
 private:
     CoverProvider::ReadyCallback coverReadyCallback(CoverSource source, bool reportFailure = false);

@@ -5,6 +5,7 @@
   "dependencies": [
     "curl",
     "nlohmann-json",
+    "taglib",
     "zlib",
     "yaml-cpp"
   ]

@@ -685,8 +685,11 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
         }
     }
     qqLocalLyricsEnabled_ = j.value("qqLocalLyricsEnabled", false);
-    qqLocalLyricsPersistOrder_ = j.value("qqLocalLyricsPersistOrder", false);
+    qqLocalLyricsPersistOrder_ = j.value("qqLocalLyricsPersistOrder", false) ||
+                                 j.value("customLocalLyricsPersistOrder", false);
     qqLocalLyricsPath_ = wideOf(j.value("qqLocalLyricsPath", std::string()));
+    customLocalLyricsEnabled_ = j.value("customLocalLyricsEnabled", false);
+    customLocalLyricsPath_ = wideOf(j.value("customLocalLyricsPath", std::string()));
     genericSmtcEnabled_ = j.value("genericSmtcEnabled", false);
     {
         const std::string mode = j.value("genericSmtcFilterMode", std::string("all"));
@@ -912,6 +915,9 @@ nlohmann::json AppSettings::toJson() const {
     j["qqLocalLyricsEnabled"] = qqLocalLyricsEnabled_;
     j["qqLocalLyricsPersistOrder"] = qqLocalLyricsPersistOrder_;
     j["qqLocalLyricsPath"] = utf8Of(qqLocalLyricsPath_);
+    j["customLocalLyricsEnabled"] = customLocalLyricsEnabled_;
+    j["customLocalLyricsPath"] = utf8Of(customLocalLyricsPath_);
+    j.erase("customLocalLyricsPersistOrder");
     j["genericSmtcEnabled"] = genericSmtcEnabled_;
     j["genericSmtcFilterMode"] =
         genericSmtcFilterMode_ == GenericSmtcFilterMode::AllowList ? "allowlist"

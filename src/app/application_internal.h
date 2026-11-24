@@ -300,6 +300,7 @@ private:
     bool updatePromptFocusVisible_ = false;
     std::wstring settingsPath_;
     bool qqLocalLyricsPickerOpen_ = false;
+    bool customLocalLyricsPickerOpen_ = false;
     bool idleAppPickerOpen_ = false;
     bool genericSmtcAppPickerOpen_ = false;
 
@@ -549,6 +550,8 @@ private:
 
     void applyQqLocalLyricsPersistOrder(bool on);
 
+    void applyCustomLocalLyricsEnabled(bool on);
+
     void applyGenericSmtcEnabled(bool on);
 
     void applyGenericSmtcFilterMode(int mode);
@@ -690,6 +693,8 @@ private:
     void setAutoCheckOnStartup(bool enabled);
     void pickQqLocalLyricsPath();
     void applyQqLocalLyricsPath(const std::wstring& path);
+    void pickCustomLocalLyricsPath();
+    void applyCustomLocalLyricsPath(const std::wstring& path);
     void applyTickTickEnabled(bool enabled);
     void disconnectTickTick();
     void editTickTickApiToken(bool enableAfterSave = false);

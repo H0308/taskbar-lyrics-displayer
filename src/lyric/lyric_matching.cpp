@@ -113,6 +113,14 @@ std::vector<std::wstring> versionTagsInText(const std::wstring& raw) {
         add(L"remastered");
         specific = true;
     }
+    if (hasAny({L"ai翻唱", L"ai 翻唱", L"ai cover", L"ai版", L"ai声库"})) {
+        add(L"ai");
+        specific = true;
+    }
+    if (hasAny({L"翻唱", L"翻唱版", L"cover"})) {
+        add(L"cover");
+        specific = true;
+    }
     if (!specific && hasAny({L"version", L"ver.", L"edit", L"special", L"anniversary"}))
         add(L"version");
     return tags;
@@ -594,7 +602,14 @@ std::vector<std::wstring> extractVersionTags(const std::wstring& s) {
             const size_t end = s.find(close, pos + 1);
             if (end == std::wstring::npos)
                 break;
-            appendUniqueVersionTags(tags, s.substr(pos + 1, end - pos - 1));
+            const std::wstring content = s.substr(pos + 1, end - pos - 1);
+            appendUniqueVersionTags(tags, content);
+            // 括号内独立出现的 "AI"（如 "(AI)"、"(AI 孙燕姿)"）标记为 ai 版本，
+            // 避免在正文标题末尾误伤 "Ai"（日语“爱”）等歌名。
+            if (containsVersionWord(content, L"ai") &&
+                std::find(tags.begin(), tags.end(), L"ai") == tags.end()) {
+                tags.emplace_back(L"ai");
+            }
             pos = end + 1;
         }
     };

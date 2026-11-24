@@ -61,17 +61,28 @@ std::vector<Row> createLyricRows(const SettingsState& state) {
                          state.secondaryAvailability == SecondaryLyricAvailability::Available,
                      *secondaryHint ? kRowTallH : kRowH);
     builder.addHeader(L"本地歌词");
+    Row& customLocalEnabled = builder.addRow(
+        kIdCustomLocalLyricsEnabled, ControlKind::Toggle, L"使用自定义本地歌词",
+        L"优先从指定目录匹配 .lrc 与音频内嵌歌词（不递归子目录），适用于所有播放器。", 40.0f,
+        kRowTallH);
+    customLocalEnabled.checked = state.customLocalLyricsEnabled;
+    const std::wstring customLocalPathHint = state.customLocalLyricsPath.empty()
+                                                 ? std::wstring(L"未配置")
+                                                 : state.customLocalLyricsPath;
+    Row& customLocalPath = builder.addButton(kIdCustomLocalLyricsPath, L"本地歌词目录",
+                                             customLocalPathHint.c_str(), L"选择文件夹…", kRowTallH);
+    customLocalPath.enabled = state.customLocalLyricsEnabled;
     builder.addToggle(kIdQqLocalLyricsEnabled, L"使用 QQ 音乐本地歌词", state.qqLocalLyricsEnabled);
-    Row& persistOrder = builder.addRow(
-        kIdQqLocalLyricsPersistOrder, ControlKind::Toggle, L"记住歌词版本选择",
-        L"记住每首歌切换后的本地/在线版本；关闭后不保存新记录，但仍读取已有记录", 40.0f, kRowTallH);
-    persistOrder.checked = state.qqLocalLyricsPersistOrder;
-    persistOrder.enabled = state.qqLocalLyricsEnabled;
     const std::wstring localPathHint =
         state.qqLocalLyricsPath.empty() ? std::wstring(L"未配置") : state.qqLocalLyricsPath;
     Row& localPath = builder.addButton(kIdQqLocalLyricsPath, L"QQ 音乐本地歌词目录",
                                        localPathHint.c_str(), L"选择文件夹…", kRowTallH);
     localPath.enabled = state.qqLocalLyricsEnabled;
+    Row& persistOrder = builder.addRow(
+        kIdQqLocalLyricsPersistOrder, ControlKind::Toggle, L"记住本地歌词版本选择",
+        L"记住每首歌切换后的本地/在线版本；关闭后不保存新记录，但仍读取已有记录", 40.0f, kRowTallH);
+    persistOrder.checked = state.qqLocalLyricsPersistOrder;
+    persistOrder.enabled = state.customLocalLyricsEnabled || state.qqLocalLyricsEnabled;
 
     updateLyricRows(rows, state);
     return rows;
@@ -121,11 +132,21 @@ void updateLyricRows(std::vector<Row>& rows, const SettingsState& s) {
         row->enabled = s.secondaryEnabled &&
                        s.secondaryAvailability == SecondaryLyricAvailability::Available;
     }
+    if (auto* row = findRow(kIdCustomLocalLyricsEnabled))
+        row->checked = s.customLocalLyricsEnabled;
+    if (auto* row = findRow(kIdCustomLocalLyricsPath)) {
+        row->hint =
+            s.customLocalLyricsPath.empty() ? std::wstring(L"未配置") : s.customLocalLyricsPath;
+        row->showHint = true;
+        row->minHeight = kRowTallH;
+        row->height = row->minHeight;
+        row->enabled = s.customLocalLyricsEnabled;
+    }
     if (auto* row = findRow(kIdQqLocalLyricsEnabled))
         row->checked = s.qqLocalLyricsEnabled;
     if (auto* row = findRow(kIdQqLocalLyricsPersistOrder)) {
         row->checked = s.qqLocalLyricsPersistOrder;
-        row->enabled = s.qqLocalLyricsEnabled;
+        row->enabled = s.customLocalLyricsEnabled || s.qqLocalLyricsEnabled;
     }
     if (auto* row = findRow(kIdQqLocalLyricsPath)) {
         row->hint = s.qqLocalLyricsPath.empty() ? std::wstring(L"未配置") : s.qqLocalLyricsPath;
@@ -227,10 +248,25 @@ bool handleLyricCommand(int id, Row& value, std::vector<Row>& rows, SettingsStat
         if (actions.onPreferRomanization)
             actions.onPreferRomanization(row->selected == 1);
         break;
+    case kIdCustomLocalLyricsEnabled:
+        row->checked = !row->checked;
+        state.customLocalLyricsEnabled = row->checked;
+        if (auto* path = findRow(kIdCustomLocalLyricsPath))
+            path->enabled = row->checked;
+        if (auto* persist = findRow(kIdQqLocalLyricsPersistOrder))
+            persist->enabled = state.customLocalLyricsEnabled || state.qqLocalLyricsEnabled;
+        if (actions.onCustomLocalLyricsEnabled)
+            actions.onCustomLocalLyricsEnabled(row->checked);
+        break;
+    case kIdCustomLocalLyricsPath:
+        if (actions.onPickCustomLocalLyricsPath)
+            actions.onPickCustomLocalLyricsPath();
+        break;
     case kIdQqLocalLyricsEnabled:
         row->checked = !row->checked;
+        state.qqLocalLyricsEnabled = row->checked;
         if (auto* persist = findRow(kIdQqLocalLyricsPersistOrder))
-            persist->enabled = row->checked;
+            persist->enabled = state.customLocalLyricsEnabled || state.qqLocalLyricsEnabled;
         if (auto* path = findRow(kIdQqLocalLyricsPath))
             path->enabled = row->checked;
         if (actions.onQqLocalLyricsEnabled)

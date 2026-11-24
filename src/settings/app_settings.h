@@ -140,6 +140,8 @@ struct AppSettings {
     bool qqLocalLyricsEnabled_ = false;
     bool qqLocalLyricsPersistOrder_ = false;
     std::wstring qqLocalLyricsPath_;
+    bool customLocalLyricsEnabled_ = false;
+    std::wstring customLocalLyricsPath_;
     bool genericSmtcEnabled_ = false;
     GenericSmtcFilterMode genericSmtcFilterMode_ = GenericSmtcFilterMode::All;
     std::vector<GenericSmtcAppRule> genericSmtcAllowList_;

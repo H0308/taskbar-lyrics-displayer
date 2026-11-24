@@ -175,6 +175,9 @@ TEST_CASE("app_settings.json_roundtrip_and_legacy_migrations") {
     original.fullscreenRenderModeEnabled_ = true;
     original.fullscreenRenderMode_ = RenderMode::Low;
     original.fullscreenRenderModeMonitorId_ = L"\\\\.\\DISPLAY2";
+    original.customLocalLyricsEnabled_ = true;
+    original.qqLocalLyricsPersistOrder_ = true;
+    original.customLocalLyricsPath_ = L"D:\\Music\\Lyrics";
 
     const nlohmann::json dumped = original.toJson();
     AppSettings loaded;
@@ -200,6 +203,9 @@ TEST_CASE("app_settings.json_roundtrip_and_legacy_migrations") {
     EXPECT_TRUE(loaded.fullscreenRenderModeEnabled_);
     EXPECT_EQ(loaded.fullscreenRenderMode_, RenderMode::Low);
     EXPECT_EQ(loaded.fullscreenRenderModeMonitorId_, std::wstring(L"\\\\.\\DISPLAY2"));
+    EXPECT_TRUE(loaded.customLocalLyricsEnabled_);
+    EXPECT_TRUE(loaded.qqLocalLyricsPersistOrder_);
+    EXPECT_EQ(loaded.customLocalLyricsPath_, std::wstring(L"D:\\Music\\Lyrics"));
 
     // 验证旧版字段迁移、越界钳制与欢迎语规则
     nlohmann::json legacy = {

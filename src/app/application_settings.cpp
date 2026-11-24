@@ -960,13 +960,22 @@ void App::applyQqLocalLyricsEnabled(bool on) {
                                                      settings_.qqLocalLyricsPath_);
     logSettingBool(L"qq-local-lyrics", on);
     saveSettings();
-    playback_.reloadCurrentQqLyrics();
+    playback_.reloadCurrentLyrics();
 }
 
 void App::applyQqLocalLyricsPersistOrder(bool on) {
     settings_.qqLocalLyricsPersistOrder_ = on;
     logSettingBool(L"qq-local-lyrics-persist-order", on);
     saveSettings();
+}
+
+void App::applyCustomLocalLyricsEnabled(bool on) {
+    settings_.customLocalLyricsEnabled_ = on;
+    playback_.lyricProvider().setCustomLocalLyricsConfig(settings_.customLocalLyricsEnabled_,
+                                                         settings_.customLocalLyricsPath_);
+    logSettingBool(L"custom-local-lyrics", on);
+    saveSettings();
+    playback_.reloadCurrentLyrics();
 }
 
 void App::syncGenericSmtcFilterToMonitor() {
@@ -1031,6 +1040,7 @@ void App::loadSettings() {
     bool migrateLegacyLogDirectory = false;
     playback_.lyricProvider().setManualOverrideDir(dir + L"\\manual_lyrics");
     playback_.lyricProvider().setQqLyricOrderDir(dir + L"\\manual_lyrics_settings");
+    playback_.lyricProvider().setCustomLocalLyricOrderDir(dir + L"\\local_lyrics_order");
     fluent::setThemeModes(settings_.taskbarThemeMode_, settings_.windowThemeMode_);
     try {
         auto loaded = settings_store::load(std::filesystem::path(settingsPath_));
@@ -1063,6 +1073,8 @@ void App::loadSettings() {
         settings_.readJson(loaded.document, idle_.hasTickTickToken(), migrateLegacyLogDirectory);
         playback_.lyricProvider().setQqLocalLyricsConfig(settings_.qqLocalLyricsEnabled_,
                                                          settings_.qqLocalLyricsPath_);
+        playback_.lyricProvider().setCustomLocalLyricsConfig(settings_.customLocalLyricsEnabled_,
+                                                             settings_.customLocalLyricsPath_);
         syncGenericSmtcFilterToMonitor();
     } catch (const std::exception&) {
         showSettingsError(L"load-exception",
@@ -1135,7 +1147,22 @@ void App::applyQqLocalLyricsPath(const std::wstring& selectedPath) {
     refreshSettingsDialog();
     if (settings_.qqLocalLyricsEnabled_) {
         playback_.lyricProvider().setQqLocalLyricsConfig(true, settings_.qqLocalLyricsPath_);
-        playback_.reloadCurrentQqLyrics();
+        playback_.reloadCurrentLyrics();
+    }
+}
+
+void App::applyCustomLocalLyricsPath(const std::wstring& selectedPath) {
+    if (selectedPath.empty() || selectedPath == settings_.customLocalLyricsPath_)
+        return;
+    runtime_log::writef(L"[action][custom-local-lyrics] directory-changed path=%s",
+                        selectedPath.c_str());
+    settings_.customLocalLyricsPath_ = selectedPath;
+    saveSettings();
+    refreshSettingsDialog();
+    if (settings_.customLocalLyricsEnabled_) {
+        playback_.lyricProvider().setCustomLocalLyricsConfig(true,
+                                                             settings_.customLocalLyricsPath_);
+        playback_.reloadCurrentLyrics();
     }
 }
 
@@ -1476,6 +1503,8 @@ SettingsState App::currentSettingsState() const {
     st.qqLocalLyricsEnabled = settings_.qqLocalLyricsEnabled_;
     st.qqLocalLyricsPersistOrder = settings_.qqLocalLyricsPersistOrder_;
     st.qqLocalLyricsPath = settings_.qqLocalLyricsPath_;
+    st.customLocalLyricsEnabled = settings_.customLocalLyricsEnabled_;
+    st.customLocalLyricsPath = settings_.customLocalLyricsPath_;
     st.genericSmtcEnabled = settings_.genericSmtcEnabled_;
     st.genericSmtcFilterMode = static_cast<int>(settings_.genericSmtcFilterMode_);
     if (settings_.genericSmtcFilterMode_ == GenericSmtcFilterMode::AllowList)
@@ -1630,6 +1659,8 @@ SettingsActions App::buildSettingsActions() {
     act.onQqLocalLyricsEnabled = [this](bool on) { applyQqLocalLyricsEnabled(on); };
     act.onQqLocalLyricsPersistOrder = [this](bool on) { applyQqLocalLyricsPersistOrder(on); };
     act.onPickQqLocalLyricsPath = [this] { pickQqLocalLyricsPath(); };
+    act.onCustomLocalLyricsEnabled = [this](bool on) { applyCustomLocalLyricsEnabled(on); };
+    act.onPickCustomLocalLyricsPath = [this] { pickCustomLocalLyricsPath(); };
     act.onGenericSmtcEnabled = [this](bool on) { applyGenericSmtcEnabled(on); };
     act.onGenericSmtcFilterMode = [this](int mode) { applyGenericSmtcFilterMode(mode); };
     act.onAddGenericSmtcApp = [this] { showAddGenericSmtcAppMenu(); };

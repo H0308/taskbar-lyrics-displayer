@@ -602,6 +602,65 @@ void App::pickQqLocalLyricsPath() {
     }).detach();
 }
 
+void App::pickCustomLocalLyricsPath() {
+    if (customLocalLyricsPickerOpen_)
+        return;
+
+    runtime_log::writef(L"[action][custom-local-lyrics] choose-directory start current=%s",
+                        settings_.customLocalLyricsPath_.c_str());
+    customLocalLyricsPickerOpen_ = true;
+    const DWORD mainThreadId = mainThread;
+    const std::wstring initialPath = settings_.customLocalLyricsPath_;
+
+    // IFileDialog 要求 STA；主线程由 C++/WinRT 初始化为 MTA，单独在线程 STA 中打开。
+    std::thread([mainThreadId, initialPath] {
+        std::wstring selectedPath;
+        const HRESULT init =
+            CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+        if (SUCCEEDED(init)) {
+            IFileDialog* dialog = nullptr;
+            if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                           IID_PPV_ARGS(&dialog)))) {
+                DWORD options = 0;
+                if (SUCCEEDED(dialog->GetOptions(&options)))
+                    dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+                dialog->SetTitle(L"选择自定义本地歌词目录");
+
+                if (!initialPath.empty()) {
+                    IShellItem* folder = nullptr;
+                    if (SUCCEEDED(SHCreateItemFromParsingName(initialPath.c_str(), nullptr,
+                                                              IID_PPV_ARGS(&folder)))) {
+                        dialog->SetFolder(folder);
+                        folder->Release();
+                    }
+                }
+
+                if (SUCCEEDED(dialog->Show(nullptr))) {
+                    IShellItem* item = nullptr;
+                    if (SUCCEEDED(dialog->GetResult(&item))) {
+                        PWSTR path = nullptr;
+                        if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+                            selectedPath = path;
+                            CoTaskMemFree(path);
+                        }
+                        item->Release();
+                    }
+                }
+                dialog->Release();
+            }
+            CoUninitialize();
+        }
+
+        runtime_log::writef(L"[action][custom-local-lyrics] choose-directory result=%s path=%s",
+                            selectedPath.empty() ? L"cancelled" : L"selected",
+                            selectedPath.c_str());
+        auto* payload = new QqLocalFolderPayload{std::move(selectedPath)};
+        if (!PostThreadMessageW(mainThreadId, kMsgCustomLocalFolderReady, 0,
+                                reinterpret_cast<LPARAM>(payload)))
+            delete payload;
+    }).detach();
+}
+
 void App::showUpdatePrompt(const std::wstring& latestVersion) {
     if (latestVersion.empty())
         return;
