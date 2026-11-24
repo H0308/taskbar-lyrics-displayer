@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <source_location>
 #include <string>
 #include <utility>
 #include <vector>
@@ -142,6 +143,8 @@ struct MediaPopup::Impl {
     int cardOffsetYPx = 0;
     float cardOriginDip = 0.0f;
     float animationTravelPx = 0.0f;
+    ULONGLONG closeStartedMs = 0;
+    D2D1_POINT_2F closeOffset{};
 
     int hoverButton = -1;
     int pressedButton = -1;
@@ -634,7 +637,12 @@ struct MediaPopup::Impl {
         materialNeedsApply = true;
     }
 
-    void releaseDrawingResources() {
+    void releaseDrawingResources(const wchar_t* failure = nullptr,
+                                 std::source_location caller = std::source_location::current()) {
+        if (failure) {
+            runtime_log::writef(L"[media-popup][render-failure] reason=%ls line=%u generation=%llu",
+                                failure, static_cast<unsigned>(caller.line()), renderer.deviceGeneration());
+        }
         releaseDeviceResources();
         idleScrollView.discardDeviceResources();
         renderer.discard();
@@ -745,6 +753,25 @@ struct MediaPopup::Impl {
     bool createResources() {
         if (!themeDirty && brushBackground)
             return true;
+        if (brushBackground) {
+            const auto& p = fluent::palette(fluent::ThemeTarget::Window);
+            brushBackground->SetColor(cardFillForPage(currentPage()));
+            brushStroke->SetColor(frostedBackgroundActive() ? p.cardStroke : p.controlStroke);
+            resetBackdropTextColors();
+            brushProgressTrack->SetColor(p.separator);
+            brushControl->SetColor(p.controlFill);
+            brushControlHover->SetColor(p.controlHover);
+            brushControlPressed->SetColor(p.controlPressed);
+            brushIdleCell->SetColor(p.listHover);
+            brushIdleCellHover->SetColor(p.listSelected);
+            brushAccent->SetColor(p.accent);
+            brushAccentHover->SetColor(p.accentHover);
+            brushTextOnAccent->SetColor(p.textOnAccent);
+            if (backdrop.hasContrastReady())
+                applyBackdropTextContrast(backdrop.lastLuminance());
+            themeDirty = false;
+            return true;
+        }
         releaseVisualResources();
         auto* rt = renderer.renderTarget();
         if (!rt)
@@ -779,17 +806,17 @@ struct MediaPopup::Impl {
             !createTextFormat(fluent::font_sizes::mediaPopup::source, DWRITE_FONT_WEIGHT_NORMAL, fmtSource) ||
             !createTextFormat(fluent::font_sizes::mediaPopup::time, DWRITE_FONT_WEIGHT_NORMAL, fmtTimeRight) ||
             !createTextFormat(fluent::font_sizes::mediaPopup::icon, DWRITE_FONT_WEIGHT_SEMI_BOLD, fmtIcon)) {
-            releaseDrawingResources();
+            releaseDrawingResources(L"common-resources-create-failed");
             return false;
         }
         if (FAILED(fmtTimeRight->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING))) {
-            releaseDrawingResources();
+            releaseDrawingResources(L"time-alignment-failed");
             return false;
         }
 
         if (!backdrop.createGeometryAndLayer(renderer.d2d(), rt, kPopupWidthDip, popupHeightDip(),
                                              kPopupCornerDip)) {
-            releaseDrawingResources();
+            releaseDrawingResources(L"backdrop-geometry-failed");
             return false;
         }
 
@@ -817,7 +844,7 @@ struct MediaPopup::Impl {
                                   8.0f, 8.0f), &coverClip)) ||
              FAILED(rt->CreateLayer(&coverLayer)) ||
              !media_control::create(factory, controlGeometry))) {
-            releaseDrawingResources();
+            releaseDrawingResources(L"media-page-resources-failed");
             return false;
         }
         if (createIdle) {
@@ -832,7 +859,7 @@ struct MediaPopup::Impl {
                                   DWRITE_FONT_WEIGHT_NORMAL, fmtIdleApp) ||
                 FAILED(fmtIdleQuote->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING)) ||
                 FAILED(fmtIdleApp->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER))) {
-                releaseDrawingResources();
+                releaseDrawingResources(L"idle-page-resources-failed");
                 return false;
             }
             DWRITE_TRIMMING idleAppTrimming{
@@ -841,7 +868,7 @@ struct MediaPopup::Impl {
                 FAILED(renderer.dwrite()->CreateEllipsisTrimmingSign(
                     fmtIdleApp.Get(), &idleAppTrimmingSign)) ||
                 FAILED(fmtIdleApp->SetTrimming(&idleAppTrimming, idleAppTrimmingSign.Get()))) {
-                releaseDrawingResources();
+                releaseDrawingResources(L"idle-text-trimming-failed");
                 return false;
             }
         }
@@ -1892,7 +1919,7 @@ struct MediaPopup::Impl {
         if (songRootAnimationInstalled) {
             resetRootVisual();
             if (!renderer.commit())
-                releaseDrawingResources();
+                releaseDrawingResources(L"song-animation-reset-commit-failed");
         }
     }
 
@@ -1947,7 +1974,7 @@ struct MediaPopup::Impl {
                                      kPopupCornerDip * scale(),
                                      fluent::isDarkMode(fluent::ThemeTarget::Window) ? 0.018f : 0.012f,
                                      cardOffsetXPx, cardOffsetYPx)) {
-            releaseDrawingResources();
+            releaseDrawingResources(L"root-shadow-failed");
             return false;
         }
         if (!createResources())
@@ -2020,7 +2047,7 @@ struct MediaPopup::Impl {
 
         auto* rt = renderer.beginSurfaceDraw(hwnd, pxW, pxH);
         if (!rt) {
-            releaseDrawingResources();
+            releaseDrawingResources(L"surface-begin-failed");
             return false;
         }
         D2D1_MATRIX_3X2_F surfaceTransform{};
@@ -2032,8 +2059,7 @@ struct MediaPopup::Impl {
         const bool drawnSuccessfully = renderer.endSurfaceDraw(rt);
         const auto renderDrawn = runtime_log::uiTimeMs();
         if (!drawnSuccessfully) {
-            runtime_log::writef(L"[media-popup] surface draw failed, releasing drawing resources");
-            releaseDrawingResources();
+            releaseDrawingResources(L"surface-draw-failed");
             return false;
         }
         if (songTransitionPending) {
@@ -2048,7 +2074,7 @@ struct MediaPopup::Impl {
         }
 
         if (!renderer.commit()) {
-            releaseDrawingResources();
+            releaseDrawingResources(L"render-commit-failed");
             return false;
         }
         const auto renderPresented = runtime_log::uiTimeMs();
@@ -2666,6 +2692,22 @@ struct MediaPopup::Impl {
         return cursorInsideScreenRect(popupCardScreenRect());
     }
 
+    bool cursorBetweenAnchorAndCard() const {
+        RECT host{};
+        if (!anchor || !GetWindowRect(anchor, &host))
+            return false;
+        const RECT card = popupCardScreenRect();
+        RECT gap{};
+        if (sideAnchored) {
+            gap = {popupOnRightOfAnchor ? host.right : card.right, std::max(host.top, card.top),
+                   popupOnRightOfAnchor ? card.left : host.left, std::min(host.bottom, card.bottom)};
+        } else {
+            gap = {std::max(host.left, card.left), placedAbove ? card.bottom : host.bottom,
+                   std::min(host.right, card.right), placedAbove ? host.top : card.top};
+        }
+        return cursorInsideScreenRect(gap);
+    }
+
     void refreshPopupHoverAfterTransition() {
         if (!hwnd || !visibility.visible())
             return;
@@ -2712,11 +2754,36 @@ struct MediaPopup::Impl {
         render();
     }
 
+    void refreshThemeColors() {
+        themeDirty = true;
+        if (hwnd && visibility.visible())
+            renderOrDefer();
+    }
+
     void showPopup() {
         if (!hwnd || !enabled || !available)
             return;
         const auto showStarted = runtime_log::uiTimeMs();
         const bool wasVisible = visibility.visible();
+        if (visibility.closing()) {
+            KillTimer(hwnd, kCloseTimer);
+            KillTimer(hwnd, kHideTimer);
+            const float t = std::min(1.0f, static_cast<float>(GetTickCount64() - closeStartedMs) /
+                                              static_cast<float>(kCloseAnimationMs));
+            // Match the SmoothStep offset of the outgoing composition animation.
+            const float progress = t * t * (3.0f - 2.0f * t);
+            const UINT duration = std::max(1u, static_cast<UINT>(kOpenAnimationMs * t));
+            visibility.beginOpen();
+            if (!renderer.animateRoot(closeOffset.x * progress, 0, closeOffset.y * progress, 0,
+                                      1, 1, static_cast<float>(duration) / 1000.0f))
+                resetRootVisual();
+            if (!renderer.commit()) {
+                hideImmediate();
+                return;
+            }
+            SetTimer(hwnd, kEnterTimer, duration, nullptr);
+            return;
+        }
         KillTimer(hwnd, kShowTimer);
         KillTimer(hwnd, kHideTimer);
         KillTimer(hwnd, kCloseTimer);
@@ -2808,6 +2875,8 @@ struct MediaPopup::Impl {
         }
         songRootAnimationInstalled = false;
         renderer.commit();
+        closeOffset = {toX, toY};
+        closeStartedMs = GetTickCount64();
         SetTimer(hwnd, kCloseTimer, kCloseAnimationMs, nullptr);
     }
 
@@ -2833,8 +2902,13 @@ struct MediaPopup::Impl {
         if (!hwnd)
             return;
         KillTimer(hwnd, kHideTimer);
-        if (enabled && available && !visibility.visible() && opensOnHover())
+        if (visibility.closing() && opensOnHover()) {
+            showPopup();
+            return;
+        }
+        if (enabled && available && !visibility.visible() && opensOnHover()) {
             SetTimer(hwnd, kShowTimer, kShowDelayMs, nullptr);
+        }
     }
 
     void onAnchorClick() {
@@ -3295,11 +3369,17 @@ struct MediaPopup::Impl {
                     categoryHoverEnvelope = {};
                     popupHover = false;
                 }
-                if (!anchorHover && !popupHover)
-                    hideAnimated();
+                if (!anchorHover && !popupHover) {
+                    if (cursorInsidePopupCard())
+                        onPopupEnter();
+                    else if (cursorBetweenAnchorAndCard())
+                        SetTimer(hwnd, kHideTimer, kHideDelayMs, nullptr);
+                    else
+                        hideAnimated();
+                }
             } else if (wp == kCloseTimer) {
                 KillTimer(hwnd, kCloseTimer);
-                if (visibility.closing() && !anchorHover && !popupHover)
+                if (visibility.closing() && !popupHover && (!anchorHover || !opensOnHover()))
                     hideImmediate();
                 else if (visibility.closing())
                     showPopup();
@@ -3366,14 +3446,10 @@ struct MediaPopup::Impl {
             return 0;
         case WM_SETTINGCHANGE:
             refreshClientAnimations();
-            releaseDrawingResources();
-            if (visibility.visible())
-                render();
+            refreshThemeColors();
             return 0;
         case WM_THEMECHANGED:
-            releaseDrawingResources();
-            if (visibility.visible())
-                render();
+            refreshThemeColors();
             return 0;
         case WM_PAINT: {
             PAINTSTRUCT ps{};
@@ -3647,13 +3723,7 @@ void MediaPopup::setSongTransitionEnabled(bool on) {
 
 void MediaPopup::refreshTheme() {
     enqueue([=, this]() mutable {
-        impl_->releaseDrawingResources();
-        if (!impl_->hwnd || !impl_->visibility.visible())
-            return;
-        if (impl_->visibility.animating())
-            impl_->deferredRender = true;
-        else
-            impl_->render();
+        impl_->refreshThemeColors();
     });
 }
 
