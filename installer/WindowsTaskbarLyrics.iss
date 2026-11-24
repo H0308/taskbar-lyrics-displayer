@@ -8,7 +8,7 @@
 #endif
 
 #ifndef AppVersion
-#define AppVersion "2.23.0"
+#define AppVersion "2.24.0"
 #endif
 #ifndef AppVersionNumeric
 #define AppVersionNumeric AppVersion + ".0"
