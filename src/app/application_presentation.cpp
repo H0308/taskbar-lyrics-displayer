@@ -274,6 +274,7 @@ void App::onSmtcChanged() {
         if (spectrumSessionAlive_)
             spectrum_.requestReconnect();
         spectrumSessionAlive_ = false;
+        spectrumSessionPlaying_ = false;
         spectrumSessionKey_.clear();
         playback_.closeSession();
         idle_.refreshIdleQuote(false);
@@ -289,14 +290,19 @@ void App::onSmtcChanged() {
     if (!audioTarget.empty()) {
         spectrum_.setTarget(audioTarget);
         // 把来源应用与曲目键一起纳入频谱会话键：不同应用播放同一首歌时也切换捕获目标。
+        // 暂停态切源可能先落到进程扫描，恢复播放时再触发一次重连以切到活动音频会话。
         const std::wstring spectrumKey = snap.sourceAppUserModelId + L'|' + makeTrackKey(snap);
-        if (!spectrumSessionAlive_ || spectrumSessionKey_ != spectrumKey)
+        const bool playing = snap.status == PlaybackStatus::Playing;
+        if (!spectrumSessionAlive_ || spectrumSessionKey_ != spectrumKey ||
+            (!spectrumSessionPlaying_ && playing))
             spectrum_.requestReconnect();
         spectrumSessionAlive_ = true;
+        spectrumSessionPlaying_ = playing;
         spectrumSessionKey_ = spectrumKey;
     } else {
         // 无法映射到具体进程或包族的未知来源：停止旧捕获线程，避免任务栏出现静止频谱空壳。
         spectrumSessionAlive_ = false;
+        spectrumSessionPlaying_ = false;
         spectrumSessionKey_.clear();
     }
     syncSpectrumWithMode();

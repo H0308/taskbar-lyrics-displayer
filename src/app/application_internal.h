@@ -275,6 +275,7 @@ private:
     // 频谱（任务栏歌词独有）：开关持久化，开启时捕获线程跟随任务栏宿主启停
     AudioSpectrum spectrum_;
     bool spectrumSessionAlive_ = false;
+    bool spectrumSessionPlaying_ = false;
     std::wstring spectrumSessionKey_;
 
     HWND updatePromptHwnd_ = nullptr;

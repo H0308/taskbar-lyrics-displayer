@@ -1,5 +1,6 @@
 #include "audio_spectrum.h"
 
+#include "logging/runtime_logger.h"
 #include "util/com_release.h"
 
 #include <windows.h>
@@ -110,8 +111,41 @@ DWORD resolveProcessTreeRootPid(DWORD activePid) {
     return current;
 }
 
+std::wstring describeTarget(const AudioSessionTarget& target) {
+    std::wstring text;
+    for (size_t i = 0; i < target.processNames.size(); ++i) {
+        if (i > 0)
+            text += L',';
+        text += target.processNames[i];
+    }
+    if (!target.packageFamilyName.empty()) {
+        if (!text.empty())
+            text += L'|';
+        text += target.packageFamilyName;
+    }
+    return text.empty() ? L"<empty>" : text;
+}
+
+std::wstring processExeName(DWORD pid) {
+    if (pid == 0)
+        return L"<none>";
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process)
+        return L"<unknown>";
+    wchar_t path[MAX_PATH]{};
+    DWORD length = static_cast<DWORD>(_countof(path));
+    std::wstring result = L"<unknown>";
+    if (QueryFullProcessImageNameW(process, 0, path, &length) != FALSE) {
+        const wchar_t* name = wcsrchr(path, L'\\');
+        result = name ? name + 1 : path;
+    }
+    CloseHandle(process);
+    return result;
+}
+
 // 找目标播放器进程树根：父进程不属于同一目标的那个进程。
 // 进程级回环捕获 INCLUDE 模式覆盖目标进程及其子进程，从树根捕获最完整。
+// 优先匹配显式进程名，避免被同包族的启动器壳进程（如 SpotifyLauncher.exe、AiStub.exe）截胡。
 DWORD findProcessRootPid(const AudioSessionTarget& target) {
     if (target.empty())
         return 0;
@@ -120,37 +154,44 @@ DWORD findProcessRootPid(const AudioSessionTarget& target) {
         return 0;
 
     struct Proc { DWORD pid; DWORD parent; };
-    std::vector<Proc> matched;
+    std::vector<Proc> nameMatched;
+    std::vector<Proc> familyMatched;
     PROCESSENTRY32W pe{};
     pe.dwSize = sizeof(pe);
     for (BOOL ok = Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe)) {
-        bool hit = matchesTargetProcessName(pe.szExeFile, target);
-        if (!hit && !target.packageFamilyName.empty())
-            hit = isTargetProcess(pe.th32ProcessID, target);
-        if (hit)
-            matched.push_back({pe.th32ProcessID, pe.th32ParentProcessID});
+        if (matchesTargetProcessName(pe.szExeFile, target))
+            nameMatched.push_back({pe.th32ProcessID, pe.th32ParentProcessID});
+        else if (!target.packageFamilyName.empty() && isTargetProcess(pe.th32ProcessID, target))
+            familyMatched.push_back({pe.th32ProcessID, pe.th32ParentProcessID});
     }
     CloseHandle(snap);
 
-    for (const auto& p : matched) {
-        bool parentMatched = std::any_of(matched.begin(), matched.end(),
-                                         [&](const Proc& q) { return q.pid == p.parent; });
-        if (!parentMatched)
-            return p.pid;
-    }
-    return matched.empty() ? 0 : matched.front().pid;
+    auto pickRoot = [](const std::vector<Proc>& list) -> DWORD {
+        for (const auto& p : list) {
+            bool parentMatched = std::any_of(list.begin(), list.end(),
+                                             [&](const Proc& q) { return q.pid == p.parent; });
+            if (!parentMatched)
+                return p.pid;
+        }
+        return list.empty() ? 0 : list.front().pid;
+    };
+    if (!nameMatched.empty())
+        return pickRoot(nameMatched);
+    return pickRoot(familyMatched);
 }
 
-// 从当前默认输出设备的活动音频会话中找真正产生声音的目标播放器进程。
-// 播放器重启后可能同时存在多个同名进程，不能再依赖进程快照中的第一个根进程。
-DWORD findPlayerAudioPid(const AudioSessionTarget& target) {
+// 从当前默认输出设备的音频会话中找真正产生声音的目标播放器进程。
+// 优先选 Active 会话，其次选 Inactive 会话，避免暂停态切源时误落到无关启动器进程。
+DWORD findPlayerAudioPid(const AudioSessionTarget& target, const wchar_t*& sourceTag) {
+    sourceTag = L"none";
     if (target.empty())
         return 0;
     IMMDeviceEnumerator* devices = nullptr;
     IMMDevice* device = nullptr;
     IAudioSessionManager2* manager = nullptr;
     IAudioSessionEnumerator* sessions = nullptr;
-    DWORD result = 0;
+    DWORD activePid = 0;
+    DWORD inactivePid = 0;
 
     HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
                                   __uuidof(IMMDeviceEnumerator),
@@ -166,21 +207,28 @@ DWORD findPlayerAudioPid(const AudioSessionTarget& target) {
     int count = 0;
     if (SUCCEEDED(hr))
         hr = sessions->GetCount(&count);
-    for (int i = 0; SUCCEEDED(hr) && i < count && !result; ++i) {
+    for (int i = 0; SUCCEEDED(hr) && i < count && !activePid; ++i) {
         IAudioSessionControl* control = nullptr;
         IAudioSessionControl2* control2 = nullptr;
         AudioSessionState state = AudioSessionStateExpired;
         DWORD pid = 0;
 
-        hr = sessions->GetSession(i, &control);
-        if (SUCCEEDED(hr))
-            hr = control->GetState(&state);
-        if (SUCCEEDED(hr) && state == AudioSessionStateActive)
-            hr = control->QueryInterface(__uuidof(IAudioSessionControl2),
-                                          reinterpret_cast<void**>(&control2));
-        if (SUCCEEDED(hr) && control2 && SUCCEEDED(control2->GetProcessId(&pid)) &&
-            pid != 0 && isTargetProcess(pid, target))
-            result = pid;
+        HRESULT itemHr = sessions->GetSession(i, &control);
+        if (SUCCEEDED(itemHr) && control)
+            itemHr = control->GetState(&state);
+        if (SUCCEEDED(itemHr) &&
+            (state == AudioSessionStateActive ||
+             (state == AudioSessionStateInactive && inactivePid == 0))) {
+            itemHr = control->QueryInterface(__uuidof(IAudioSessionControl2),
+                                             reinterpret_cast<void**>(&control2));
+            if (SUCCEEDED(itemHr) && control2 && SUCCEEDED(control2->GetProcessId(&pid)) &&
+                pid != 0 && isTargetProcess(pid, target)) {
+                if (state == AudioSessionStateActive)
+                    activePid = pid;
+                else
+                    inactivePid = pid;
+            }
+        }
 
         if (control2)
             control2->Release();
@@ -196,7 +244,15 @@ DWORD findPlayerAudioPid(const AudioSessionTarget& target) {
         device->Release();
     if (devices)
         devices->Release();
-    return resolveProcessTreeRootPid(result);
+    if (activePid != 0) {
+        sourceTag = L"active-session";
+        return resolveProcessTreeRootPid(activePid);
+    }
+    if (inactivePid != 0) {
+        sourceTag = L"inactive-session";
+        return resolveProcessTreeRootPid(inactivePid);
+    }
+    return 0;
 }
 
 // ActivateAudioInterfaceAsync 完成回调：把结果转交给等待中的捕获线程
@@ -449,6 +505,13 @@ void AudioSpectrum::run() {
             Sleep(std::min<DWORD>(100, ms - t));
     };
 
+    std::wstring loggedTarget;
+    DWORD loggedPid = 0;
+    std::wstring loggedSource;
+    HRESULT loggedErrorHr = S_OK;
+    DWORD loggedErrorPid = 0;
+    DWORD loggedAudioPid = 0;
+
     while (!stop_.load()) {
         reconnectRequested_.store(false, std::memory_order_release);
         AudioSessionTarget target;
@@ -456,16 +519,41 @@ void AudioSpectrum::run() {
             std::lock_guard<std::mutex> lock(targetMutex_);
             target = target_;
         }
-        // 优先使用当前真正出声的目标播放器音频会话，避免重启后命中同名辅助进程。
-        // 暂停或尚未开始播放时没有活动会话，再回退到进程树扫描。
-        DWORD pid = findPlayerAudioPid(target);
-        if (!pid)
-            pid = findProcessRootPid(target);
+        const std::wstring targetDesc = describeTarget(target);
+        // 优先使用当前目标播放器的音频会话，避免命中同包族启动器或同名辅助进程。
+        // 尚未创建音频会话时再回退到进程树扫描。
+        const wchar_t* sourceTag = L"none";
+        DWORD pid = findPlayerAudioPid(target, sourceTag);
         if (!pid) {
+            pid = findProcessRootPid(target);
+            if (pid)
+                sourceTag = L"process-root";
+        }
+        if (!pid) {
+            if (loggedTarget != targetDesc || loggedPid != 0 || loggedSource != L"none") {
+                runtime_log::writef(L"[spectrum] no-target-pid target=%s", targetDesc.c_str());
+                loggedTarget = targetDesc;
+                loggedPid = 0;
+                loggedSource = L"none";
+                loggedAudioPid = 0;
+            }
             for (auto& v : bands_)
                 v.store(0.0f, std::memory_order_relaxed);
             sleepOrStop(2000);
             continue;
+        }
+        if (loggedTarget != targetDesc || loggedPid != pid || loggedSource != sourceTag) {
+            const std::wstring exe = processExeName(pid);
+            runtime_log::writef(L"[spectrum] attach pid=%lu source=%s exe=%s target=%s",
+                                static_cast<unsigned long>(pid), sourceTag, exe.c_str(),
+                                targetDesc.c_str());
+            loggedTarget = targetDesc;
+            loggedPid = pid;
+            loggedSource = sourceTag;
+            loggedErrorHr = S_OK;
+            loggedErrorPid = 0;
+            if (loggedAudioPid != pid)
+                loggedAudioPid = 0;
         }
 
         // ---- 激活进程级回环虚拟设备（仅捕获 pid 进程树）----
@@ -492,6 +580,13 @@ void AudioSpectrum::run() {
         handler->Release();
         releaseCom(op);
         if (FAILED(hr) || !client) {
+            if (loggedErrorPid != pid || loggedErrorHr != hr) {
+                runtime_log::writef(L"[spectrum] activate-failed pid=%lu hr=0x%08lX",
+                                    static_cast<unsigned long>(pid),
+                                    static_cast<unsigned long>(hr));
+                loggedErrorPid = pid;
+                loggedErrorHr = hr;
+            }
             releaseCom(client);
             sleepOrStop(2000);
             continue;
@@ -523,19 +618,24 @@ void AudioSpectrum::run() {
 
         Analyzer analyzer(&bands_);
         bool sessionOk = SUCCEEDED(hr);
+        if (!sessionOk && (loggedErrorPid != pid || loggedErrorHr != hr)) {
+            runtime_log::writef(L"[spectrum] init-failed pid=%lu hr=0x%08lX",
+                                static_cast<unsigned long>(pid), static_cast<unsigned long>(hr));
+            loggedErrorPid = pid;
+            loggedErrorHr = hr;
+        }
 
-        // ---- 捕获循环：事件驱动取包；静音/暂停时不投递数据包，用等量静音推进分析让频段自然回落 ----
+        // ---- 捕获循环：事件驱动取包；静音/暂停时不投递有效包，用等量静音推进分析让频段自然回落 ----
         ULONGLONG lastPacketTick = GetTickCount64();
         while (sessionOk && !stop_.load() && !reconnectRequested_.load(std::memory_order_acquire)) {
-            DWORD wr = WaitForSingleObject(dataReady, 500);
+            DWORD wr = WaitForSingleObject(dataReady, 200);
             if (wr == WAIT_FAILED) {
                 sessionOk = false;
                 break;
             }
             if (wr == WAIT_TIMEOUT) {
-                analyzer.pushSilence(kSampleRate / 2); // 0.5s 静音 -> 按 release 节奏回落
-                // QQ 退出/重启或音频会话重建时，进程回环可能不再来数据。
-                // 不能只依赖 WAIT_TIMEOUT：旧会话也可能持续触发事件但没有数据包。
+                analyzer.pushSilence(kSampleRate / 5); // 0.2s 静音 -> 按 release 节奏回落
+                // 退出/重启或音频会话重建时，进程回环可能不再来有效数据。
                 if (GetTickCount64() - lastPacketTick >= kNoDataRebuildMs) {
                     break;
                 }
@@ -551,13 +651,20 @@ void AudioSpectrum::run() {
                 hr = capture->GetBuffer(&data, &frames, &flags, nullptr, nullptr);
                 if (FAILED(hr))
                     break;
-                if (flags & AUDCLNT_BUFFERFLAGS_SILENT)
+                const bool silent = (flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0;
+                if (silent)
                     analyzer.pushSilence(frames);
                 else
                     analyzer.push(reinterpret_cast<const float*>(data), frames);
                 capture->ReleaseBuffer(frames);
-                if (frames > 0)
+                if (frames > 0 && !silent) {
                     lastPacketTick = GetTickCount64();
+                    if (loggedAudioPid != pid) {
+                        runtime_log::writef(L"[spectrum] audio-active pid=%lu",
+                                            static_cast<unsigned long>(pid));
+                        loggedAudioPid = pid;
+                    }
+                }
                 hr = capture->GetNextPacketSize(&packet);
             }
             if (FAILED(hr))
