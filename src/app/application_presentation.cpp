@@ -207,9 +207,13 @@ void App::syncHost(ILyricHost* host) {
     host->applyPresentationFrame(presentation_.frame());
 }
 
-void App::onControl(MediaControl c, uint64_t sessionGeneration) {
+void App::onControl(MediaControl c, uint64_t sessionGeneration, int64_t positionMs) {
     const wchar_t* name = L"unknown";
     switch (c) {
+    case MediaControl::Seek:
+        name = L"seek";
+        monitor.seek(sessionGeneration, positionMs);
+        break;
     case MediaControl::Prev:
         name = L"previous";
         monitor.skipPrevious(sessionGeneration);

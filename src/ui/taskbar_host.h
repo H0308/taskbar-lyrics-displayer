@@ -49,7 +49,7 @@ public:
     void applyPresentationFrame(const PresentationFrame& frame) override;
     void applyPlaybackPatch(const PlaybackPatch& patch) override;
     void applySpectrumPatch(const SpectrumPatch& patch) override;
-    void setControlCallback(std::function<void(MediaControl, uint64_t)> cb) override;
+    void setControlCallback(std::function<void(MediaControl, uint64_t, int64_t)> cb) override;
     // 沉浸/AppBar 展开视图的退出回调，不受普通内嵌控件设置影响。
     void setImmersiveExitCallback(std::function<void()> cb);
     void setAppVolume(const AppVolumeState& state) override;

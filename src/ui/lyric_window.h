@@ -17,7 +17,7 @@
 
 // 底部控制条操作
 enum class MediaControl { Prev = 0, PlayPause = 1, Next = 2, Repeat = 3,
-                          NextSource = 5, PreviousSource = 6 };
+                          NextSource = 5, PreviousSource = 6, Seek };
 
 // 悬浮媒体卡片的背景材质
 
@@ -34,6 +34,7 @@ struct OverlayMediaInfo {
     bool canPrev = false;
     bool canPlayPause = false;
     bool canNext = false;
+    bool canSeek = false;
     bool canRepeat = false;
     bool canSwitchSource = false;
     int repeatMode = 0;   // 播放模式：0 顺序播放、1 列表循环、2 单曲循环、3 随机播放
@@ -99,7 +100,7 @@ public:
     virtual void applyPresentationFrame(const PresentationFrame& frame) = 0;
     virtual void applyPlaybackPatch(const PlaybackPatch& patch) = 0;
     virtual void applySpectrumPatch(const SpectrumPatch& patch) = 0;
-    virtual void setControlCallback(std::function<void(MediaControl, uint64_t)> cb) = 0;
+    virtual void setControlCallback(std::function<void(MediaControl, uint64_t, int64_t)> cb) = 0;
 
     // 应用音量：state 由宿主缓存展示；用户请求携带版本，回写沿用该版本。
     virtual void setAppVolume(const AppVolumeState& state) = 0;
