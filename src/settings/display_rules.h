@@ -3,9 +3,8 @@
 struct AppSettings;
 
 namespace display_rules {
-constexpr TaskbarViewMode effectiveTaskbarViewMode(TaskbarViewMode configured,
-                                                   bool mediaSessionAlive, bool vertical) {
-    if (configured == TaskbarViewMode::Immersive && (!mediaSessionAlive || vertical))
+constexpr TaskbarViewMode effectiveTaskbarViewMode(TaskbarViewMode configured, bool vertical) {
+    if (configured == TaskbarViewMode::Immersive && vertical)
         return TaskbarViewMode::Embedded;
     return configured;
 }

@@ -10,8 +10,7 @@ std::vector<TaskbarDisplayInfo> App::desiredTaskbarDisplays(const SmtcSnapshot& 
     if (primary == displays.end())
         primary = displays.begin();
 
-    if (settings_.taskbarViewMode_ == TaskbarViewMode::Embedded ||
-        (settings_.taskbarViewMode_ == TaskbarViewMode::Immersive && !snap.sessionAlive))
+    if (settings_.taskbarViewMode_ == TaskbarViewMode::Embedded)
         return {*primary};
 
     if (settings_.taskbarMonitorId_ == L"all") {
@@ -258,10 +257,9 @@ void App::syncTaskbarView(const SmtcSnapshot& snap) {
     forEachHost([&](TaskbarHost* host) {
         host->setAppBarEdge(settings_.appBarEdge_);
         const auto configuredMode = settings_.taskbarViewMode_;
-        const bool vertical = configuredMode == TaskbarViewMode::Immersive &&
-                              snap.sessionAlive && host->isVerticalTaskbar();
-        host->setViewMode(display_rules::effectiveTaskbarViewMode(
-            configuredMode, snap.sessionAlive, vertical));
+        const bool vertical =
+            configuredMode == TaskbarViewMode::Immersive && host->isVerticalTaskbar();
+        host->setViewMode(display_rules::effectiveTaskbarViewMode(configuredMode, vertical));
     });
     syncTaskbarOrientation();
 }
@@ -323,6 +321,12 @@ void App::syncTaskbarOrientation() {
 
     taskbarVertical_ = vertical;
     // 方向只影响实际显示与采样，保留用户配置，回到横向后重新应用。
+    forEachHost([&](TaskbarHost* host) {
+        const auto configuredMode = settings_.taskbarViewMode_;
+        const bool hostVertical =
+            configuredMode == TaskbarViewMode::Immersive && host->isVerticalTaskbar();
+        host->setViewMode(display_rules::effectiveTaskbarViewMode(configuredMode, hostVertical));
+    });
     applyEffectiveTaskbarSettings();
     syncSpectrumWithMode();
     publishPresentationFrame(monitor.snapshot(), {.lyricsChanged = true});
@@ -518,8 +522,7 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
         auto host = std::make_unique<TaskbarHost>();
         host->setVisibilitySuppressed(true);
         const auto initialMode = display_rules::effectiveTaskbarViewMode(
-            settings_.taskbarViewMode_, snap.sessionAlive && display.taskbarWindow,
-            !display.horizontalTaskbar);
+            settings_.taskbarViewMode_, !display.taskbarWindow || !display.horizontalTaskbar);
         if (!host->create(inst, display.deviceName, initialMode)) {
             runtime_log::writef(L"failed to create taskbar host for %s",
                                 display.deviceName.c_str());

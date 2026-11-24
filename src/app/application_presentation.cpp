@@ -1,5 +1,6 @@
 #include "app/application_internal.h"
 #include "media/player_source.h"
+#include "settings/display_rules.h"
 #include <algorithm>
 #include <cstdlib>
 namespace lyrics_app {
@@ -175,6 +176,9 @@ const PresentationFrame& App::preparePresentationFrame(const SmtcSnapshot& snap,
     input.resourcesVisible = settings_.taskbarViewMode_ == TaskbarViewMode::AppBar ||
         (settings_.taskbarViewMode_ == TaskbarViewMode::Embedded &&
          settings_.embeddedResourceMonitor_);
+    input.keepIdleVisible =
+        display_rules::effectiveTaskbarViewMode(settings_.taskbarViewMode_, taskbarVertical_) ==
+        TaskbarViewMode::Immersive;
     if (input.summaryActive)
         input.summaryText = idle_.startupTaskSummaryText();
     return presentation_.update(snap, settings_, playback_.state(), input, update);

@@ -162,10 +162,8 @@ std::vector<fluent::FluentMenuItem> App::buildMenuItems(bool fullTrayMenu,
             viewMode.submenu.push_back(std::move(sub));
         };
         addViewMode(kCmdTaskbarModeEmbedded, L"内嵌", TaskbarViewMode::Embedded);
-        if (snap.sessionAlive) {
-            addViewMode(kCmdTaskbarModeImmersive, L"沉浸", TaskbarViewMode::Immersive,
-                        !taskbarVertical_);
-        }
+        addViewMode(kCmdTaskbarModeImmersive, L"沉浸", TaskbarViewMode::Immersive,
+                    !taskbarVertical_);
         addViewMode(kCmdTaskbarModeAppBar, L"Dock 模式", TaskbarViewMode::AppBar);
         items.push_back(std::move(viewMode));
         if (settings_.taskbarViewMode_ == TaskbarViewMode::AppBar) {
@@ -294,8 +292,7 @@ void App::showTaskbarMenu(POINT screenPt, const TaskbarHost* menuHost) {
     const auto configuredMode = settings_.taskbarViewMode_;
     const bool vertical = configuredMode == TaskbarViewMode::Immersive &&
                           (menuHost ? menuHost->isVerticalTaskbar() : taskbarVertical_);
-    const auto effectiveMode = display_rules::effectiveTaskbarViewMode(
-        configuredMode, monitor.snapshot().sessionAlive, vertical);
+    const auto effectiveMode = display_rules::effectiveTaskbarViewMode(configuredMode, vertical);
     auto items = buildMenuItems(false, menuHost, effectiveMode == TaskbarViewMode::Embedded);
     fluent::FluentMenu::show(trayHwnd, screenPt, std::move(items),
                              [this](int cmd) { onMenuCommand(cmd, L"taskbar-menu"); });
@@ -410,7 +407,7 @@ void App::onMenuCommand(int cmd, const wchar_t* source) {
         applyTaskbarViewMode(0);
         break;
     case kCmdTaskbarModeImmersive:
-        if (!taskbarVertical_ && monitor.snapshot().sessionAlive)
+        if (!taskbarVertical_)
             applyTaskbarViewMode(1);
         break;
     case kCmdTaskbarModeAppBar:

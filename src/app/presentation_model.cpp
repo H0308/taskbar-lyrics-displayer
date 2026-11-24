@@ -86,7 +86,8 @@ void fillPresentationFrame(PresentationFrame& frame, const SmtcSnapshot& snap,
                            const IdleFrameInput& idle) {
     frame.requestGeneration = playback.requestGeneration_;
     frame.trackKey = playback.currentKey;
-    const bool idleVisible = idle.presentation.hasContent() || idle.resourcesVisible ||
+    const bool alwaysIdleBar = idle.resourcesVisible || idle.keepIdleVisible;
+    const bool idleVisible = idle.presentation.hasContent() || alwaysIdleBar ||
                              idle.summaryActive || (idle.summaryPending && idle.tasksEnabled);
     frame.scene = displaySceneFor(snap, settings, playback, idleVisible);
     frame.media = makeMediaInfo(snap, playback, frame);
@@ -113,9 +114,9 @@ void fillPresentationFrame(PresentationFrame& frame, const SmtcSnapshot& snap,
     } else if (frame.scene == DisplayScene::Idle) {
         if (idle.presentation.showText)
             frame.statusText = frame.idle.sentence;
-        else if (!idle.resourcesVisible && idle.presentation.quickStartEnabled)
+        else if (!alwaysIdleBar && idle.presentation.quickStartEnabled)
             frame.statusText = L"快捷启动";
-        else if (!idle.resourcesVisible && idle.presentation.todayTasksEnabled)
+        else if (!alwaysIdleBar && idle.presentation.todayTasksEnabled)
             frame.statusText = L"今日任务";
         else
             frame.statusText.clear();

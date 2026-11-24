@@ -351,7 +351,7 @@ void SettingsSections::onCommand(int id, int option) {
             actions.onTaskbarContextMenu(row->checked);
         break;
     case kIdTaskbarViewMode:
-        if (row->selected == 1 && (!state.mediaSessionAlive || state.verticalTaskbar)) {
+        if (row->selected == 1 && state.verticalTaskbar) {
             row->selected = std::clamp(state.taskbarViewMode, 0, 2);
             break;
         }

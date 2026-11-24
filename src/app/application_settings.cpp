@@ -552,7 +552,7 @@ void App::applyHoverControlStyle(int style) {
 
 void App::applyInlineControlDisplayMode(int mode) {
     const auto effectiveMode = display_rules::effectiveTaskbarViewMode(
-        settings_.taskbarViewMode_, monitor.snapshot().sessionAlive, taskbarVertical_);
+        settings_.taskbarViewMode_, taskbarVertical_);
     if (!display_rules::canEditInlineControlDisplayMode(
             effectiveMode, taskbarVertical_, settings_.hoverPlaybackControls_,
             settings_.hoverControlStyle_)) {

@@ -529,4 +529,23 @@ TEST_CASE("playback_controller.salt_player_debounce_duration_update_and_transien
     noIdle.presentation.quickStartEnabled = false;
     EXPECT_EQ(model.update(closedSnap, settings, controller.state(), noIdle, {}).statusText,
               std::wstring(L"椒盐音乐未运行"));
+
+    // 8. 沉浸模式无歌曲且关闭全部空闲内容时，依然进入空闲常驻状态并清空中间占位文案
+    IdleFrameInput immersiveEmptyIdle;
+    immersiveEmptyIdle.presentation.showText = false;
+    immersiveEmptyIdle.presentation.quickStartEnabled = false;
+    immersiveEmptyIdle.presentation.todayTasksEnabled = false;
+    immersiveEmptyIdle.keepIdleVisible = true;
+    const auto& immersiveIdleFrame =
+        model.update(closedSnap, settings, controller.state(), immersiveEmptyIdle, {});
+    EXPECT_EQ(immersiveIdleFrame.scene, DisplayScene::Idle);
+    EXPECT_TRUE(immersiveIdleFrame.visible);
+    EXPECT_TRUE(immersiveIdleFrame.statusText.empty());
+
+    immersiveEmptyIdle.presentation.quickStartEnabled = true;
+    const auto& immersiveQuickFrame =
+        model.update(closedSnap, settings, controller.state(), immersiveEmptyIdle, {});
+    EXPECT_EQ(immersiveQuickFrame.scene, DisplayScene::Idle);
+    EXPECT_TRUE(immersiveQuickFrame.visible);
+    EXPECT_TRUE(immersiveQuickFrame.statusText.empty());
 }

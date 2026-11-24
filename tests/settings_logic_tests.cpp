@@ -28,6 +28,13 @@ TEST_CASE("display_rules.constraints_and_lyric_conflict_resolution") {
         display_rules::resolveConstraints(settings, RenderMode::Normal, true);
     EXPECT_TRUE(normalVertical.vertical);
     EXPECT_FALSE(normalVertical.minimal);
+
+    EXPECT_EQ(display_rules::effectiveTaskbarViewMode(TaskbarViewMode::Immersive, false),
+              TaskbarViewMode::Immersive);
+    EXPECT_EQ(display_rules::effectiveTaskbarViewMode(TaskbarViewMode::Immersive, true),
+              TaskbarViewMode::Embedded);
+    EXPECT_EQ(display_rules::effectiveTaskbarViewMode(TaskbarViewMode::AppBar, true),
+              TaskbarViewMode::AppBar);
     EXPECT_FALSE(normalVertical.spectrumAllowed);
     EXPECT_FALSE(display_rules::spectrumRequested(settings, RenderMode::Normal, true));
 

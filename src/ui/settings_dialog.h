@@ -39,7 +39,7 @@ struct SettingsState {
     int taskbarViewMode = 0; // 0 内嵌 1 沉浸 2 AppBar
     bool songTransitionEnabled = true;
     std::wstring taskbarMonitorLabel;
-    bool mediaSessionAlive = false; // 有活动媒体会话时才允许选择沉浸模式
+    bool mediaSessionAlive = false; // 当前是否存在活动媒体会话
     int appBarEdge = 0; // 0 顶部 1 底部
     int immersiveBackgroundBlur = 88;
     int dockBackgroundBlur = 88;

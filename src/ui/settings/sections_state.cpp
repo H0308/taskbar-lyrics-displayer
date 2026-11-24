@@ -84,7 +84,7 @@ void SettingsSections::updateBackgroundAdjustmentPresentation() {
 void SettingsSections::updateImmersiveRowsEnabled() {
     auto* mode = findRow(kIdTaskbarViewMode);
     const int selectedMode = mode ? std::clamp(mode->selected, 0, 2) : 0;
-    const bool immersiveEnabled = state.mediaSessionAlive && !state.verticalTaskbar;
+    const bool immersiveEnabled = !state.verticalTaskbar;
     const bool appBarEnabled = selectedMode == 2;
     const bool expandedEnabled = appBarEnabled || (selectedMode == 1 && immersiveEnabled);
     if (mode) {
@@ -145,7 +145,7 @@ void SettingsSections::updateMediaControlRowsEnabled() {
     const int selectedMode =
         mode ? std::clamp(mode->selected, 0, 2) : std::clamp(state.taskbarViewMode, 0, 2);
     const auto effectiveMode = display_rules::effectiveTaskbarViewMode(
-        static_cast<TaskbarViewMode>(selectedMode), state.mediaSessionAlive, state.verticalTaskbar);
+        static_cast<TaskbarViewMode>(selectedMode), state.verticalTaskbar);
     const bool expandedEnabled = effectiveMode != TaskbarViewMode::Embedded;
     const bool minimal = minimalModeActive();
     auto* controls = findRow(kIdHoverControls);
