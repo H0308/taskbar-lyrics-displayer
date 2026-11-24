@@ -285,6 +285,8 @@ void App::applyMonitorSettingsToAll() {
         profile.immersiveBackgroundAdjustment = source.immersiveBackgroundAdjustment;
         profile.dockBackgroundAdjustment = source.dockBackgroundAdjustment;
         profile.embeddedResourceMonitor = source.embeddedResourceMonitor;
+        profile.dockResourceCpuUsage = source.dockResourceCpuUsage;
+        profile.dockResourceMemoryUsage = source.dockResourceMemoryUsage;
         profile.dockResourceGpuUsage = source.dockResourceGpuUsage;
         profile.dockResourceDownload = source.dockResourceDownload;
         profile.dockResourceUpload = source.dockResourceUpload;

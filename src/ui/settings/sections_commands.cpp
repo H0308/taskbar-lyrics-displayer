@@ -422,8 +422,24 @@ void SettingsSections::onCommand(int id, int option) {
         if (actions.onEmbeddedResourceMonitor)
             actions.onEmbeddedResourceMonitor(row->checked);
         break;
+    case kIdDockResourceCpuUsage:
+        row->checked = !row->checked;
+        state.dockResourceCpuUsage = row->checked;
+        updateImmersiveRowsEnabled();
+        if (actions.onDockResourceCpuUsage)
+            actions.onDockResourceCpuUsage(row->checked);
+        break;
+    case kIdDockResourceMemoryUsage:
+        row->checked = !row->checked;
+        state.dockResourceMemoryUsage = row->checked;
+        updateImmersiveRowsEnabled();
+        if (actions.onDockResourceMemoryUsage)
+            actions.onDockResourceMemoryUsage(row->checked);
+        break;
     case kIdDockResourceGpuUsage:
         row->checked = !row->checked;
+        state.dockResourceGpuUsage = row->checked;
+        updateImmersiveRowsEnabled();
         if (actions.onDockResourceGpuUsage)
             actions.onDockResourceGpuUsage(row->checked);
         break;
@@ -447,17 +463,21 @@ void SettingsSections::onCommand(int id, int option) {
     case kIdDockResourceDownload:
         row->checked = !row->checked;
         state.dockResourceDownload = row->checked;
+        updateImmersiveRowsEnabled();
         if (actions.onDockResourceDownload)
             actions.onDockResourceDownload(row->checked);
         break;
     case kIdDockResourceUpload:
         row->checked = !row->checked;
         state.dockResourceUpload = row->checked;
+        updateImmersiveRowsEnabled();
         if (actions.onDockResourceUpload)
             actions.onDockResourceUpload(row->checked);
         break;
     case kIdDockResourceCpuFrequency:
         row->checked = !row->checked;
+        state.dockResourceCpuFrequency = row->checked;
+        updateImmersiveRowsEnabled();
         if (actions.onDockResourceCpuFrequency)
             actions.onDockResourceCpuFrequency(row->checked);
         break;

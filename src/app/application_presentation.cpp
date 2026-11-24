@@ -179,14 +179,17 @@ void App::refreshIdleWelcome() {
 }
 
 IdleFrameInput App::buildIdleFrameInput(TaskbarViewMode effectiveMode,
-                                        bool embeddedResourceMonitor) const {
+                                        bool embeddedResourceMonitor,
+                                        bool hasResourceMetrics) const {
     IdleFrameInput input;
     input.presentation = idle_.currentIdlePresentation();
     input.summaryActive = idle_.state().startupTaskSummaryActive_;
     input.summaryPending = idle_.state().startupTaskSummaryPending_;
     input.tasksEnabled = idle_.tickTickEffectiveEnabled();
-    input.resourcesVisible = effectiveMode == TaskbarViewMode::AppBar ||
-                             (effectiveMode == TaskbarViewMode::Embedded && embeddedResourceMonitor);
+    input.resourcesVisible =
+        hasResourceMetrics &&
+        (effectiveMode == TaskbarViewMode::AppBar ||
+         (effectiveMode == TaskbarViewMode::Embedded && embeddedResourceMonitor));
     input.keepIdleVisible = effectiveMode == TaskbarViewMode::Immersive;
     if (input.summaryActive)
         input.summaryText = idle_.startupTaskSummaryText();
@@ -202,7 +205,8 @@ const PresentationFrame& App::preparePresentationFrame(const SmtcSnapshot& snap,
     const auto effectiveMode =
         display_rules::effectiveTaskbarViewMode(primaryProfile.viewMode, primaryVertical);
     const IdleFrameInput input =
-        buildIdleFrameInput(effectiveMode, primaryProfile.embeddedResourceMonitor);
+        buildIdleFrameInput(effectiveMode, primaryProfile.embeddedResourceMonitor,
+                            primaryProfile.hasAnyResourceMetric());
     return presentation_.update(snap, settings_, playback_.state(), input, update);
 }
 
@@ -216,7 +220,9 @@ void App::applyPresentationFrameToHost(TaskbarHost* host, const SmtcSnapshot& sn
     const MonitorTaskbarSettings profile = monitorSettingsForHost(host);
     const auto effectiveMode =
         display_rules::effectiveTaskbarViewMode(profile.viewMode, host->isVerticalTaskbar());
-    const IdleFrameInput input = buildIdleFrameInput(effectiveMode, profile.embeddedResourceMonitor);
+    const IdleFrameInput input =
+        buildIdleFrameInput(effectiveMode, profile.embeddedResourceMonitor,
+                            profile.hasAnyResourceMetric());
     host->applyPresentationFrame(presentation_.frameForView(snap, playback_.state(), input));
 }
 

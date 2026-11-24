@@ -307,3 +307,51 @@ TEST_CASE("settings_sections.per_monitor_mode_constraints_and_single_display_gua
     EXPECT_FALSE(viewMode->enabled);
     EXPECT_EQ(viewMode->selected, 2);
 }
+
+TEST_CASE("resource_monitor.zero_metrics_layout_and_settings_guard") {
+    // Dock 模式资源区宽度为 0 时折叠右侧空白并扩展频谱可用边界
+    const auto dockEmpty = expandedSideLayout(1920.0f, true, 0.0f);
+    EXPECT_NEAR(dockEmpty.resourceWidth, 0.0, 1e-4);
+    EXPECT_NEAR(dockEmpty.spectrumRight, 1920.0 - 8.0, 1e-4);
+
+    // 开启资源监视但关闭全部 6 项指标：指标开关仍可点击（不锁死），纯样式项置灰且给出明确提示
+    SettingsSections sections;
+    sections.state.taskbarViewMode = 0;
+    sections.state.embeddedResourceMonitor = true;
+    sections.state.dockResourceCpuUsage = true;
+    sections.state.dockResourceMemoryUsage = true;
+    sections.state.dockResourceDownload = false;
+    sections.state.dockResourceUpload = false;
+    sections.state.dockResourceGpuUsage = false;
+    sections.state.dockResourceCpuFrequency = false;
+    sections.create();
+
+    sections.onCommand(settings_ui::kIdDockResourceCpuUsage);
+    sections.onCommand(settings_ui::kIdDockResourceMemoryUsage);
+
+    const auto* embedded = sections.findRow(settings_ui::kIdEmbeddedResourceMonitor);
+    const auto* cpuRow = sections.findRow(settings_ui::kIdDockResourceCpuUsage);
+    const auto* memRow = sections.findRow(settings_ui::kIdDockResourceMemoryUsage);
+    const auto* placement = sections.findRow(settings_ui::kIdDockResourcePlacement);
+    const auto* smallFont = sections.findRow(settings_ui::kIdDockResourceSmallFont);
+    const auto* hideLabels = sections.findRow(settings_ui::kIdDockResourceHideLabels);
+    EXPECT_TRUE(embedded != nullptr && cpuRow != nullptr && memRow != nullptr &&
+                placement != nullptr && smallFont != nullptr && hideLabels != nullptr);
+    EXPECT_TRUE(embedded->checked);
+    EXPECT_TRUE(embedded->hint.find(L"未开启任何监控项") != std::wstring::npos);
+    EXPECT_FALSE(cpuRow->checked);
+    EXPECT_FALSE(memRow->checked);
+    EXPECT_TRUE(cpuRow->enabled);
+    EXPECT_TRUE(memRow->enabled);
+    EXPECT_FALSE(placement->enabled);
+    EXPECT_FALSE(smallFont->enabled);
+    EXPECT_FALSE(hideLabels->enabled);
+
+    // 重新开启任意一项后立即恢复样式项与常规提示
+    sections.onCommand(settings_ui::kIdDockResourceCpuUsage);
+    EXPECT_TRUE(cpuRow->checked);
+    EXPECT_TRUE(placement->enabled);
+    EXPECT_TRUE(smallFont->enabled);
+    EXPECT_TRUE(hideLabels->enabled);
+    EXPECT_TRUE(embedded->hint.find(L"未开启任何监控项") == std::wstring::npos);
+}

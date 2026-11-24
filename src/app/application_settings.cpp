@@ -327,13 +327,47 @@ void App::applyEmbeddedResourceMonitor(bool on) {
     saveSettings();
 }
 
+void App::applyDockResourceCpuUsage(bool on) {
+    const auto displays = enumerateTaskbarDisplays();
+    const std::wstring targetId = resolveEditingMonitorDeviceName(displays);
+    const bool hadAny = monitorSettingsForDevice(targetId).hasAnyResourceMetric();
+    updateMonitorSettings(targetId, [on](MonitorTaskbarSettings& profile) {
+        profile.dockResourceCpuUsage = on;
+    });
+    const bool hasAny = monitorSettingsForDevice(targetId).hasAnyResourceMetric();
+    applyDockResourceVisibility();
+    if (hadAny != hasAny)
+        publishPresentationFrame(monitor.snapshot(), {.lyricsChanged = true});
+    logSettingBool(L"dock-resource-cpu", on);
+    saveSettings();
+}
+
+void App::applyDockResourceMemoryUsage(bool on) {
+    const auto displays = enumerateTaskbarDisplays();
+    const std::wstring targetId = resolveEditingMonitorDeviceName(displays);
+    const bool hadAny = monitorSettingsForDevice(targetId).hasAnyResourceMetric();
+    updateMonitorSettings(targetId, [on](MonitorTaskbarSettings& profile) {
+        profile.dockResourceMemoryUsage = on;
+    });
+    const bool hasAny = monitorSettingsForDevice(targetId).hasAnyResourceMetric();
+    applyDockResourceVisibility();
+    if (hadAny != hasAny)
+        publishPresentationFrame(monitor.snapshot(), {.lyricsChanged = true});
+    logSettingBool(L"dock-resource-memory", on);
+    saveSettings();
+}
+
 void App::applyDockResourceGpuUsage(bool on) {
     const auto displays = enumerateTaskbarDisplays();
     const std::wstring targetId = resolveEditingMonitorDeviceName(displays);
+    const bool hadAny = monitorSettingsForDevice(targetId).hasAnyResourceMetric();
     updateMonitorSettings(targetId, [on](MonitorTaskbarSettings& profile) {
         profile.dockResourceGpuUsage = on;
     });
+    const bool hasAny = monitorSettingsForDevice(targetId).hasAnyResourceMetric();
     applyDockResourceVisibility();
+    if (hadAny != hasAny)
+        publishPresentationFrame(monitor.snapshot(), {.lyricsChanged = true});
     logSettingBool(L"dock-resource-gpu", on);
     saveSettings();
 }
@@ -341,10 +375,14 @@ void App::applyDockResourceGpuUsage(bool on) {
 void App::applyDockResourceNetwork(bool download, bool on) {
     const auto displays = enumerateTaskbarDisplays();
     const std::wstring targetId = resolveEditingMonitorDeviceName(displays);
+    const bool hadAny = monitorSettingsForDevice(targetId).hasAnyResourceMetric();
     updateMonitorSettings(targetId, [download, on](MonitorTaskbarSettings& profile) {
         (download ? profile.dockResourceDownload : profile.dockResourceUpload) = on;
     });
+    const bool hasAny = monitorSettingsForDevice(targetId).hasAnyResourceMetric();
     applyDockResourceVisibility();
+    if (hadAny != hasAny)
+        publishPresentationFrame(monitor.snapshot(), {.lyricsChanged = true});
     logSettingBool(download ? L"dock-resource-download" : L"dock-resource-upload", on);
     saveSettings();
 }
@@ -352,10 +390,14 @@ void App::applyDockResourceNetwork(bool download, bool on) {
 void App::applyDockResourceCpuFrequency(bool on) {
     const auto displays = enumerateTaskbarDisplays();
     const std::wstring targetId = resolveEditingMonitorDeviceName(displays);
+    const bool hadAny = monitorSettingsForDevice(targetId).hasAnyResourceMetric();
     updateMonitorSettings(targetId, [on](MonitorTaskbarSettings& profile) {
         profile.dockResourceCpuFrequency = on;
     });
+    const bool hasAny = monitorSettingsForDevice(targetId).hasAnyResourceMetric();
     applyDockResourceVisibility();
+    if (hadAny != hasAny)
+        publishPresentationFrame(monitor.snapshot(), {.lyricsChanged = true});
     logSettingBool(L"dock-resource-cpu-frequency", on);
     saveSettings();
 }
@@ -1451,6 +1493,8 @@ SettingsState App::currentSettingsState() const {
     st.backgroundBlurSupported = editingHost ? editingHost->backgroundBlurAvailable()
                                              : (!taskbarHost || taskbarHost->backgroundBlurAvailable());
     st.embeddedResourceMonitor = editingProfile.embeddedResourceMonitor;
+    st.dockResourceCpuUsage = editingProfile.dockResourceCpuUsage;
+    st.dockResourceMemoryUsage = editingProfile.dockResourceMemoryUsage;
     st.dockResourceGpuUsage = editingProfile.dockResourceGpuUsage;
     st.dockResourceDownload = editingProfile.dockResourceDownload;
     st.dockResourceUpload = editingProfile.dockResourceUpload;
@@ -1595,6 +1639,8 @@ SettingsActions App::buildSettingsActions() {
     };
     act.onDockBackgroundAdjustment = [this](int mode) { applyDockBackgroundAdjustment(mode); };
     act.onEmbeddedResourceMonitor = [this](bool on) { applyEmbeddedResourceMonitor(on); };
+    act.onDockResourceCpuUsage = [this](bool on) { applyDockResourceCpuUsage(on); };
+    act.onDockResourceMemoryUsage = [this](bool on) { applyDockResourceMemoryUsage(on); };
     act.onDockResourceGpuUsage = [this](bool on) { applyDockResourceGpuUsage(on); };
     act.onDockResourceDownload = [this](bool on) { applyDockResourceNetwork(true, on); };
     act.onDockResourceUpload = [this](bool on) { applyDockResourceNetwork(false, on); };

@@ -24,6 +24,8 @@ float ResourcePanel::columnGap() const {
 }
 
 float ResourcePanel::width() const {
+    if (!dockResourceVisibility_.hasAnyMetric())
+        return 0.0f;
     const float gap = columnGap();
     if (compact_) {
         float width = 0.0f;
@@ -43,7 +45,11 @@ float ResourcePanel::width() const {
 }
 
 std::vector<ResourcePanel::Reading> ResourcePanel::readings() const {
-    std::vector<Reading> result{{L"CPU", resourceCpuText_}, {L"内存", resourceMemoryText_}};
+    std::vector<Reading> result;
+    if (dockResourceVisibility_.cpuUsage)
+        result.push_back({L"CPU", resourceCpuText_});
+    if (dockResourceVisibility_.memoryUsage)
+        result.push_back({L"内存", resourceMemoryText_});
     if (dockResourceVisibility_.upload)
         result.push_back({L"上行", resourceUploadText_});
     if (dockResourceVisibility_.download)
@@ -95,15 +101,20 @@ float ResourcePanel::verticalAvailableWidth(float width) {
 }
 
 float ResourcePanel::verticalHeight(float width) const {
+    const size_t count = readings().size();
+    if (count == 0)
+        return 0.0f;
     const float available = verticalAvailableWidth(width);
     if (verticalLineHeight_ <= 0.0f || available < verticalMinWidth_)
         return 0.0f;
+    const size_t items = std::min<size_t>(2, count);
+    const float gaps = items > 1 ? kVerticalResourceGroupGap : 0.0f;
     if (dockResourceVisibility_.hideLabels)
-        return 2.0f * verticalLineHeight_ + kVerticalResourceGroupGap;
+        return static_cast<float>(items) * verticalLineHeight_ + gaps;
     if (available < verticalInlineWidth_)
-        return 2.0f * (2.0f * verticalLineHeight_ + kVerticalResourceLabelGap) +
-               kVerticalResourceGroupGap;
-    return 2.0f * verticalLineHeight_;
+        return static_cast<float>(items) * (2.0f * verticalLineHeight_ + kVerticalResourceLabelGap) +
+               gaps;
+    return static_cast<float>(items) * verticalLineHeight_;
 }
 
 void ResourcePanel::drawVertical(ID2D1DeviceContext* rt, IDWriteTextFormat* format,
@@ -112,6 +123,8 @@ void ResourcePanel::drawVertical(ID2D1DeviceContext* rt, IDWriteTextFormat* form
         return;
 
     const auto values = readings();
+    if (values.empty())
+        return;
     const size_t first = std::min(dockResourcePage_, (values.size() - 1) / 2) * 2;
     const bool hideLabels = dockResourceVisibility_.hideLabels;
     const bool stacked =
@@ -294,6 +307,8 @@ void ResourcePanel::draw(ID2D1DeviceContext* rt, IDWriteTextFormat* format, ID2D
 
     const auto rows = ResourcePanel::rows();
     const size_t pageCount = compact_ ? rows.size() : rows.size() / 2;
+    if (rows.empty() || pageCount == 0)
+        return;
     const size_t page = std::min(dockResourcePage_, pageCount - 1);
     const float gap = columnGap();
     const bool hideLabels = dockResourceVisibility_.hideLabels;
@@ -345,6 +360,8 @@ void ResourcePanel::draw(ID2D1DeviceContext* rt, IDWriteTextFormat* format, ID2D
         return;
     }
 
+    if (resourcePageColumnWidths_.empty())
+        return;
     std::array<DockResourceRow, 2> visibleRows{};
     visibleRows[0] = rows[page * 2];
     visibleRows[1] = rows[page * 2 + 1];
@@ -361,9 +378,12 @@ void ResourcePanel::draw(ID2D1DeviceContext* rt, IDWriteTextFormat* format, ID2D
                                                    ? D2D1_DRAW_TEXT_OPTIONS_NONE
                                                    : D2D1_DRAW_TEXT_OPTIONS_CLIP;
 
-    for (size_t row = 0; row < visibleRows.size(); ++row) {
+    const bool singleRow =
+        visibleRows[1].left.value.empty() && visibleRows[1].left.label.empty() &&
+        visibleRows[1].right.value.empty() && visibleRows[1].right.label.empty();
+    for (size_t row = 0; row < (singleRow ? 1u : visibleRows.size()); ++row) {
         const auto& current = visibleRows[row];
-        const float rowTop = top + row * rowH;
+        const float rowTop = singleRow ? top + (blockH - rowH) * 0.5f : top + row * rowH;
         if (current.right.value.empty() && current.right.label.empty()) {
             drawCell(current.left, x, rowTop, width, rowH, drawOptions);
         } else {
@@ -420,6 +440,8 @@ ResourcePanel::ColumnMetrics ResourcePanel::measureColumnMetrics(IDWriteFactory*
     const std::wstring decimalDigits = twoDigits + L"." + singleDigit;
 
     const auto values = readings();
+    if (values.empty())
+        return result;
     float verticalInlineWidth = 0.0f;
     float verticalStackedWidth = 0.0f;
     float verticalMinWidth = 0.0f;
@@ -457,8 +479,10 @@ ResourcePanel::ColumnMetrics ResourcePanel::measureColumnMetrics(IDWriteFactory*
         }
         ++cellIndex;
     };
-    measureCell({L"100%", twoDigits + L"%"});
-    measureCell({L"100%", twoDigits + L"%"});
+    if (dockResourceVisibility_.cpuUsage)
+        measureCell({L"100%", twoDigits + L"%"});
+    if (dockResourceVisibility_.memoryUsage)
+        measureCell({L"100%", twoDigits + L"%"});
     static constexpr const wchar_t* rateUnits[] = {L"B/s", L"KB/s", L"MB/s", L"GB/s", L"TB/s"};
     auto measureRate = [&] {
         std::vector<std::wstring> samples;

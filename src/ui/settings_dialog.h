@@ -54,6 +54,8 @@ struct SettingsState {
     int dockBackgroundAdjustment = 0; // 0 模糊程度 1 不透明度
     bool backgroundBlurSupported = true;
     bool embeddedResourceMonitor = false;
+    bool dockResourceCpuUsage = true;
+    bool dockResourceMemoryUsage = true;
     bool dockResourceGpuUsage = false;
     bool dockResourceSmallFont = false; // 性能监测用小一号字，块与块更紧凑
     bool dockResourceHideLabels = false; // 隐藏指标标签，常态仅显示数值，翻页或悬停时短暂提示
@@ -161,6 +163,8 @@ struct SettingsActions {
     std::function<void(int)> onImmersiveBackgroundAdjustment;
     std::function<void(int)> onDockBackgroundAdjustment;
     std::function<void(bool)> onEmbeddedResourceMonitor;
+    std::function<void(bool)> onDockResourceCpuUsage;
+    std::function<void(bool)> onDockResourceMemoryUsage;
     std::function<void(bool)> onDockResourceGpuUsage;
     std::function<void(bool)> onDockResourceSmallFont;
     std::function<void(bool)> onDockResourceHideLabels;

@@ -60,11 +60,13 @@ TaskbarAppearance resolveTaskbarAppearance(const AppSettings& settings,
     result.dockBackgroundBlur =
         monitor ? monitor->dockBackgroundBlur : settings.dockBackgroundBlur_;
     result.dockResourceVisibility = monitor
-        ? DockResourceVisibility{monitor->embeddedResourceMonitor, monitor->dockResourceDownload,
+        ? DockResourceVisibility{monitor->embeddedResourceMonitor, monitor->dockResourceCpuUsage,
+                                 monitor->dockResourceMemoryUsage, monitor->dockResourceDownload,
                                  monitor->dockResourceUpload, monitor->dockResourceGpuUsage,
                                  monitor->dockResourceCpuFrequency, monitor->dockResourceSmallFont,
                                  monitor->dockResourceHideLabels, monitor->dockResourcePlacement}
-        : DockResourceVisibility{settings.embeddedResourceMonitor_, settings.dockResourceDownload_,
+        : DockResourceVisibility{settings.embeddedResourceMonitor_, settings.dockResourceCpuUsage_,
+                                 settings.dockResourceMemoryUsage_, settings.dockResourceDownload_,
                                  settings.dockResourceUpload_, settings.dockResourceGpuUsage_,
                                  settings.dockResourceCpuFrequency_, settings.dockResourceSmallFont_,
                                  settings.dockResourceHideLabels_, settings.dockResourcePlacement_};

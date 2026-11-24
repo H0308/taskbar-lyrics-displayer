@@ -432,6 +432,10 @@ private:
 
     void applyEmbeddedResourceMonitor(bool on);
 
+    void applyDockResourceCpuUsage(bool on);
+
+    void applyDockResourceMemoryUsage(bool on);
+
     void applyDockResourceGpuUsage(bool on);
 
     void applyDockResourceNetwork(bool download, bool on);
@@ -604,7 +608,8 @@ private:
     void pickIdleApp();
 
     IdleFrameInput buildIdleFrameInput(TaskbarViewMode effectiveMode,
-                                       bool embeddedResourceMonitor) const;
+                                       bool embeddedResourceMonitor,
+                                       bool hasResourceMetrics) const;
 
     const PresentationFrame& preparePresentationFrame(const SmtcSnapshot& snap,
                                                       PresentationUpdate update);

@@ -305,6 +305,8 @@ TEST_CASE("app_settings.per_monitor_profiles_and_appearance_override") {
     disp2.appBarEdge = AppBarEdge::Bottom;
     disp2.dockBackgroundAdjustment = 1;
     disp2.dockBackgroundBlur = 55;
+    disp2.dockResourceCpuUsage = false;
+    disp2.dockResourceMemoryUsage = false;
     disp2.dockResourceDownload = false;
     disp2.dockResourceCpuFrequency = true;
 
@@ -320,6 +322,8 @@ TEST_CASE("app_settings.per_monitor_profiles_and_appearance_override") {
     EXPECT_EQ(loadedDisp1.taskbarPosition, 2);
     EXPECT_TRUE(loadedDisp1.embeddedResourceMonitor);
     EXPECT_EQ(loadedDisp1.dockResourcePlacement, ResourcePlacement::Start);
+    EXPECT_TRUE(loadedDisp1.dockResourceCpuUsage);
+    EXPECT_TRUE(loadedDisp1.dockResourceMemoryUsage);
     EXPECT_TRUE(loadedDisp1.dockResourceGpuUsage);
 
     const auto loadedDisp2 = loaded.monitorTaskbarSettingsFor(L"\\\\.\\DISPLAY2", false);
@@ -328,6 +332,8 @@ TEST_CASE("app_settings.per_monitor_profiles_and_appearance_override") {
     EXPECT_EQ(loadedDisp2.appBarEdge, AppBarEdge::Bottom);
     EXPECT_EQ(loadedDisp2.dockBackgroundAdjustment, 1);
     EXPECT_EQ(loadedDisp2.dockBackgroundBlur, 55);
+    EXPECT_FALSE(loadedDisp2.dockResourceCpuUsage);
+    EXPECT_FALSE(loadedDisp2.dockResourceMemoryUsage);
     EXPECT_FALSE(loadedDisp2.dockResourceDownload);
     EXPECT_TRUE(loadedDisp2.dockResourceCpuFrequency);
 
@@ -336,6 +342,9 @@ TEST_CASE("app_settings.per_monitor_profiles_and_appearance_override") {
     ctx1.monitorSettings = &loadedDisp1;
     const auto app1 = resolveTaskbarAppearance(loaded, ctx1);
     EXPECT_TRUE(app1.dockResourceVisibility.embeddedEnabled);
+    EXPECT_TRUE(app1.dockResourceVisibility.cpuUsage);
+    EXPECT_TRUE(app1.dockResourceVisibility.memoryUsage);
+    EXPECT_TRUE(app1.dockResourceVisibility.hasAnyMetric());
     EXPECT_EQ(app1.dockResourceVisibility.placement, ResourcePlacement::Start);
     EXPECT_TRUE(app1.dockResourceVisibility.gpuUsage);
 
@@ -344,6 +353,20 @@ TEST_CASE("app_settings.per_monitor_profiles_and_appearance_override") {
     const auto app2 = resolveTaskbarAppearance(loaded, ctx2);
     EXPECT_EQ(app2.dockBackgroundAdjustment, 1);
     EXPECT_EQ(app2.dockBackgroundBlur, 55);
+    EXPECT_FALSE(app2.dockResourceVisibility.cpuUsage);
+    EXPECT_FALSE(app2.dockResourceVisibility.memoryUsage);
     EXPECT_FALSE(app2.dockResourceVisibility.download);
     EXPECT_TRUE(app2.dockResourceVisibility.cpuFrequency);
+    EXPECT_TRUE(app2.dockResourceVisibility.hasAnyMetric());
+
+    // 全部 6 项监控指标关闭时，hasAnyMetric 返回 false
+    DockResourceVisibility emptyMetrics{};
+    emptyMetrics.embeddedEnabled = true;
+    emptyMetrics.cpuUsage = false;
+    emptyMetrics.memoryUsage = false;
+    emptyMetrics.download = false;
+    emptyMetrics.upload = false;
+    emptyMetrics.gpuUsage = false;
+    emptyMetrics.cpuFrequency = false;
+    EXPECT_FALSE(emptyMetrics.hasAnyMetric());
 }

@@ -125,9 +125,11 @@ enum class ResourcePlacement {
     End,
 };
 
-// 复用 Dock 资源区；CPU、内存为基础指标，其余指标按开关紧凑排列。
+// 复用 Dock 资源区；所有监控项均可独立开关，按启用顺序紧凑排列。
 struct DockResourceVisibility {
     bool embeddedEnabled = false;
+    bool cpuUsage = true;
+    bool memoryUsage = true;
     bool download = true;
     bool upload = true;
     bool gpuUsage = false;
@@ -135,6 +137,9 @@ struct DockResourceVisibility {
     bool smallFont = false; // 性能监测用小一号字，块与块之间更紧凑
     bool hideLabels = false; // 隐藏指标标签，常态仅显示数值，翻页或悬停时短暂提示
     ResourcePlacement placement = ResourcePlacement::End; // 仅内嵌模式生效，Dock 固定在右侧
+    constexpr bool hasAnyMetric() const noexcept {
+        return cpuUsage || memoryUsage || download || upload || gpuUsage || cpuFrequency;
+    }
     bool operator==(const DockResourceVisibility&) const = default;
 };
 

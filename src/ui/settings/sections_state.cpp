@@ -148,12 +148,27 @@ void SettingsSections::updateImmersiveRowsEnabled() {
     }
     updateBackgroundAdjustmentPresentation();
     const bool embeddedResources = monitorActive && hasTaskbar && selectedMode == 0;
-    if (auto* row = findRow(kIdEmbeddedResourceMonitor))
-        row->enabled = embeddedResources;
-    if (auto* row = findRow(kIdDockResourcePlacement))
-        row->enabled = embeddedResources && state.embeddedResourceMonitor;
     const bool resourceExtrasEnabled =
         appBarEnabled || (embeddedResources && state.embeddedResourceMonitor);
+    const bool anyResourceMetric = state.dockResourceCpuUsage || state.dockResourceMemoryUsage ||
+                                   state.dockResourceDownload || state.dockResourceUpload ||
+                                   state.dockResourceGpuUsage || state.dockResourceCpuFrequency;
+    if (auto* row = findRow(kIdEmbeddedResourceMonitor)) {
+        row->enabled = embeddedResources;
+        row->hint =
+            (resourceExtrasEnabled && !anyResourceMetric)
+                ? (appBarEnabled
+                       ? L"Dock 模式下当前未开启任何监控项，右侧暂不显示资源监视且不进行采样；请至少开启下方一项。"
+                       : L"当前未开启任何监控项，任务栏暂不显示资源监视且不进行采样；请至少开启下方一项。")
+                : L"仅内嵌模式生效。按下方已开启的监控项顺序显示，多页可用滚轮切换。";
+        row->showHint = true;
+    }
+    if (auto* row = findRow(kIdDockResourcePlacement))
+        row->enabled = embeddedResources && state.embeddedResourceMonitor && anyResourceMetric;
+    if (auto* row = findRow(kIdDockResourceCpuUsage))
+        row->enabled = resourceExtrasEnabled;
+    if (auto* row = findRow(kIdDockResourceMemoryUsage))
+        row->enabled = resourceExtrasEnabled;
     if (auto* row = findRow(kIdDockResourceDownload))
         row->enabled = resourceExtrasEnabled;
     if (auto* row = findRow(kIdDockResourceUpload))
@@ -163,9 +178,9 @@ void SettingsSections::updateImmersiveRowsEnabled() {
     if (auto* row = findRow(kIdDockResourceCpuFrequency))
         row->enabled = resourceExtrasEnabled;
     if (auto* row = findRow(kIdDockResourceSmallFont))
-        row->enabled = resourceExtrasEnabled;
+        row->enabled = resourceExtrasEnabled && anyResourceMetric;
     if (auto* row = findRow(kIdDockResourceHideLabels))
-        row->enabled = resourceExtrasEnabled;
+        row->enabled = resourceExtrasEnabled && anyResourceMetric;
     updateMediaControlRowsEnabled();
     if (auto* row = findRow(kIdAlignment))
         row->enabled = state.anyHorizontalEmbeddedHostActive;
@@ -357,6 +372,10 @@ void SettingsSections::syncTaskbarModeRows(const SettingsState& s) {
                                 : std::vector<std::wstring>{L"左侧", L"右侧"};
         row->selected = std::clamp(s.dockResourcePlacement, 0, 1);
     }
+    if (auto* row = findRow(kIdDockResourceCpuUsage))
+        row->checked = s.dockResourceCpuUsage;
+    if (auto* row = findRow(kIdDockResourceMemoryUsage))
+        row->checked = s.dockResourceMemoryUsage;
     if (auto* row = findRow(kIdDockResourceDownload))
         row->checked = s.dockResourceDownload;
     if (auto* row = findRow(kIdDockResourceUpload))

@@ -834,13 +834,15 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     bool isAppBarView() const { return viewMode_ == TaskbarViewMode::AppBar; }
 
     bool resourceMonitoringEnabled() const {
-        return isAppBarView() || (viewMode_ == TaskbarViewMode::Embedded &&
-                                  resourcePanel_.visibility().embeddedEnabled);
+        return resourcePanel_.visibility().hasAnyMetric() &&
+               (isAppBarView() || (viewMode_ == TaskbarViewMode::Embedded &&
+                                   resourcePanel_.visibility().embeddedEnabled));
     }
 
     bool embeddedResourceVisible() const {
         return viewMode_ == TaskbarViewMode::Embedded &&
-               resourcePanel_.visibility().embeddedEnabled && !isVerticalTaskbar();
+               resourcePanel_.visibility().embeddedEnabled &&
+               resourcePanel_.visibility().hasAnyMetric() && !isVerticalTaskbar();
     }
 
     bool embeddedResourceAtStart() const {
@@ -854,7 +856,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
     bool verticalResourceVisible() const {
         return viewMode_ == TaskbarViewMode::Embedded &&
-               resourcePanel_.visibility().embeddedEnabled && isVerticalTaskbar();
+               resourcePanel_.visibility().embeddedEnabled &&
+               resourcePanel_.visibility().hasAnyMetric() && isVerticalTaskbar();
     }
 
     bool verticalResourceOnly() const {
@@ -2706,14 +2709,14 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     void setDockResourceVisibility(const DockResourceVisibility& visibility) {
         if (resourcePanel_.visibility() == visibility)
             return;
-        const bool embeddedChanged =
-            resourcePanel_.visibility().embeddedEnabled != visibility.embeddedEnabled;
+        const bool wasMonitoring = resourceMonitoringEnabled();
         const bool fontChanged = resourcePanel_.visibility().smallFont != visibility.smallFont;
         const bool hideLabelsChanged =
             resourcePanel_.visibility().hideLabels != visibility.hideLabels;
         const bool placementChanged = resourcePanel_.visibility().placement != visibility.placement;
         resourcePanel_.setVisibility(visibility);
-        if (visibility.hideLabels && (isAppBarView() || visibility.embeddedEnabled))
+        const bool nowMonitoring = resourceMonitoringEnabled();
+        if (visibility.hideLabels && nowMonitoring)
             resourcePanel_.triggerTransientLabels(monotonicNowMs());
         if (placementChanged) {
             resetLyricTransition();
@@ -2723,8 +2726,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
             recreateResourceFormat(); // 字号、标签显示或竖向窄栏拟合依赖已启用指标，必须清缓存重建
         else
             updateResourceColumnWidths();
-        if (embeddedChanged && viewMode_ == TaskbarViewMode::Embedded && hwnd) {
-            if (visibility.embeddedEnabled && !isStoppedMode())
+        if (wasMonitoring != nowMonitoring && hwnd) {
+            if (nowMonitoring && !isStoppedMode())
                 startResourceMonitoring();
             else
                 stopResourceMonitoring();
@@ -3144,7 +3147,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     size_t dockResourcePageCount() const { return resourcePanel_.pageCount(); }
 
     float dockResourceZoneW(float hostW) const {
-        if (!isAppBarView() || hostW <= 0.0f)
+        if (!isAppBarView() || !resourcePanel_.visibility().hasAnyMetric() || hostW <= 0.0f)
             return 0.0f;
         return std::min(resourceZoneWidth(), std::max(1.0f, hostW - kDockResourceRightPadding));
     }
@@ -3215,10 +3218,12 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         // 沉浸模式的最右侧始终保留给频谱和时钟；关闭频谱只隐藏其可视内容，
         // 不让歌词安全区或居中效果跟着变化。
         if (horizontalImmersiveMode()) {
-            const float rightPadding = isAppBarView() ? kDockResourceRightPadding : kTextPadding;
+            const float dockResW = dockResourceZoneW(hostW);
+            const float rightPadding =
+                (isAppBarView() && dockResW > 0.0f) ? kDockResourceRightPadding : kTextPadding;
             float extra = immersiveSpectrumZoneW(hostW) + rightPadding;
-            if (isAppBarView())
-                extra += dockResourceZoneW(hostW) + kDockResourceZoneGap;
+            if (isAppBarView() && dockResW > 0.0f)
+                extra += dockResW + kDockResourceZoneGap;
             return extra;
         }
         if (scene == DisplayScene::Idle || !spectrumVisible_ || backgroundWaveEnabled() ||
@@ -3451,7 +3456,10 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (!horizontalImmersiveMode())
             return w - kTextPadding - embeddedResourceRightExtra();
         if (isAppBarView()) {
-            return w - dockResourceZoneW(w) - kDockResourceRightPadding - kDockResourceZoneGap;
+            const float dockResW = dockResourceZoneW(w);
+            return dockResW > 0.0f
+                       ? w - dockResW - kDockResourceRightPadding - kDockResourceZoneGap
+                       : w - kTextPadding;
         }
         return w - immersiveClockZoneW(w) - kImmersiveSpectrumClockGap - kTextPadding;
     }

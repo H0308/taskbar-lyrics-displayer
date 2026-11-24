@@ -146,7 +146,7 @@ void SettingsSections::createTaskbarModeRows() {
     addHeader(kTaskbarModePage, L"资源监视");
     Row& embeddedResources = addRow(
         kTaskbarModePage, kIdEmbeddedResourceMonitor, ControlKind::Toggle, L"内嵌模式显示资源监视",
-        L"仅内嵌模式生效。首页优先显示 CPU 和内存，多页可用滚轮切换。",
+        L"仅内嵌模式生效。按下方已开启的监控项顺序显示，多页可用滚轮切换。",
         40.0f, kRowTallH);
     embeddedResources.checked = state.embeddedResourceMonitor;
     embeddedResources.enabled = monitorActive && state.taskbarViewMode == 0;
@@ -155,6 +155,14 @@ void SettingsSections::createTaskbarModeRows() {
                       : std::vector<std::wstring>{L"左侧", L"右侧"},
              std::clamp(state.dockResourcePlacement, 0, 1),
              monitorActive && state.taskbarViewMode == 0 && state.embeddedResourceMonitor, kRowH);
+    Row& cpuUsage =
+        addRow(kTaskbarModePage, kIdDockResourceCpuUsage, ControlKind::Toggle, L"显示 CPU 使用率",
+               L"示例：CPU: 12%。", 40.0f, kRowTallH);
+    cpuUsage.checked = state.dockResourceCpuUsage;
+    Row& memoryUsage =
+        addRow(kTaskbarModePage, kIdDockResourceMemoryUsage, ControlKind::Toggle, L"显示内存使用率",
+               L"示例：内存: 48%。", 40.0f, kRowTallH);
+    memoryUsage.checked = state.dockResourceMemoryUsage;
     Row& upload =
         addRow(kTaskbarModePage, kIdDockResourceUpload, ControlKind::Toggle, L"显示上行速度",
                nullptr, 40.0f, kRowTallH);

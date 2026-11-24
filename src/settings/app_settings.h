@@ -21,6 +21,8 @@ struct MonitorTaskbarSettings {
     int immersiveBackgroundAdjustment = 0;
     int dockBackgroundAdjustment = 0;
     bool embeddedResourceMonitor = false;
+    bool dockResourceCpuUsage = true;
+    bool dockResourceMemoryUsage = true;
     bool dockResourceGpuUsage = false;
     bool dockResourceDownload = true;
     bool dockResourceUpload = true;
@@ -29,6 +31,10 @@ struct MonitorTaskbarSettings {
     bool dockResourceHideLabels = false;
     ResourcePlacement dockResourcePlacement = ResourcePlacement::End;
 
+    constexpr bool hasAnyResourceMetric() const noexcept {
+        return dockResourceCpuUsage || dockResourceMemoryUsage || dockResourceDownload ||
+               dockResourceUpload || dockResourceGpuUsage || dockResourceCpuFrequency;
+    }
     TaskbarAnchorSpec anchor() const;
     void setAnchor(const TaskbarAnchorSpec& value);
     bool operator==(const MonitorTaskbarSettings&) const = default;
@@ -85,6 +91,8 @@ struct AppSettings {
     int immersiveBackgroundAdjustment_ = 0;
     int dockBackgroundAdjustment_ = 0;
     bool embeddedResourceMonitor_ = false;
+    bool dockResourceCpuUsage_ = true;
+    bool dockResourceMemoryUsage_ = true;
     bool dockResourceGpuUsage_ = false;
     bool dockResourceDownload_ = true;
     bool dockResourceUpload_ = true;

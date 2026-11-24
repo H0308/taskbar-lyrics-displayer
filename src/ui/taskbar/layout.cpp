@@ -309,14 +309,17 @@ float expandedClockWidth(float hostWidth) {
 
 ExpandedSideLayout expandedSideLayout(float w, bool dock, float resourceWidth) {
     ExpandedSideLayout result;
+    const bool dockHasResource = dock && resourceWidth > 0.0f;
     result.zoneWidth = expandedSpectrumWidth(w);
-    result.resourceWidth = dock ? resourceWidth : 0.0f;
-    result.resourceX = w - result.resourceWidth - (dock ? 3.0f : kTextPadding);
-    result.zoneX =
-        dock ? result.resourceX - 10.0f - result.zoneWidth : w - result.zoneWidth - kTextPadding;
+    result.resourceWidth = dockHasResource ? resourceWidth : 0.0f;
+    result.resourceX = w - result.resourceWidth - (dockHasResource ? 3.0f : kTextPadding);
+    result.zoneX = dockHasResource ? result.resourceX - 10.0f - result.zoneWidth
+                                   : w - result.zoneWidth - kTextPadding;
     result.clockWidth = dock ? 0.0f : std::min(result.zoneWidth, expandedClockWidth(w));
     result.clockX = w - result.clockWidth - kTextPadding;
-    result.spectrumRight = dock ? result.resourceX - 10.0f : result.clockX - 10.0f;
+    result.spectrumRight = dockHasResource ? result.resourceX - 10.0f
+                         : dock            ? w - kTextPadding
+                                           : result.clockX - 10.0f;
     result.spectrumWidth = std::max(0.0f, result.spectrumRight - result.zoneX);
     return result;
 }

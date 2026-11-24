@@ -309,6 +309,8 @@ MonitorTaskbarSettings AppSettings::defaultMonitorTaskbarSettings(const std::wst
     profile.immersiveBackgroundAdjustment = immersiveBackgroundAdjustment_;
     profile.dockBackgroundAdjustment = dockBackgroundAdjustment_;
     profile.embeddedResourceMonitor = embeddedResourceMonitor_;
+    profile.dockResourceCpuUsage = dockResourceCpuUsage_;
+    profile.dockResourceMemoryUsage = dockResourceMemoryUsage_;
     profile.dockResourceGpuUsage = dockResourceGpuUsage_;
     profile.dockResourceDownload = dockResourceDownload_;
     profile.dockResourceUpload = dockResourceUpload_;
@@ -351,6 +353,8 @@ void AppSettings::syncLegacyTaskbarFieldsFromMonitor(const MonitorTaskbarSetting
     immersiveBackgroundAdjustment_ = profile.immersiveBackgroundAdjustment;
     dockBackgroundAdjustment_ = profile.dockBackgroundAdjustment;
     embeddedResourceMonitor_ = profile.embeddedResourceMonitor;
+    dockResourceCpuUsage_ = profile.dockResourceCpuUsage;
+    dockResourceMemoryUsage_ = profile.dockResourceMemoryUsage;
     dockResourceGpuUsage_ = profile.dockResourceGpuUsage;
     dockResourceDownload_ = profile.dockResourceDownload;
     dockResourceUpload_ = profile.dockResourceUpload;
@@ -461,6 +465,8 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
     dockResourceHideLabels_ = j.value("dockResourceHideLabels", false);
     dockResourcePlacement_ =
         j.value("dockResourcePlacement", 1) == 0 ? ResourcePlacement::Start : ResourcePlacement::End;
+    dockResourceCpuUsage_ = j.value("dockResourceCpu", true);
+    dockResourceMemoryUsage_ = j.value("dockResourceMemory", true);
     dockResourceGpuUsage_ = j.value("dockResourceGpu", false);
     dockResourceDownload_ = j.value("dockResourceDownload", true);
     dockResourceUpload_ = j.value("dockResourceUpload", true);
@@ -516,6 +522,9 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
                             dockResourcePlacement_ == ResourcePlacement::Start ? 0 : 1) == 0
                     ? ResourcePlacement::Start
                     : ResourcePlacement::End;
+            profile.dockResourceCpuUsage = entry.value("dockResourceCpu", dockResourceCpuUsage_);
+            profile.dockResourceMemoryUsage =
+                entry.value("dockResourceMemory", dockResourceMemoryUsage_);
             profile.dockResourceGpuUsage = entry.value("dockResourceGpu", dockResourceGpuUsage_);
             profile.dockResourceDownload =
                 entry.value("dockResourceDownload", dockResourceDownload_);
@@ -805,6 +814,8 @@ nlohmann::json AppSettings::toJson() const {
     j["dockResourceSmallFont"] = dockResourceSmallFont_;
     j["dockResourceHideLabels"] = dockResourceHideLabels_;
     j["dockResourcePlacement"] = dockResourcePlacement_ == ResourcePlacement::Start ? 0 : 1;
+    j["dockResourceCpu"] = dockResourceCpuUsage_;
+    j["dockResourceMemory"] = dockResourceMemoryUsage_;
     j["dockResourceGpu"] = dockResourceGpuUsage_;
     j["dockResourceDownload"] = dockResourceDownload_;
     j["dockResourceUpload"] = dockResourceUpload_;
@@ -832,6 +843,8 @@ nlohmann::json AppSettings::toJson() const {
                 {"dockResourceHideLabels", profile.dockResourceHideLabels},
                 {"dockResourcePlacement",
                  profile.dockResourcePlacement == ResourcePlacement::Start ? 0 : 1},
+                {"dockResourceCpu", profile.dockResourceCpuUsage},
+                {"dockResourceMemory", profile.dockResourceMemoryUsage},
                 {"dockResourceGpu", profile.dockResourceGpuUsage},
                 {"dockResourceDownload", profile.dockResourceDownload},
                 {"dockResourceUpload", profile.dockResourceUpload},
