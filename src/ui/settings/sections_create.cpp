@@ -131,14 +131,14 @@ void SettingsSections::createTaskbarModeRows() {
                       : std::vector<std::wstring>{L"左侧", L"右侧"},
              std::clamp(state.dockResourcePlacement, 0, 1),
              state.taskbarViewMode == 0 && state.embeddedResourceMonitor, kRowH);
-    Row& download =
-        addRow(kTaskbarModePage, kIdDockResourceDownload, ControlKind::Toggle, L"显示下行速度",
-               nullptr, 40.0f, kRowTallH);
-    download.checked = state.dockResourceDownload;
     Row& upload =
         addRow(kTaskbarModePage, kIdDockResourceUpload, ControlKind::Toggle, L"显示上行速度",
                nullptr, 40.0f, kRowTallH);
     upload.checked = state.dockResourceUpload;
+    Row& download =
+        addRow(kTaskbarModePage, kIdDockResourceDownload, ControlKind::Toggle, L"显示下行速度",
+               nullptr, 40.0f, kRowTallH);
+    download.checked = state.dockResourceDownload;
     Row& dockResourceGpu =
         addRow(kTaskbarModePage, kIdDockResourceGpuUsage, ControlKind::Toggle, L"显示 GPU 使用率",
                L"示例：GPU: 7%；没有可用 GPU 性能计数器时显示“—”。", 40.0f, kRowTallH);

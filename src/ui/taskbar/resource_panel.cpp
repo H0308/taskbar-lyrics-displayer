@@ -44,10 +44,10 @@ float ResourcePanel::width() const {
 
 std::vector<ResourcePanel::Reading> ResourcePanel::readings() const {
     std::vector<Reading> result{{L"CPU", resourceCpuText_}, {L"内存", resourceMemoryText_}};
-    if (dockResourceVisibility_.download)
-        result.push_back({L"下行", resourceDownloadText_});
     if (dockResourceVisibility_.upload)
         result.push_back({L"上行", resourceUploadText_});
+    if (dockResourceVisibility_.download)
+        result.push_back({L"下行", resourceDownloadText_});
     if (dockResourceVisibility_.gpuUsage)
         result.push_back({L"GPU", resourceGpuText_});
     if (dockResourceVisibility_.cpuFrequency)
@@ -469,9 +469,9 @@ ResourcePanel::ColumnMetrics ResourcePanel::measureColumnMetrics(IDWriteFactory*
         }
         measureCell(samples);
     };
-    if (dockResourceVisibility_.download)
-        measureRate();
     if (dockResourceVisibility_.upload)
+        measureRate();
+    if (dockResourceVisibility_.download)
         measureRate();
     if (dockResourceVisibility_.gpuUsage)
         measureCell({L"100%", twoDigits + L"%"});
