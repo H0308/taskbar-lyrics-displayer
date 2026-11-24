@@ -138,6 +138,8 @@ struct MediaPopup::Impl {
     int cardScreenY = 0;
     int cardWidthPx = 0;
     int cardHeightPx = 0;
+    int cardOffsetXPx = 0;
+    int cardOffsetYPx = 0;
     float cardOriginDip = 0.0f;
     float animationTravelPx = 0.0f;
 
@@ -560,8 +562,8 @@ struct MediaPopup::Impl {
         return static_cast<int>(std::ceil(kPopupShadowPaddingDip * scale()));
     }
 
-    float clientDipX(int px) const { return dip(px - shadowPaddingPx()); }
-    float clientDipY(int px) const { return dip(px - shadowPaddingPx()); }
+    float clientDipX(int px) const { return dip(px - cardOffsetXPx); }
+    float clientDipY(int px) const { return dip(px - cardOffsetYPx); }
 
     float popupHeightDip() const {
         return popupContentHeightDip();
@@ -1232,12 +1234,13 @@ struct MediaPopup::Impl {
             // 收尾预绘制时保持滚动内容透明，避免它叠在仍可见的转场快照上。
             idleScrollView.setContentVisible(!categoryTransition.hasLayers() &&
                                              !quickExpandTransition.hasLayers());
-            const float paddingDip = dip(shadowPaddingPx());
+            const float offsetXDip = dip(cardOffsetXPx);
+            const float offsetYDip = dip(cardOffsetYPx);
             idleScrollView.layout(
-                D2D1::RectF(idleListRect.left + paddingDip,
-                            idleListRect.top + cardOriginDip + paddingDip,
-                            idleListRect.right + paddingDip,
-                            idleListRect.bottom + cardOriginDip + paddingDip),
+                D2D1::RectF(idleListRect.left + offsetXDip,
+                            idleListRect.top + cardOriginDip + offsetYDip,
+                            idleListRect.right + offsetXDip,
+                            idleListRect.bottom + cardOriginDip + offsetYDip),
                 idleQuickListContentHeight(content), dpi, false);
             if (!idleScrollView.animating())
                 idleScrollView.setOffset(idleScrollOffset);
@@ -1248,10 +1251,10 @@ struct MediaPopup::Impl {
                 D2D1_MATRIX_3X2_F saved{};
                 target->GetTransform(&saved);
                 target->SetTransform(D2D1::Matrix3x2F::Translation(
-                    paddingDip, cardOriginDip + paddingDip) * saved);
+                    offsetXDip, cardOriginDip + offsetYDip) * saved);
                 const auto localBounds = D2D1::RectF(
-                    bounds.left - paddingDip, bounds.top - cardOriginDip - paddingDip,
-                    bounds.right - paddingDip, bounds.bottom - cardOriginDip - paddingDip);
+                    bounds.left - offsetXDip, bounds.top - cardOriginDip - offsetYDip,
+                    bounds.right - offsetXDip, bounds.bottom - cardOriginDip - offsetYDip);
                 const float previous = idleScrollOffset;
                 idleScrollOffset = position;
                 media_popup_paint::drawIdleQuickListContent(pagePaintContext(), target, w, content,
@@ -1915,9 +1918,9 @@ struct MediaPopup::Impl {
         RECT rc{};
         GetClientRect(hwnd, &rc);
         const int padding = shadowPaddingPx();
-        const int pxW = rc.right - rc.left - padding * 2;
-        const int pxH = rc.bottom - rc.top - padding * 2;
-        if (pxW <= 0 || pxH <= 0)
+        const int pxW = cardWidthPx;
+        const int pxH = cardHeightPx;
+        if (pxW <= 0 || pxH <= 0 || rc.right - rc.left <= 0 || rc.bottom - rc.top <= 0)
             return false;
         CompositionRenderer::BindTimings bindTimings;
         if (!renderer.bindSurface(hwnd, pxW, pxH, &bindTimings))
@@ -1942,7 +1945,8 @@ struct MediaPopup::Impl {
         if (!renderer.setRootShadow(padding, cardTopPx,
                                      cardTopPx + static_cast<float>(cardHeightPx),
                                      kPopupCornerDip * scale(),
-                                     fluent::isDarkMode(fluent::ThemeTarget::Window) ? 0.018f : 0.012f)) {
+                                     fluent::isDarkMode(fluent::ThemeTarget::Window) ? 0.018f : 0.012f,
+                                     cardOffsetXPx, cardOffsetYPx)) {
             releaseDrawingResources();
             return false;
         }
@@ -2145,24 +2149,30 @@ struct MediaPopup::Impl {
         const int workTop = static_cast<int>(work.top);
         const int workRight = static_cast<int>(work.right);
         const int workBottom = static_cast<int>(work.bottom);
-        // 侧边任务栏的宿主是窄竖栏，卡片应贴在它的外侧并以宿主中心对齐。
-        // 这里把 HWND 直接放在卡片最终矩形上，卡片内部坐标保持从 (0, 0)
-        // 开始，避免沿用上下弹出时仅支持 Y 方向的 cardOriginDip。
-        const int anchorWidth = anchorRect.right - anchorRect.left;
-        const int anchorHeight = anchorRect.bottom - anchorRect.top;
         // 直接使用歌词宿主自身的长宽比，而不是依赖 Shell_TrayWnd 的外框。
         // 某些 Explorer 版本会让外框覆盖整块屏幕，但宿主尺寸仍准确反映
         // 当前任务栏是横向还是侧边。
+        const int anchorWidth = anchorRect.right - anchorRect.left;
+        const int anchorHeight = anchorRect.bottom - anchorRect.top;
         const bool verticalTaskbar = anchorHeight > anchorWidth;
         sideAnchored = verticalTaskbar;
+
+        int x = 0;
+        int y = 0;
+        int winLeft = 0;
+        int winTop = 0;
+        int winRight = 0;
+        int winBottom = 0;
+        int travel = 0;
+
         if (verticalTaskbar) {
             const int monitorCenterX = (info.rcMonitor.left + info.rcMonitor.right) / 2;
             popupOnRightOfAnchor = (anchorRect.left + anchorRect.right) / 2 < monitorCenterX;
 
-            int x = popupOnRightOfAnchor ? anchorRect.right + gap
-                                         : anchorRect.left - gap - popupW;
+            x = popupOnRightOfAnchor ? anchorRect.right + gap
+                                     : anchorRect.left - gap - popupW;
             const int anchorCenterY = (anchorRect.top + anchorRect.bottom) / 2;
-            int y = anchorCenterY - popupH / 2;
+            y = anchorCenterY - popupH / 2;
             y = std::clamp(y, workTop, std::max(workTop, workBottom - popupH));
 
             if (popupOnRightOfAnchor && x + popupW > workRight) {
@@ -2174,68 +2184,83 @@ struct MediaPopup::Impl {
             }
             x = std::clamp(x, workLeft, std::max(workLeft, workRight - popupW));
 
-            cardScreenX = x;
-            cardScreenY = y;
-            cardWidthPx = popupW;
-            cardHeightPx = popupH;
-            cardOriginDip = 0.0f;
-            // 初始状态让卡片外缘贴住宿主边缘，随后沿 X 轴滑入。
-            animationTravelPx = static_cast<float>(popupW + gap);
-
-            RECT windowRect{};
-            const bool windowRectUnchanged =
-                GetWindowRect(hwnd, &windowRect) && windowRect.left == x - padding &&
-                windowRect.top == y - padding &&
-                windowRect.right - windowRect.left == popupW + padding * 2 &&
-                windowRect.bottom - windowRect.top == popupH + padding * 2;
-            if (!windowRectUnchanged) {
-                SetWindowPos(hwnd, HWND_TOPMOST, x - padding, y - padding,
-                             popupW + padding * 2, popupH + padding * 2,
-                             SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+            // 靠任务栏一侧停在任务栏外沿（自动隐藏时退回歌词宿主边缘），避免阴影
+            // 余量把承载窗口伸入任务栏内部，导致滑出动画压在任务栏歌词上方。
+            winTop = y - padding;
+            winBottom = y + popupH + padding;
+            if (popupOnRightOfAnchor) {
+                const int taskbarEdgeX =
+                    anchorRect.right <= workLeft ? workLeft : anchorRect.right;
+                const int clipLeft = std::min(x, taskbarEdgeX);
+                winLeft = clipLeft;
+                winRight = x + popupW + padding;
+                travel = (x + popupW) - clipLeft;
+            } else {
+                const int taskbarEdgeX =
+                    anchorRect.left >= workRight ? workRight : anchorRect.left;
+                const int clipRight = std::max(x + popupW, taskbarEdgeX);
+                winLeft = x - padding;
+                winRight = clipRight;
+                travel = clipRight - x;
             }
-            return;
+        } else {
+            const int anchorCenterX = (anchorRect.left + anchorRect.right) / 2;
+            x = anchorCenterX - popupW / 2;
+            x = std::clamp(x, workLeft, std::max(workLeft, workRight - popupW));
+
+            const int monitorCenterY = (info.rcMonitor.top + info.rcMonitor.bottom) / 2;
+            placedAbove = anchorRect.top >= workBottom ||
+                          (anchorRect.bottom > workTop && anchorRect.top < workBottom &&
+                           (anchorRect.top + anchorRect.bottom) / 2 >= monitorCenterY);
+            y = placedAbove ? anchorRect.top - gap - popupH : anchorRect.bottom + gap;
+            if (placedAbove && y < workTop) {
+                placedAbove = false;
+                y = anchorRect.bottom + gap;
+            } else if (!placedAbove && y + popupH > workBottom) {
+                placedAbove = true;
+                y = anchorRect.top - gap - popupH;
+            }
+            y = std::clamp(y, workTop, std::max(workTop, workBottom - popupH));
+
+            // 承载窗口在靠任务栏一侧严格停在任务栏外沿（自动隐藏时停在歌词宿主边缘），
+            // 不再把阴影余量外扩进任务栏内部；其余三侧仍保留完整阴影余量。
+            winLeft = x - padding;
+            winRight = x + popupW + padding;
+            if (placedAbove) {
+                const int taskbarEdgeY =
+                    anchorRect.top >= workBottom ? workBottom : anchorRect.top;
+                const int clipBottom = std::max(y + popupH, taskbarEdgeY);
+                winTop = y - padding;
+                winBottom = clipBottom;
+                travel = clipBottom - y;
+            } else {
+                const int taskbarEdgeY =
+                    anchorRect.bottom <= workTop ? workTop : anchorRect.bottom;
+                const int clipTop = std::min(y, taskbarEdgeY);
+                winTop = clipTop;
+                winBottom = y + popupH + padding;
+                travel = (y + popupH) - clipTop;
+            }
         }
 
-        sideAnchored = false;
-        const int anchorCenterX = (anchorRect.left + anchorRect.right) / 2;
-        int x = anchorCenterX - popupW / 2;
-        x = std::clamp(x, workLeft, std::max(workLeft, workRight - popupW));
-
-        const int monitorCenterY = (info.rcMonitor.top + info.rcMonitor.bottom) / 2;
-        placedAbove = anchorRect.top >= workBottom ||
-                      (anchorRect.bottom > workTop && anchorRect.top < workBottom &&
-                       (anchorRect.top + anchorRect.bottom) / 2 >= monitorCenterY);
-        int y = placedAbove ? anchorRect.top - gap - popupH : anchorRect.bottom + gap;
-        if (placedAbove && y < workTop) {
-            placedAbove = false;
-            y = anchorRect.bottom + gap;
-        } else if (!placedAbove && y + popupH > workBottom) {
-            placedAbove = true;
-            y = anchorRect.top - gap - popupH;
-        }
-        y = std::clamp(y, workTop, std::max(workTop, workBottom - popupH));
-
-        // 承载窗口只覆盖“卡片终点到歌词宿主边缘”的可见路径，另一侧保持在
-        // 宿主边缘之外。这样卡片会从歌词窗口边缘露出，而不是从屏幕边缘露出。
-        const int anchorEdgeY = placedAbove ? anchorRect.top : anchorRect.bottom;
-        const int hostY = placedAbove ? y : anchorEdgeY;
-        const int cardLocalY = placedAbove ? 0 : y - anchorEdgeY;
-        const int travel = placedAbove ? anchorEdgeY - y : cardLocalY + popupH;
+        const int winW = winRight - winLeft;
+        const int winH = winBottom - winTop;
         RECT windowRect{};
         const bool windowRectUnchanged =
-            GetWindowRect(hwnd, &windowRect) && windowRect.left == x - padding &&
-            windowRect.top == hostY - padding &&
-            windowRect.right - windowRect.left == popupW + padding * 2 &&
-            windowRect.bottom - windowRect.top == travel + padding * 2;
+            GetWindowRect(hwnd, &windowRect) && windowRect.left == winLeft &&
+            windowRect.top == winTop &&
+            windowRect.right - windowRect.left == winW &&
+            windowRect.bottom - windowRect.top == winH;
         cardScreenX = x;
         cardScreenY = y;
         cardWidthPx = popupW;
         cardHeightPx = popupH;
+        cardOffsetXPx = x - winLeft;
+        cardOffsetYPx = y - winTop;
         animationTravelPx = static_cast<float>(travel);
-        cardOriginDip = dip(cardLocalY);
+        cardOriginDip = 0.0f;
         if (!windowRectUnchanged) {
-            SetWindowPos(hwnd, HWND_TOPMOST, x - padding, hostY - padding,
-                         popupW + padding * 2, travel + padding * 2,
+            SetWindowPos(hwnd, HWND_TOPMOST, winLeft, winTop, winW, winH,
                          SWP_NOACTIVATE | SWP_NOOWNERZORDER);
         }
     }
@@ -3336,6 +3361,8 @@ struct MediaPopup::Impl {
             return 0;
         case WM_DISPLAYCHANGE:
             reposition();
+            if (visibility.visible())
+                renderOrDefer();
             return 0;
         case WM_SETTINGCHANGE:
             refreshClientAnimations();

@@ -107,9 +107,12 @@ public:
     bool animateRootScroll(float from, float to, float velocity, float frequency);
     // 给窗口的根视觉设置物理像素圆角裁剪；未调用时根视觉保持矩形。
     bool setRootRoundedClip(float top, float bottom, float cornerRadius);
-    // 在圆角内容外增加独立阴影层；参数均为物理像素，宿主须预留四周 padding。
-    // 阴影和内容共用根动画，内容及其转场层仍受原圆角裁剪。
-    bool setRootShadow(int padding, float top, float bottom, float cornerRadius, float opacity);
+    // 在圆角内容外增加独立阴影层；参数均为物理像素。
+    // contentOffsetX/contentOffsetY 为内容区在窗口客户区内的原点，允许靠近任务栏的
+    // 一侧收紧窗口边界而不影响其余方向的阴影余量；阴影和内容共用根动画，内容及其
+    // 转场层仍受原圆角裁剪。
+    bool setRootShadow(int padding, float top, float bottom, float cornerRadius, float opacity,
+                       int contentOffsetX, int contentOffsetY);
     bool commit();
     // 等待上一批 DComposition 命令被合成器处理完，用于交换链与覆盖层交接。
     void waitForCommitCompletion();
@@ -125,6 +128,8 @@ private:
         int width = 0;
         int height = 0;
         int padding = 0;
+        int contentOffsetX = 0;
+        int contentOffsetY = 0;
         float top = 0.0f;
         float bottom = 0.0f;
         float radius = 0.0f;

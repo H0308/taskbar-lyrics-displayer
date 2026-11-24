@@ -1141,14 +1141,18 @@ void CompositionRenderer::waitForCommitCompletion() {
 }
 
 bool CompositionRenderer::setRootShadow(int padding, float top, float bottom,
-                                        float cornerRadius, float opacity) {
+                                        float cornerRadius, float opacity,
+                                        int contentOffsetX, int contentOffsetY) {
     if (!dcomp_ || !target_ || !visual_ || !rootOpacity_ || padding <= 0 || bottom <= top)
         return false;
     const int width = width_ + padding * 2;
     const int height = height_ + padding * 2;
-    if (rootShadow_.surface && rootShadow_.width == width && rootShadow_.height == height &&
+    const bool surfaceUnchanged =
+        rootShadow_.surface && rootShadow_.width == width && rootShadow_.height == height &&
         rootShadow_.padding == padding && rootShadow_.top == top && rootShadow_.bottom == bottom &&
-        rootShadow_.radius == cornerRadius && rootShadow_.opacity == opacity)
+        rootShadow_.radius == cornerRadius && rootShadow_.opacity == opacity;
+    if (surfaceUnchanged && rootShadow_.contentOffsetX == contentOffsetX &&
+        rootShadow_.contentOffsetY == contentOffsetY)
         return true;
 
     const auto fail = [this](HRESULT hr, const wchar_t* stage) {
@@ -1178,11 +1182,19 @@ bool CompositionRenderer::setRootShadow(int padding, float top, float bottom,
         if (FAILED(hr))
             return fail(hr, L"attach-root-tree");
     }
-    HRESULT hr = visual_->SetOffsetX(static_cast<float>(padding));
+    HRESULT hr = visual_->SetOffsetX(static_cast<float>(contentOffsetX));
     if (SUCCEEDED(hr))
-        hr = visual_->SetOffsetY(static_cast<float>(padding));
+        hr = visual_->SetOffsetY(static_cast<float>(contentOffsetY));
+    if (SUCCEEDED(hr))
+        hr = rootShadow_.visual->SetOffsetX(static_cast<float>(contentOffsetX - padding));
+    if (SUCCEEDED(hr))
+        hr = rootShadow_.visual->SetOffsetY(static_cast<float>(contentOffsetY - padding));
     if (FAILED(hr))
         return fail(hr, L"content-offset");
+    rootShadow_.contentOffsetX = contentOffsetX;
+    rootShadow_.contentOffsetY = contentOffsetY;
+    if (surfaceUnchanged)
+        return true;
 
     IDCompositionSurface* surface = nullptr;
     hr = dcomp_->CreateSurface(static_cast<UINT>(width), static_cast<UINT>(height),
