@@ -322,6 +322,7 @@ void SettingsSections::onCommand(int id, int option) {
         row->checked = !row->checked;
         state.genericSmtcEnabled = row->checked;
         syncPlayerRows(state);
+        settings_ui::updateLyricRows(rows[kLyricsPage], state);
         if (actions.onGenericSmtcEnabled)
             actions.onGenericSmtcEnabled(row->checked);
         break;

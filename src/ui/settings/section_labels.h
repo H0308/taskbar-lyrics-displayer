@@ -208,6 +208,8 @@ inline settings_icon::Kind iconForRow(int id) {
         return settings_icon::Kind::Folder;
     case kIdQqLocalLyricsPersistOrder:
         return settings_icon::Kind::Persist;
+    case kIdLyricSourceOrderPreview:
+        return settings_icon::Kind::Scope;
     default:
         return settings_icon::Kind::None;
     }

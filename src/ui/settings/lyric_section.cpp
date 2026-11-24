@@ -1,9 +1,132 @@
 #include "ui/settings/lyric_section.h"
+#include "lyric/custom_local_lyric_index.h"
 #include "ui/settings/ids.h"
 #include "ui/settings/section_metrics.h"
 #include <algorithm>
 
 namespace settings_ui {
+namespace {
+
+bool hasGenericCustomLocalRule(const std::vector<GenericSmtcAppRule>& rules) {
+    for (const auto& rule : rules) {
+        if (lyric_detail::parseBuiltinPlayerRuleSourceId(rule.sourceId) != SmtcPlayerType::Unknown)
+            continue;
+        bool matchesBuiltinProc = false;
+        if (!rule.processName.empty()) {
+            const std::vector<GenericSmtcAppRule> single{rule};
+            for (SmtcPlayerType builtin : {SmtcPlayerType::QQMusic, SmtcPlayerType::NetEase,
+                                           SmtcPlayerType::Soda, SmtcPlayerType::Spotify,
+                                           SmtcPlayerType::SaltPlayer}) {
+                if (lyric_detail::matchesCustomLocalPlayerRules(builtin, {}, {}, single)) {
+                    matchesBuiltinProc = true;
+                    break;
+                }
+            }
+        }
+        if (!matchesBuiltinProc)
+            return true;
+    }
+    return false;
+}
+
+std::vector<InfoLine> buildLyricSourceOrderLines(const SettingsState& s) {
+    const bool customEnabled = s.customLocalLyricsEnabled;
+    const bool customHasDir = !s.customLocalLyricsPath.empty();
+    const bool customOnlySelected = std::clamp(s.customLocalLyricsScope, 0, 1) == 1;
+    const bool qqLocalEnabled = s.qqLocalLyricsEnabled;
+    const bool qqLocalHasDir = !s.qqLocalLyricsPath.empty();
+
+    auto appendCustomStep = [&](std::vector<InfoStep>& steps, bool applies,
+                                const wchar_t* activeLabel) {
+        if (!customEnabled || !applies)
+            return;
+        if (customHasDir)
+            steps.push_back({activeLabel, InfoBadgeTone::AccentSoft});
+        else
+            steps.push_back({L"自定义本地（未选目录）", InfoBadgeTone::Muted});
+    };
+
+    auto builtinCustomApplies = [&](SmtcPlayerType player) {
+        if (!customOnlySelected)
+            return true;
+        return lyric_detail::matchesCustomLocalPlayerRules(player, {}, {},
+                                                           s.customLocalLyricsPlayers);
+    };
+
+    std::vector<InfoLine> lines;
+    lines.reserve(6);
+
+    // 1. QQ 音乐
+    {
+        InfoLine line{L"QQ 音乐", false, {{L"手动搜索", InfoBadgeTone::Neutral}}};
+        appendCustomStep(line.steps, builtinCustomApplies(SmtcPlayerType::QQMusic),
+                         L"自定义本地");
+        if (qqLocalEnabled) {
+            line.steps.push_back(qqLocalHasDir
+                                     ? InfoStep{L"QQ 本地歌词", InfoBadgeTone::AccentSoft}
+                                     : InfoStep{L"QQ 本地（未选目录）", InfoBadgeTone::Muted});
+        }
+        line.steps.push_back({L"在线歌词", InfoBadgeTone::Neutral});
+        lines.push_back(std::move(line));
+    }
+
+    // 2. 网易云音乐
+    {
+        InfoLine line{L"网易云音乐", false, {{L"手动搜索", InfoBadgeTone::Neutral}}};
+        appendCustomStep(line.steps, builtinCustomApplies(SmtcPlayerType::NetEase),
+                         L"自定义本地");
+        line.steps.push_back({L"在线（网易云优先）", InfoBadgeTone::Neutral});
+        lines.push_back(std::move(line));
+    }
+
+    // 3. 汽水音乐
+    {
+        InfoLine line{L"汽水音乐", false, {{L"手动搜索", InfoBadgeTone::Neutral}}};
+        appendCustomStep(line.steps, builtinCustomApplies(SmtcPlayerType::Soda), L"自定义本地");
+        line.steps.push_back({L"在线（汽水优先）", InfoBadgeTone::Neutral});
+        lines.push_back(std::move(line));
+    }
+
+    // 4. Spotify
+    {
+        InfoLine line{L"Spotify", false, {{L"手动搜索", InfoBadgeTone::Neutral}}};
+        appendCustomStep(line.steps, builtinCustomApplies(SmtcPlayerType::Spotify),
+                         L"自定义本地");
+        line.steps.push_back({L"在线歌词", InfoBadgeTone::Neutral});
+        lines.push_back(std::move(line));
+    }
+
+    // 5. 椒盐音乐
+    {
+        InfoLine line{L"椒盐音乐", false, {{L"手动搜索", InfoBadgeTone::Neutral}}};
+        appendCustomStep(line.steps, builtinCustomApplies(SmtcPlayerType::SaltPlayer),
+                         L"自定义本地");
+        line.steps.push_back({L"在线歌词", InfoBadgeTone::Neutral});
+        lines.push_back(std::move(line));
+    }
+
+    // 6. 其他通用识别播放器
+    {
+        const bool genericOn = s.genericSmtcEnabled;
+        InfoLine line{genericOn ? L"其他通用播放器" : L"其他通用播放器（未开启）",
+                      !genericOn,
+                      {{L"手动搜索", InfoBadgeTone::Neutral}}};
+        if (customEnabled) {
+            if (!customOnlySelected) {
+                appendCustomStep(line.steps, true, L"自定义本地");
+            } else if (hasGenericCustomLocalRule(s.customLocalLyricsPlayers)) {
+                appendCustomStep(line.steps, true, L"自定义本地（已指定）");
+            }
+        }
+        line.steps.push_back({L"在线歌词", InfoBadgeTone::Neutral});
+        lines.push_back(std::move(line));
+    }
+
+    return lines;
+}
+
+} // namespace
+
 std::vector<Row> createLyricRows(const SettingsState& state) {
     std::vector<Row> rows;
     RowBuilder builder(rows);
@@ -62,6 +185,12 @@ std::vector<Row> createLyricRows(const SettingsState& state) {
                          state.secondaryAvailability == SecondaryLyricAvailability::Available,
                      *secondaryHint ? kRowTallH : kRowH);
     builder.addHeader(L"本地歌词");
+    Row& sourceOrder = builder.addRow(
+        kIdLyricSourceOrderPreview, ControlKind::Info, L"当前歌词读取顺序",
+        L"随本地歌词与生效范围实时更新；在线通用顺序为 酷狗 → QQ 音乐 → LRCLIB → 网易云 → 汽水。",
+        0.0f, kRowTallH + kInfoPanelTopGap + infoPanelHeight(6) + kInfoPanelBottomPad);
+    sourceOrder.options = {L"歌词读取顺序", L"QQ 音乐", L"网易云音乐", L"汽水音乐",
+                           L"Spotify",     L"椒盐音乐", L"通用播放器"};
     Row& customLocalEnabled = builder.addRow(
         kIdCustomLocalLyricsEnabled, ControlKind::Toggle, L"使用自定义本地歌词",
         L"优先从指定目录匹配 .lrc 与音频内嵌歌词（不递归子目录），可设置全部应用或仅指定播放器生效。",
@@ -187,6 +316,13 @@ void updateLyricRows(std::vector<Row>& rows, const SettingsState& s) {
         row->height = row->minHeight;
         row->enabled = s.qqLocalLyricsEnabled;
     }
+    if (auto* row = findRow(kIdLyricSourceOrderPreview)) {
+        row->infoLines = buildLyricSourceOrderLines(s);
+        row->minHeight =
+            kRowTallH + kInfoPanelTopGap + infoPanelHeight(row->infoLines.size()) +
+            kInfoPanelBottomPad;
+        row->height = row->minHeight;
+    }
 
     updateCompactLyricRows(rows, s);
 }
@@ -310,10 +446,7 @@ bool handleLyricCommand(int id, Row& value, std::vector<Row>& rows, SettingsStat
     case kIdQqLocalLyricsEnabled:
         row->checked = !row->checked;
         state.qqLocalLyricsEnabled = row->checked;
-        if (auto* persist = findRow(kIdQqLocalLyricsPersistOrder))
-            persist->enabled = state.customLocalLyricsEnabled || state.qqLocalLyricsEnabled;
-        if (auto* path = findRow(kIdQqLocalLyricsPath))
-            path->enabled = row->checked;
+        updateLyricRows(rows, state);
         if (actions.onQqLocalLyricsEnabled)
             actions.onQqLocalLyricsEnabled(row->checked);
         break;

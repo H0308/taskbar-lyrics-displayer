@@ -72,6 +72,7 @@ inline constexpr int kIdCustomLocalLyricsEnabled = 525;
 inline constexpr int kIdCustomLocalLyricsPath = 526;
 inline constexpr int kIdCustomLocalLyricsScope = 527;
 inline constexpr int kIdCustomLocalLyricsPlayers = 528;
+inline constexpr int kIdLyricSourceOrderPreview = 532;
 inline constexpr int kIdGenericSmtcEnabled = 518;
 inline constexpr int kIdGenericSmtcFilterMode = 519;
 inline constexpr int kIdGenericSmtcApps = 520;

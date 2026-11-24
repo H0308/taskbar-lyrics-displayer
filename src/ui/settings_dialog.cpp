@@ -871,6 +871,16 @@ struct SettingsDialog::Impl {
                         requiredHeight, kTitleTopPadding + titleHeight + valueBlockHeight +
                                             hintHeight + kHintBottomPadding);
                 }
+            } else if (row.kind == ControlKind::Info) {
+                const float hintHeight =
+                    row.showHint && !row.hint.empty() ? measureHintHeight(painter, row) : 0.0f;
+                const float headerBottom =
+                    kTitleTopPadding + titleHeight +
+                    (hintHeight > 0.0f ? kTitleHintGap + hintHeight : 0.0f);
+                const float panelH = infoPanelHeight(row.infoLines.size());
+                const float bodyH = panelH > 0.0f ? kInfoPanelTopGap + panelH : 0.0f;
+                requiredHeight =
+                    std::max(requiredHeight, headerBottom + bodyH + kInfoPanelBottomPad);
             } else if (row.showHint && !row.hint.empty()) {
                 const float hintHeight = measureHintHeight(painter, row);
                 if (hintHeight > 0.0f) {
@@ -1227,6 +1237,27 @@ struct SettingsDialog::Impl {
                     row.hintRect = D2D1::RectF(labelX, hintTop, innerRight,
                                               y + rowH - kHintBottomPadding);
                 }
+                y += rowH + row.gapAfter;
+                continue;
+            }
+            if (row.kind == ControlKind::Info) {
+                const float titleTop = y + kTitleTopPadding;
+                placeIcon(titleTop);
+                row.labelRect = D2D1::RectF(labelX, titleTop, innerRight,
+                                            titleTop + row.titleHeight);
+                const float panelH = infoPanelHeight(row.infoLines.size());
+                const float panelBottom = y + rowH - kInfoPanelBottomPad;
+                const float panelTop = panelH > 0.0f ? panelBottom - panelH : panelBottom;
+                if (row.showHint) {
+                    const float hintTop = titleTop + row.titleHeight + kTitleHintGap;
+                    const float hintBottom =
+                        panelH > 0.0f ? std::max(hintTop, panelTop - kInfoPanelTopGap)
+                                      : y + rowH - kHintBottomPadding;
+                    row.hintRect = D2D1::RectF(labelX, hintTop, innerRight, hintBottom);
+                }
+                row.controlRect = panelH > 0.0f
+                                      ? D2D1::RectF(innerX, panelTop, innerRight, panelBottom)
+                                      : D2D1::RectF(0, 0, 0, 0);
                 y += rowH + row.gapAfter;
                 continue;
             }
@@ -1651,6 +1682,10 @@ struct SettingsDialog::Impl {
                 row_painters::drawAppList(painter, rowCtx, row);
                 continue;
             }
+            if (row.kind == ControlKind::Info) {
+                row_painters::drawInfo(painter, row);
+                continue;
+            }
             if (row.id == kIdSpectrumBackground)
                 artwork_.drawSpectrumBackgroundArtwork(painter, row.artworkRect, row.enabled);
             else if (row.id == kIdSpectrumGradient)
@@ -1772,7 +1807,7 @@ struct SettingsDialog::Impl {
         if (!contains(contentViewportRect, x, y))
             return 0;
         for (const auto& row : sections_.rows[activePage]) {
-            if (!row.enabled)
+            if (!row.enabled || row.kind == ControlKind::Info)
                 continue;
             if (row.kind == ControlKind::AppList) {
                 if (row.id == kIdGenericSmtcApps || row.id == kIdCustomLocalLyricsPlayers) {
@@ -1853,7 +1888,8 @@ struct SettingsDialog::Impl {
             if (row.enabled && row.id == kIdIdleApps) {
                 order.push_back(kIdIdleAppNames);
                 order.push_back(row.id);
-            } else if (row.enabled) {
+            } else if (row.enabled && row.kind != ControlKind::Header &&
+                       row.kind != ControlKind::Info) {
                 order.push_back(row.id);
             }
         }

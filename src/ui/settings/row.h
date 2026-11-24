@@ -18,7 +18,25 @@ enum class ControlKind {
     Slider,
     Button,
     AppList,
+    Info,   // 只读信息展示行，不参与点击与焦点
     Header, // 分组标题：无卡片背景，不参与交互与焦点
+};
+
+enum class InfoBadgeTone {
+    Neutral,
+    AccentSoft,
+    Muted,
+};
+
+struct InfoStep {
+    std::wstring text;
+    InfoBadgeTone tone = InfoBadgeTone::Neutral;
+};
+
+struct InfoLine {
+    std::wstring label;
+    bool muted = false;
+    std::vector<InfoStep> steps;
 };
 
 struct Row {
@@ -58,6 +76,7 @@ struct Row {
     std::vector<D2D1_RECT_F> appDeleteRects;
     std::vector<D2D1_RECT_F> optionRects;
     std::vector<std::wstring> optionHints;
+    std::vector<InfoLine> infoLines;
 };
 
 // 页面定义与窗口共用同一套行创建规则。

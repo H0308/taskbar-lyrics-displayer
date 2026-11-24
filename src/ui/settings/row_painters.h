@@ -48,5 +48,6 @@ void drawModeGrid(fluent::FluentDialogSurface::Painter& painter, const RowPaintC
                   Row& row);
 void drawAppList(fluent::FluentDialogSurface::Painter& painter, const RowPaintContext& ctx,
                  const Row& row);
+void drawInfo(fluent::FluentDialogSurface::Painter& painter, const Row& row);
 
 } // namespace settings_ui::row_painters

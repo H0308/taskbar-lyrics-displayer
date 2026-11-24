@@ -10,6 +10,7 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 
 namespace settings_ui::row_painters {
@@ -858,6 +859,92 @@ void drawAppList(fluent::FluentDialogSurface::Painter& painter, const RowPaintCo
     painter.strokeRoundRect(canAdd ? p.accent : p.disabled, row.addAppRect, 1.0f, 7.0f);
     painter.drawText(L"添加应用", painter.textFormat(fluent::font_sizes::label, 600, true, true),
                      row.addAppRect, canAdd ? p.textOnAccent : p.disabled);
+}
+
+void drawInfo(fluent::FluentDialogSurface::Painter& painter, const Row& row) {
+    if (row.infoLines.empty() || row.controlRect.right <= row.controlRect.left ||
+        row.controlRect.bottom <= row.controlRect.top) {
+        return;
+    }
+    const auto& p = painter.colors();
+    const bool dark = fluent::isDarkMode();
+    auto* labelFormat = painter.textFormat(fluent::font_sizes::smallText, 500, false, true);
+    auto* stepFormat = painter.textFormat(fluent::font_sizes::smallText, 400, true, true);
+    if (!labelFormat || !stepFormat)
+        return;
+
+    painter.fillRoundRect(p.listHover, row.controlRect, 6.0f);
+    painter.strokeRoundRect(p.cardStroke, row.controlRect, 1.0f, 6.0f);
+
+    const float contentLeft = row.controlRect.left + kInfoPanelPadX;
+    const float contentRight = row.controlRect.right - kInfoPanelPadX;
+    const float chainStart = contentLeft + kInfoPanelLabelW + 8.0f;
+    constexpr float kPillH = 20.0f;
+    constexpr float kPillPadX = 7.0f;
+    constexpr float kArrowW = 16.0f;
+
+    D2D1_COLOR_F rowSep = p.separator;
+    rowSep.a *= 0.65f;
+
+    for (size_t i = 0; i < row.infoLines.size(); ++i) {
+        const auto& line = row.infoLines[i];
+        const float lineTop =
+            row.controlRect.top + kInfoPanelPadY + static_cast<float>(i) * kInfoPanelLineH;
+        const float lineBottom = lineTop + kInfoPanelLineH;
+        if (i > 0) {
+            if (auto* sepBrush = painter.brush(rowSep)) {
+                painter.target()->DrawLine(D2D1::Point2F(contentLeft, lineTop),
+                                           D2D1::Point2F(contentRight, lineTop), sepBrush, 1.0f);
+            }
+        }
+
+        const D2D1_RECT_F labelRect =
+            D2D1::RectF(contentLeft, lineTop, contentLeft + kInfoPanelLabelW, lineBottom);
+        painter.drawTrimmedText(line.label, labelFormat, labelRect,
+                                line.muted ? p.disabled : p.text);
+
+        float x = chainStart;
+        const float pillTop = lineTop + (kInfoPanelLineH - kPillH) * 0.5f;
+        for (size_t j = 0; j < line.steps.size(); ++j) {
+            const auto& step = line.steps[j];
+            if (j > 0) {
+                if (x + kArrowW >= contentRight)
+                    break;
+                painter.drawText(L"→", stepFormat,
+                                 D2D1::RectF(x, lineTop, x + kArrowW, lineBottom), p.disabled);
+                x += kArrowW;
+            }
+            if (x + 16.0f >= contentRight)
+                break;
+            const float textW = std::ceil(painter.measureTextWidth(step.text, stepFormat));
+            const float pillRight = std::min(x + textW + kPillPadX * 2.0f, contentRight);
+            const D2D1_RECT_F pillRect = D2D1::RectF(x, pillTop, pillRight, pillTop + kPillH);
+
+            const InfoBadgeTone effectiveTone =
+                line.muted && step.tone == InfoBadgeTone::AccentSoft ? InfoBadgeTone::Muted
+                                                                     : step.tone;
+            D2D1_COLOR_F fill = p.cardFill;
+            D2D1_COLOR_F stroke = p.cardStroke;
+            D2D1_COLOR_F textColor = line.muted ? p.disabled : p.textSecondary;
+            if (effectiveTone == InfoBadgeTone::AccentSoft) {
+                fill = D2D1::ColorF(p.accent.r, p.accent.g, p.accent.b, dark ? 0.14f : 0.08f);
+                stroke = D2D1::ColorF(p.accent.r, p.accent.g, p.accent.b, dark ? 0.32f : 0.22f);
+                textColor = p.text;
+            } else if (effectiveTone == InfoBadgeTone::Muted) {
+                fill = p.listHover;
+                stroke = p.cardStroke;
+                textColor = p.disabled;
+            }
+            painter.fillRoundRect(fill, pillRect, 4.0f);
+            painter.strokeRoundRect(stroke, pillRect, 1.0f, 4.0f);
+            painter.drawTrimmedText(
+                step.text, stepFormat,
+                D2D1::RectF(pillRect.left + 4.0f, pillRect.top, pillRect.right - 4.0f,
+                            pillRect.bottom),
+                textColor);
+            x = pillRight;
+        }
+    }
 }
 
 } // namespace settings_ui::row_painters

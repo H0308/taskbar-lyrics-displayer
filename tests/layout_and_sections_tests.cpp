@@ -366,3 +366,65 @@ TEST_CASE("resource_monitor.zero_metrics_layout_and_settings_guard") {
     sections.onCommand(settings_ui::kIdEmbeddedResourceMonitor);
     EXPECT_FALSE(metrics->enabled);
 }
+
+TEST_CASE("lyric_section.dynamic_source_order_preview") {
+    SettingsSections sections;
+    sections.state.genericSmtcEnabled = false;
+    sections.state.qqLocalLyricsEnabled = false;
+    sections.state.customLocalLyricsEnabled = false;
+    sections.create();
+
+    const auto* preview = sections.findRow(settings_ui::kIdLyricSourceOrderPreview);
+    EXPECT_TRUE(preview != nullptr);
+    EXPECT_EQ(preview->kind, settings_ui::ControlKind::Info);
+    EXPECT_EQ(preview->infoLines.size(), 6u);
+
+    // 默认状态：QQ 音乐为 手动搜索 -> 在线歌词；其他通用播放器呈弱化未开启状态
+    EXPECT_EQ(preview->infoLines[0].label, L"QQ 音乐");
+    EXPECT_EQ(preview->infoLines[0].steps.size(), 2u);
+    EXPECT_EQ(preview->infoLines[0].steps[0].text, L"手动搜索");
+    EXPECT_EQ(preview->infoLines[0].steps[1].text, L"在线歌词");
+    EXPECT_TRUE(preview->infoLines[5].muted);
+    EXPECT_TRUE(preview->infoLines[5].label.find(L"未开启") != std::wstring::npos);
+
+    // 开启 QQ 音乐本地歌词（未选目录）：立即出现弱化态“QQ 本地（未选目录）”
+    sections.onCommand(settings_ui::kIdQqLocalLyricsEnabled);
+    EXPECT_EQ(preview->infoLines[0].steps.size(), 3u);
+    EXPECT_EQ(preview->infoLines[0].steps[1].text, L"QQ 本地（未选目录）");
+    EXPECT_EQ(preview->infoLines[0].steps[1].tone, settings_ui::InfoBadgeTone::Muted);
+
+    // 配置 QQ 本地目录并启用自定义本地歌词（全部应用）：QQ 音乐按 手动 -> 自定义本地 -> QQ 本地 -> 在线
+    auto s = sections.state;
+    s.qqLocalLyricsPath = L"C:\\QQMusicLyric";
+    s.customLocalLyricsEnabled = true;
+    s.customLocalLyricsPath = L"C:\\MyLyrics";
+    s.customLocalLyricsScope = 0;
+    s.genericSmtcEnabled = true;
+    sections.update(s);
+    EXPECT_EQ(preview->infoLines[0].steps.size(), 4u);
+    EXPECT_EQ(preview->infoLines[0].steps[1].text, L"自定义本地");
+    EXPECT_EQ(preview->infoLines[0].steps[1].tone, settings_ui::InfoBadgeTone::AccentSoft);
+    EXPECT_EQ(preview->infoLines[0].steps[2].text, L"QQ 本地歌词");
+    EXPECT_EQ(preview->infoLines[0].steps[2].tone, settings_ui::InfoBadgeTone::AccentSoft);
+    EXPECT_EQ(preview->infoLines[1].steps.size(), 3u); // 网易云：手动 -> 自定义本地 -> 在线（网易云优先）
+    EXPECT_FALSE(preview->infoLines[5].muted);
+    EXPECT_EQ(preview->infoLines[5].steps.size(), 3u);
+
+    // 切换为“仅指定播放器”（仅指定椒盐音乐与 foobar2000）：仅对应条目保留自定义本地节点
+    s.customLocalLyricsScope = 1;
+    GenericSmtcAppRule saltRule;
+    saltRule.sourceId = L"builtin:saltplayer";
+    saltRule.displayName = L"椒盐音乐";
+    GenericSmtcAppRule genericRule;
+    genericRule.processName = L"foobar2000.exe";
+    genericRule.displayName = L"foobar2000";
+    s.customLocalLyricsPlayers = {saltRule, genericRule};
+    sections.update(s);
+    EXPECT_EQ(preview->infoLines[0].steps.size(), 3u); // QQ：手动 -> QQ 本地 -> 在线
+    EXPECT_EQ(preview->infoLines[0].steps[1].text, L"QQ 本地歌词");
+    EXPECT_EQ(preview->infoLines[1].steps.size(), 2u); // 网易云：手动 -> 在线（网易云优先）
+    EXPECT_EQ(preview->infoLines[4].steps.size(), 3u); // 椒盐：手动 -> 自定义本地 -> 在线
+    EXPECT_EQ(preview->infoLines[4].steps[1].text, L"自定义本地");
+    EXPECT_EQ(preview->infoLines[5].steps.size(), 3u); // 通用：手动 -> 自定义本地（已指定） -> 在线
+    EXPECT_EQ(preview->infoLines[5].steps[1].text, L"自定义本地（已指定）");
+}

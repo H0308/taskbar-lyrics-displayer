@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 namespace settings_ui {
 inline constexpr float kModeGridMinH = 196.0f;
 inline constexpr float kModeGridGap = 8.0f;
@@ -24,4 +25,16 @@ inline constexpr float kIdleAppNamesToggleGap = 8.0f;
 inline constexpr float kIdleQuoteBackgroundCardH = 112.0f;
 inline constexpr float kIdleQuoteBackgroundCardGap = 8.0f;
 inline constexpr float kIdleQuoteBackgroundRowH = 324.0f;
+inline constexpr float kInfoPanelTopGap = 10.0f;
+inline constexpr float kInfoPanelPadY = 8.0f;
+inline constexpr float kInfoPanelPadX = 12.0f;
+inline constexpr float kInfoPanelLineH = 28.0f;
+inline constexpr float kInfoPanelBottomPad = 14.0f;
+inline constexpr float kInfoPanelLabelW = 136.0f;
+
+inline float infoPanelHeight(size_t lineCount) {
+    if (lineCount == 0)
+        return 0.0f;
+    return kInfoPanelPadY * 2.0f + static_cast<float>(lineCount) * kInfoPanelLineH;
+}
 } // namespace settings_ui
