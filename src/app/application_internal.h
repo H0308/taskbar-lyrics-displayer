@@ -301,6 +301,7 @@ private:
     std::wstring settingsPath_;
     bool qqLocalLyricsPickerOpen_ = false;
     bool customLocalLyricsPickerOpen_ = false;
+    bool customLocalPlayerExePickerOpen_ = false;
     bool idleAppPickerOpen_ = false;
     bool genericSmtcAppPickerOpen_ = false;
 
@@ -551,6 +552,22 @@ private:
     void applyQqLocalLyricsPersistOrder(bool on);
 
     void applyCustomLocalLyricsEnabled(bool on);
+
+    void applyCustomLocalLyricsScope(int scope);
+
+    void syncCustomLocalLyricsScopeToProvider();
+
+    void showAddCustomLocalLyricsPlayerMenu();
+
+    void pickCustomLocalLyricsPlayerExe();
+
+    void addCustomLocalPlayerBuiltin(SmtcPlayerType player);
+
+    void addCustomLocalPlayerFromSource(const std::wstring& sourceId);
+
+    void addCustomLocalPlayerFromExe(const std::wstring& exePath);
+
+    void removeCustomLocalPlayer(int index);
 
     void applyGenericSmtcEnabled(bool on);
 

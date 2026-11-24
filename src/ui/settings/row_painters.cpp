@@ -653,11 +653,13 @@ void drawAppList(fluent::FluentDialogSurface::Painter& painter, const RowPaintCo
         painter.drawText(text, actionFormat, rect, enabled ? p.text : p.disabled);
     };
 
-    if (row.id == kIdGenericSmtcApps) {
-        const size_t count = ctx.genericSmtcRules.size();
+    if (row.id == kIdGenericSmtcApps || row.id == kIdCustomLocalLyricsPlayers) {
+        const bool isCustomLocal = row.id == kIdCustomLocalLyricsPlayers;
+        const auto rules = isCustomLocal ? ctx.customLocalLyricsPlayers : ctx.genericSmtcRules;
+        const size_t count = rules.size();
         for (size_t i = 0; i < count && i < row.appItemRects.size() && i < row.appDeleteRects.size();
              ++i) {
-            const auto& rule = ctx.genericSmtcRules[i];
+            const auto& rule = rules[i];
             const D2D1_RECT_F item = row.appItemRects[i];
             const int option = ctx.hoverId == row.id ? ctx.hoverOption : -1;
             const int pressedOptionValue = ctx.pressedId == row.id ? ctx.pressedOption : -1;
@@ -726,9 +728,13 @@ void drawAppList(fluent::FluentDialogSurface::Painter& painter, const RowPaintCo
 
         if (count == 0) {
             const wchar_t* emptyText =
-                row.enabled
-                    ? L"暂未添加应用，可从已检测到的 SMTC 应用或本地 EXE 添加"
-                    : L"开启通用识别并选择“仅白名单”或“排除黑名单”后可管理应用";
+                isCustomLocal
+                    ? (row.enabled
+                           ? L"暂未添加播放器，可从内置播放器、已检测到的 SMTC 应用或本地 EXE 添加"
+                           : L"开启自定义本地歌词并选择“仅指定播放器”后可管理播放器")
+                    : (row.enabled
+                           ? L"暂未添加应用，可从已检测到的 SMTC 应用或本地 EXE 添加"
+                           : L"开启通用识别并选择“仅白名单”或“排除黑名单”后可管理应用");
             painter.drawText(emptyText, pathFormat,
                              D2D1::RectF(innerX + 8.0f, listTop + 10.0f, innerRight - 8.0f,
                                          listTop + 34.0f),
@@ -743,7 +749,8 @@ void drawAppList(fluent::FluentDialogSurface::Painter& painter, const RowPaintCo
                    : p.listHover,
             row.addAppRect, 7.0f);
         painter.strokeRoundRect(canAdd ? p.accent : p.disabled, row.addAppRect, 1.0f, 7.0f);
-        painter.drawText(L"添加应用…", painter.textFormat(fluent::font_sizes::label, 600, true, true),
+        painter.drawText(isCustomLocal ? L"添加播放器…" : L"添加应用…",
+                         painter.textFormat(fluent::font_sizes::label, 600, true, true),
                          row.addAppRect, canAdd ? p.textOnAccent : p.disabled);
         return;
     }

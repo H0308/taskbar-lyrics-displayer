@@ -1,4 +1,6 @@
 #include "app/application_internal.h"
+#include "lyric/custom_local_lyric_index.h"
+#include "media/player_source.h"
 #include "ui/font_sizes.h"
 namespace lyrics_app {
 void App::refreshSettingsDialog(bool onlyWhenOpen) {
@@ -448,6 +450,293 @@ void App::removeGenericSmtcRule(int index) {
     refreshSettingsDialog();
 }
 
+void App::showAddCustomLocalLyricsPlayerMenu() {
+    if (settings_.customLocalLyricsScope_ != CustomLocalLyricsScope::SelectedPlayers)
+        return;
+    const auto& currentList = settings_.customLocalLyricsPlayers_;
+    if (currentList.size() >= kMaxGenericSmtcRules)
+        return;
+
+    constexpr SmtcPlayerType kBuiltinPlayers[] = {
+        SmtcPlayerType::QQMusic, SmtcPlayerType::NetEase, SmtcPlayerType::Soda,
+        SmtcPlayerType::Spotify, SmtcPlayerType::SaltPlayer,
+    };
+    auto builtinAlreadyAdded = [&](SmtcPlayerType player) {
+        const auto* def = player_source::find(player);
+        for (const auto& rule : currentList) {
+            if (lyric_detail::parseBuiltinPlayerRuleSourceId(rule.sourceId) == player)
+                return true;
+            if (def && !rule.processName.empty()) {
+                for (const wchar_t* proc : def->processNames) {
+                    if (_wcsicmp(proc, rule.processName.c_str()) == 0)
+                        return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    std::vector<std::wstring> detected = monitor.observedGenericSources();
+    const SmtcSnapshot snap = monitor.snapshot();
+    if (snap.sessionAlive && snap.player == SmtcPlayerType::Generic &&
+        !snap.sourceAppUserModelId.empty()) {
+        const bool exists = std::any_of(detected.begin(), detected.end(), [&](const auto& id) {
+            return _wcsicmp(id.c_str(), snap.sourceAppUserModelId.c_str()) == 0;
+        });
+        if (!exists)
+            detected.insert(detected.begin(), snap.sourceAppUserModelId);
+    }
+
+    constexpr int kCmdPickExe = 1;
+    constexpr int kCmdBuiltinBase = 10;
+    constexpr int kCmdDetectedBase = 100;
+    std::vector<fluent::FluentMenuItem> items;
+
+    {
+        fluent::FluentMenuItem header;
+        header.text = L"内置播放器";
+        header.enabled = false;
+        items.push_back(std::move(header));
+    }
+    for (size_t i = 0; i < _countof(kBuiltinPlayers); ++i) {
+        const SmtcPlayerType player = kBuiltinPlayers[i];
+        const auto* def = player_source::find(player);
+        if (!def)
+            continue;
+        const bool alreadyAdded = builtinAlreadyAdded(player);
+        fluent::FluentMenuItem item;
+        item.id = kCmdBuiltinBase + static_cast<int>(i);
+        item.text = def->displayName;
+        item.icon = settings_icon::Kind::MusicNote;
+        if (!def->processNames.empty()) {
+            const std::wstring exePath =
+                platform_icon::resolveSourceExePath(def->processNames.front());
+            if (!exePath.empty())
+                item.nativeIcon = shellIconForPath(exePath);
+        }
+        item.checked = alreadyAdded;
+        item.enabled = !alreadyAdded;
+        items.push_back(std::move(item));
+    }
+
+    {
+        fluent::FluentMenuItem sep;
+        sep.separator = true;
+        items.push_back(std::move(sep));
+    }
+
+    if (!detected.empty()) {
+        fluent::FluentMenuItem header;
+        header.text = L"已检测到的其他 SMTC 应用";
+        header.enabled = false;
+        items.push_back(std::move(header));
+
+        for (size_t i = 0; i < detected.size(); ++i) {
+            const std::wstring& sourceId = detected[i];
+            const bool alreadyAdded = sourceMatchesRuleList(currentList, sourceId);
+            std::wstring label = platform_icon::resolveSourceDisplayName(sourceId);
+            if (label == L"未知应用")
+                label += L" (" + sourceId + L")";
+            fluent::FluentMenuItem item;
+            item.id = kCmdDetectedBase + static_cast<int>(i);
+            item.text = std::move(label);
+            item.icon = settings_icon::Kind::MusicNote;
+            const std::wstring exePath = platform_icon::resolveSourceExePath(sourceId);
+            if (!exePath.empty())
+                item.nativeIcon = shellIconForPath(exePath);
+            item.checked = alreadyAdded;
+            item.enabled = !alreadyAdded;
+            items.push_back(std::move(item));
+        }
+    } else {
+        fluent::FluentMenuItem empty;
+        empty.text = L"暂未检测到其他 SMTC 应用（播放一下即可识别）";
+        empty.enabled = false;
+        items.push_back(std::move(empty));
+    }
+
+    {
+        fluent::FluentMenuItem sep;
+        sep.separator = true;
+        items.push_back(std::move(sep));
+    }
+
+    fluent::FluentMenuItem pickExe;
+    pickExe.id = kCmdPickExe;
+    pickExe.text = L"选择本地 EXE 文件…";
+    pickExe.icon = settings_icon::Kind::Folder;
+    items.push_back(std::move(pickExe));
+
+    POINT pt{};
+    GetCursorPos(&pt);
+    HWND owner = (settingsDialog && settingsDialog->isOpen()) ? settingsDialog->hwnd() : trayHwnd;
+    fluent::FluentMenu::show(owner, pt, std::move(items), [this, detected](int cmd) {
+        if (cmd == kCmdPickExe) {
+            pickCustomLocalLyricsPlayerExe();
+            return;
+        }
+        if (cmd >= kCmdBuiltinBase && cmd < kCmdBuiltinBase + 5) {
+            constexpr SmtcPlayerType kBuiltins[] = {
+                SmtcPlayerType::QQMusic, SmtcPlayerType::NetEase, SmtcPlayerType::Soda,
+                SmtcPlayerType::Spotify, SmtcPlayerType::SaltPlayer,
+            };
+            addCustomLocalPlayerBuiltin(kBuiltins[cmd - kCmdBuiltinBase]);
+            return;
+        }
+        if (cmd >= kCmdDetectedBase) {
+            const size_t idx = static_cast<size_t>(cmd - kCmdDetectedBase);
+            if (idx < detected.size())
+                addCustomLocalPlayerFromSource(detected[idx]);
+        }
+    });
+}
+
+void App::pickCustomLocalLyricsPlayerExe() {
+    if (customLocalPlayerExePickerOpen_)
+        return;
+
+    customLocalPlayerExePickerOpen_ = true;
+    runtime_log::writef(L"[action][custom-local-lyrics] choose-player-exe start");
+    const DWORD mainThreadId = mainThread;
+
+    std::thread([mainThreadId] {
+        std::wstring selectedPath;
+        const HRESULT init =
+            CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+        if (SUCCEEDED(init)) {
+            IFileOpenDialog* dialog = nullptr;
+            if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                           IID_PPV_ARGS(&dialog)))) {
+                const COMDLG_FILTERSPEC filters[] = {{L"应用程序 (*.exe)", L"*.exe"}};
+                DWORD options = 0;
+                if (SUCCEEDED(dialog->GetOptions(&options)))
+                    dialog->SetOptions(options | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST |
+                                       FOS_PATHMUSTEXIST);
+                dialog->SetFileTypes(_countof(filters), filters);
+                dialog->SetTitle(L"选择要添加的播放器程序");
+                if (SUCCEEDED(dialog->Show(nullptr))) {
+                    IShellItem* item = nullptr;
+                    if (SUCCEEDED(dialog->GetResult(&item)) && item) {
+                        PWSTR path = nullptr;
+                        if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path) {
+                            selectedPath = path;
+                            CoTaskMemFree(path);
+                        }
+                        item->Release();
+                    }
+                }
+                dialog->Release();
+            }
+            CoUninitialize();
+        }
+
+        runtime_log::writef(L"[action][custom-local-lyrics] choose-player-exe result=%s path=%s",
+                            selectedPath.empty() ? L"cancelled" : L"selected",
+                            selectedPath.c_str());
+        auto* payload = new IdleAppPayload{std::move(selectedPath)};
+        if (!PostThreadMessageW(mainThreadId, kMsgCustomLocalPlayerExeReady, 0,
+                                reinterpret_cast<LPARAM>(payload)))
+            delete payload;
+    }).detach();
+}
+
+void App::addCustomLocalPlayerBuiltin(SmtcPlayerType player) {
+    if (settings_.customLocalLyricsScope_ != CustomLocalLyricsScope::SelectedPlayers)
+        return;
+    auto& targetList = settings_.customLocalLyricsPlayers_;
+    if (targetList.size() >= kMaxGenericSmtcRules)
+        return;
+
+    GenericSmtcAppRule rule = lyric_detail::makeBuiltinPlayerRule(player);
+    if (rule.sourceId.empty() || ruleAlreadyExists(targetList, rule))
+        return;
+
+    targetList.push_back(std::move(rule));
+    runtime_log::writef(L"[action][custom-local-lyrics] player-added builtin=%d",
+                        static_cast<int>(player));
+    syncCustomLocalLyricsScopeToProvider();
+    saveSettings();
+    playback_.reloadCurrentLyrics();
+}
+
+void App::addCustomLocalPlayerFromSource(const std::wstring& sourceId) {
+    if (sourceId.empty() ||
+        settings_.customLocalLyricsScope_ != CustomLocalLyricsScope::SelectedPlayers)
+        return;
+    auto& targetList = settings_.customLocalLyricsPlayers_;
+    if (targetList.size() >= kMaxGenericSmtcRules)
+        return;
+
+    const AudioSessionTarget audioTarget =
+        platform_icon::resolveSourceAudioTarget(SmtcPlayerType::Generic, sourceId);
+    GenericSmtcAppRule rule;
+    rule.sourceId = sourceId;
+    if (!audioTarget.processNames.empty())
+        rule.processName = audioTarget.processNames.front();
+    rule.packageFamilyName = audioTarget.packageFamilyName;
+    rule.displayName = platform_icon::resolveSourceDisplayName(sourceId);
+    if (ruleAlreadyExists(targetList, rule))
+        return;
+
+    targetList.push_back(std::move(rule));
+    runtime_log::writef(L"[action][custom-local-lyrics] player-added source=%s", sourceId.c_str());
+    syncCustomLocalLyricsScopeToProvider();
+    saveSettings();
+    playback_.reloadCurrentLyrics();
+}
+
+void App::addCustomLocalPlayerFromExe(const std::wstring& exePath) {
+    if (exePath.empty() || !validExePath(exePath) ||
+        settings_.customLocalLyricsScope_ != CustomLocalLyricsScope::SelectedPlayers)
+        return;
+    auto& targetList = settings_.customLocalLyricsPlayers_;
+    if (targetList.size() >= kMaxGenericSmtcRules)
+        return;
+
+    const size_t slash = exePath.find_last_of(L"\\/");
+    const std::wstring fileName =
+        slash == std::wstring::npos ? exePath : exePath.substr(slash + 1);
+    if (fileName.empty())
+        return;
+
+    GenericSmtcAppRule rule;
+    rule.processName = fileName;
+    if (!platform_icon::readExeDisplayName(exePath, rule.displayName) || rule.displayName.empty())
+        rule.displayName = fallbackExeName(exePath);
+    std::vector<BYTE> pixels;
+    UINT width = 0;
+    UINT height = 0;
+    if (platform_icon::readExeIconPixels(exePath, pixels, width, height) && !pixels.empty()) {
+        rule.iconPixels = std::make_shared<std::vector<uint8_t>>(pixels.begin(), pixels.end());
+        rule.iconWidth = width;
+        rule.iconHeight = height;
+    }
+    if (ruleAlreadyExists(targetList, rule))
+        return;
+
+    targetList.push_back(std::move(rule));
+    runtime_log::writef(L"[action][custom-local-lyrics] player-added exe=%s", fileName.c_str());
+    syncCustomLocalLyricsScopeToProvider();
+    saveSettings();
+    playback_.reloadCurrentLyrics();
+}
+
+void App::removeCustomLocalPlayer(int index) {
+    if (settings_.customLocalLyricsScope_ != CustomLocalLyricsScope::SelectedPlayers)
+        return;
+    auto& targetList = settings_.customLocalLyricsPlayers_;
+    if (index < 0 || static_cast<size_t>(index) >= targetList.size())
+        return;
+
+    const auto& removed = targetList[static_cast<size_t>(index)];
+    runtime_log::writef(L"[action][custom-local-lyrics] player-removed name=%s",
+                        removed.displayName.c_str());
+    targetList.erase(targetList.begin() + index);
+    syncCustomLocalLyricsScopeToProvider();
+    saveSettings();
+    playback_.reloadCurrentLyrics();
+}
+
 void App::showManualSearch(HINSTANCE inst) {
     runtime_log::writef(L"[action][dialog] open=manual-search title=%s artist=%s",
                         playback_.state().currentTitle.c_str(),
@@ -467,7 +756,8 @@ void App::showManualSearch(HINSTANCE inst) {
     if (!manualSearchDialog->create(
             inst, trayHwnd, &playback_.lyricProvider(), playback_.state().currentTitle,
             playback_.state().currentArtist, playback_.state().currentDurationMs,
-            manualTarget.player, targetNeteaseSongId, manualTarget.album)) {
+            manualTarget.player, targetNeteaseSongId, manualTarget.album,
+            manualTarget.sourceAppUserModelId)) {
         manualSearchDialog.reset();
         return;
     }

@@ -439,10 +439,11 @@ void PlaybackController::startLyricRequest(const SmtcSnapshot& snap, bool forceO
                                       : Order::Default;
     if (snap.player == SmtcPlayerType::NetEase) {
         provider.requestNeteaseAsync(snap.neteaseSongId, snap.title, snap.artist, snap.album,
-                                     durationMs, postLyricResult, order, persistOrder);
+                                     durationMs, postLyricResult, order, persistOrder,
+                                     snap.sourceAppUserModelId);
     } else if (snap.player == SmtcPlayerType::Soda) {
         provider.requestSodaAsync(snap.title, snap.artist, snap.album, durationMs, postLyricResult,
-                                  order, persistOrder);
+                                  order, persistOrder, snap.sourceAppUserModelId);
     } else {
         using Source = LyricProvider::RequestSource;
         const Source source = snap.player == SmtcPlayerType::SaltPlayer ? Source::SaltPlayer
@@ -450,7 +451,7 @@ void PlaybackController::startLyricRequest(const SmtcSnapshot& snap, bool forceO
                               : snap.player == SmtcPlayerType::Generic  ? Source::Generic
                                                                         : Source::Default;
         provider.requestAsync(snap.title, snap.artist, durationMs, postLyricResult, source,
-                              persistOrder, snap.album, order);
+                              persistOrder, snap.album, order, snap.sourceAppUserModelId);
     }
 }
 

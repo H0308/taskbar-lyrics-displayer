@@ -7,5 +7,5 @@ std::vector<Row> createLyricRows(const SettingsState& state);
 void updateLyricRows(std::vector<Row>& rows, const SettingsState& state);
 void updateCompactLyricRows(std::vector<Row>& rows, const SettingsState& state);
 bool handleLyricCommand(int id, Row& row, std::vector<Row>& rows, SettingsState& state,
-                        const SettingsActions& actions);
+                        const SettingsActions& actions, int option = -1);
 } // namespace settings_ui

@@ -291,7 +291,7 @@ void SettingsSections::onCommand(int id, int option) {
     Row* row = findRow(id);
     if (!row || !row->enabled)
         return;
-    if (settings_ui::handleLyricCommand(id, *row, rows[kLyricsPage], state, actions)) {
+    if (settings_ui::handleLyricCommand(id, *row, rows[kLyricsPage], state, actions, option)) {
         return;
     }
     if (onIdleCommand(id, row, option) || onSpectrumCommand(id, row) ||

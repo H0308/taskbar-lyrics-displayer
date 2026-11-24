@@ -1016,7 +1016,7 @@ struct SettingsDialog::Impl {
                 y += rowH + row.gapAfter;
                 continue;
             }
-            if (row.id == kIdGenericSmtcApps) {
+            if (row.id == kIdGenericSmtcApps || row.id == kIdCustomLocalLyricsPlayers) {
                 const float titleTop = y + kTitleTopPadding;
                 placeIcon(titleTop);
                 row.labelRect = D2D1::RectF(labelX, titleTop, innerRight,
@@ -1024,9 +1024,14 @@ struct SettingsDialog::Impl {
                 const float hintTop = titleTop + row.titleHeight + kTitleHintGap;
                 row.hintRect = D2D1::RectF(labelX, hintTop, innerRight, hintTop + 30.0f);
                 const float listTop = y + kIdleAppsListTop;
-                const size_t count = sections_.state.genericSmtcFilterMode == 0
-                                         ? 0
-                                         : sections_.state.genericSmtcRules.size();
+                const size_t count =
+                    row.id == kIdCustomLocalLyricsPlayers
+                        ? (sections_.state.customLocalLyricsScope == 1
+                               ? sections_.state.customLocalLyricsPlayers.size()
+                               : 0)
+                        : (sections_.state.genericSmtcFilterMode == 0
+                               ? 0
+                               : sections_.state.genericSmtcRules.size());
                 row.appItemRects.reserve(count);
                 row.appDeleteRects.reserve(count);
                 for (size_t i = 0; i < count; ++i) {
@@ -1441,12 +1446,17 @@ struct SettingsDialog::Impl {
             sections_.state.genericSmtcFilterMode == 0
                 ? std::span<const GenericSmtcAppRule>{}
                 : std::span<const GenericSmtcAppRule>{sections_.state.genericSmtcRules};
+        const std::span<const GenericSmtcAppRule> visibleCustomLocalPlayers =
+            sections_.state.customLocalLyricsScope == 1
+                ? std::span<const GenericSmtcAppRule>{sections_.state.customLocalLyricsPlayers}
+                : std::span<const GenericSmtcAppRule>{};
         return {
             artwork_,
             slider_,
             sections_.state.floatingCardBackgroundColor,
             sections_.state.idleApps,
             visibleGenericRules,
+            visibleCustomLocalPlayers,
             surface.dpi(),
             idleAppDragging,
             idleAppDragIndex,
@@ -1715,7 +1725,11 @@ struct SettingsDialog::Impl {
             if (!row.enabled)
                 continue;
             if (row.kind == ControlKind::AppList) {
-                if (row.id == kIdGenericSmtcApps) {
+                if (row.id == kIdGenericSmtcApps || row.id == kIdCustomLocalLyricsPlayers) {
+                    const size_t listSize =
+                        row.id == kIdCustomLocalLyricsPlayers
+                            ? sections_.state.customLocalLyricsPlayers.size()
+                            : sections_.state.genericSmtcRules.size();
                     for (size_t i = 0; i < row.appDeleteRects.size(); ++i) {
                         if (contains(row.appDeleteRects[i], x, y)) {
                             if (option)
@@ -1723,7 +1737,7 @@ struct SettingsDialog::Impl {
                             return row.id;
                         }
                     }
-                    if (sections_.state.genericSmtcRules.size() < kMaxGenericSmtcRules &&
+                    if (listSize < kMaxGenericSmtcRules &&
                         contains(row.addAppRect, x, y))
                         return row.id;
                     continue;

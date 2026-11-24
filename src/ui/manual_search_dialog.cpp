@@ -128,6 +128,7 @@ struct ManualSearchDialog::Impl {
     std::wstring targetNeteaseSongId;
     SmtcPlayerType targetPlayer = SmtcPlayerType::Unknown;
     std::wstring targetAlbum;
+    std::wstring targetSourceAppId;
 
     bool targetIsSoda() const { return targetPlayer == SmtcPlayerType::Soda; }
     bool targetIsNetease() const { return targetPlayer == SmtcPlayerType::NetEase; }
@@ -849,7 +850,7 @@ struct ManualSearchDialog::Impl {
                 if (!PostMessageW(hwndCopy, kMsgCandidatesReady, generation,
                                   reinterpret_cast<LPARAM>(payload)))
                     delete payload;
-            }, targetPlayer);
+            }, targetPlayer, targetSourceAppId);
     }
 
     void handleCandidatesReady(const std::vector<SearchCandidate>& result) {
@@ -1293,7 +1294,8 @@ bool ManualSearchDialog::create(HINSTANCE inst, HWND parent, LyricProvider* prov
                                 const std::wstring& targetArtist,
                                 int64_t targetDurationMs, SmtcPlayerType targetPlayer,
                                 const std::wstring& targetNeteaseSongId,
-                                const std::wstring& targetAlbum) {
+                                const std::wstring& targetAlbum,
+                                const std::wstring& targetSourceAppId) {
     impl_->notifyHwnd = parent; // 仅用于关闭通知
     impl_->provider = provider;
     impl_->targetTitle = targetTitle;
@@ -1302,6 +1304,7 @@ bool ManualSearchDialog::create(HINSTANCE inst, HWND parent, LyricProvider* prov
     impl_->targetNeteaseSongId = targetNeteaseSongId;
     impl_->targetPlayer = targetPlayer;
     impl_->targetAlbum = targetAlbum;
+    impl_->targetSourceAppId = targetSourceAppId;
 
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
@@ -1390,10 +1393,12 @@ void ManualSearchDialog::setPlaybackPosition(int64_t positionMs) {
 void ManualSearchDialog::setTargetSong(const std::wstring& title, const std::wstring& artist,
                                       int64_t durationMs, SmtcPlayerType player,
                                       const std::wstring& neteaseSongId,
-                                      const std::wstring& album) {
+                                      const std::wstring& album,
+                                      const std::wstring& sourceAppId) {
     const bool changed = title != impl_->targetTitle || artist != impl_->targetArtist ||
                          neteaseSongId != impl_->targetNeteaseSongId ||
                          player != impl_->targetPlayer ||
+                         sourceAppId != impl_->targetSourceAppId ||
                          (player_source::usesMetadataLyricPath(player) &&
                           album != impl_->targetAlbum);
     impl_->targetDurationMs = durationMs;
@@ -1404,6 +1409,7 @@ void ManualSearchDialog::setTargetSong(const std::wstring& title, const std::wst
     impl_->targetNeteaseSongId = neteaseSongId;
     impl_->targetPlayer = player;
     impl_->targetAlbum = album;
+    impl_->targetSourceAppId = sourceAppId;
     ++impl_->searchGeneration;
     ++impl_->previewGeneration;
     impl_->candidateItems.clear();

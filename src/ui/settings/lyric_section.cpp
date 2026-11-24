@@ -1,5 +1,6 @@
 #include "ui/settings/lyric_section.h"
 #include "ui/settings/ids.h"
+#include "ui/settings/section_metrics.h"
 #include <algorithm>
 
 namespace settings_ui {
@@ -63,8 +64,8 @@ std::vector<Row> createLyricRows(const SettingsState& state) {
     builder.addHeader(L"本地歌词");
     Row& customLocalEnabled = builder.addRow(
         kIdCustomLocalLyricsEnabled, ControlKind::Toggle, L"使用自定义本地歌词",
-        L"优先从指定目录匹配 .lrc 与音频内嵌歌词（不递归子目录），适用于所有播放器。", 40.0f,
-        kRowTallH);
+        L"优先从指定目录匹配 .lrc 与音频内嵌歌词（不递归子目录），可设置全部应用或仅指定播放器生效。",
+        40.0f, kRowTallH);
     customLocalEnabled.checked = state.customLocalLyricsEnabled;
     const std::wstring customLocalPathHint = state.customLocalLyricsPath.empty()
                                                  ? std::wstring(L"未配置")
@@ -72,6 +73,21 @@ std::vector<Row> createLyricRows(const SettingsState& state) {
     Row& customLocalPath = builder.addButton(kIdCustomLocalLyricsPath, L"本地歌词目录",
                                              customLocalPathHint.c_str(), L"选择文件夹…", kRowTallH);
     customLocalPath.enabled = state.customLocalLyricsEnabled;
+    const int customScope = std::clamp(state.customLocalLyricsScope, 0, 1);
+    builder.addRadio(kIdCustomLocalLyricsScope, L"生效范围", nullptr,
+                     {L"全部应用", L"仅指定播放器"}, customScope,
+                     state.customLocalLyricsEnabled, kRowH);
+    const wchar_t* playersHint =
+        customScope == 1
+            ? L"仅当以下播放器处于播放状态时，优先读取自定义本地歌词目录。"
+            : L"切换为“仅指定播放器”后可指定需要读取本地歌词的播放器。";
+    const size_t visiblePlayers =
+        customScope == 1 ? state.customLocalLyricsPlayers.size() : 0;
+    Row& customPlayers = builder.addRow(
+        kIdCustomLocalLyricsPlayers, ControlKind::AppList, L"指定播放器", playersHint, 0.0f,
+        kIdleAppsBaseH + static_cast<float>(std::max<size_t>(1, visiblePlayers)) * kIdleAppItemH);
+    customPlayers.height = customPlayers.minHeight;
+    customPlayers.enabled = state.customLocalLyricsEnabled && customScope == 1;
     builder.addToggle(kIdQqLocalLyricsEnabled, L"使用 QQ 音乐本地歌词", state.qqLocalLyricsEnabled);
     const std::wstring localPathHint =
         state.qqLocalLyricsPath.empty() ? std::wstring(L"未配置") : state.qqLocalLyricsPath;
@@ -142,6 +158,22 @@ void updateLyricRows(std::vector<Row>& rows, const SettingsState& s) {
         row->height = row->minHeight;
         row->enabled = s.customLocalLyricsEnabled;
     }
+    const int customScope = std::clamp(s.customLocalLyricsScope, 0, 1);
+    if (auto* row = findRow(kIdCustomLocalLyricsScope)) {
+        row->selected = customScope;
+        row->enabled = s.customLocalLyricsEnabled;
+    }
+    if (auto* row = findRow(kIdCustomLocalLyricsPlayers)) {
+        row->hint = customScope == 1
+                        ? L"仅当以下播放器处于播放状态时，优先读取自定义本地歌词目录。"
+                        : L"切换为“仅指定播放器”后可指定需要读取本地歌词的播放器。";
+        row->showHint = true;
+        const size_t visibleCount = customScope == 1 ? s.customLocalLyricsPlayers.size() : 0;
+        row->minHeight =
+            kIdleAppsBaseH + static_cast<float>(std::max<size_t>(1, visibleCount)) * kIdleAppItemH;
+        row->height = row->minHeight;
+        row->enabled = s.customLocalLyricsEnabled && customScope == 1;
+    }
     if (auto* row = findRow(kIdQqLocalLyricsEnabled))
         row->checked = s.qqLocalLyricsEnabled;
     if (auto* row = findRow(kIdQqLocalLyricsPersistOrder)) {
@@ -187,7 +219,7 @@ void updateCompactLyricRows(std::vector<Row>& rows, const SettingsState& state) 
 }
 
 bool handleLyricCommand(int id, Row& value, std::vector<Row>& rows, SettingsState& state,
-                        const SettingsActions& actions) {
+                        const SettingsActions& actions, int option) {
     Row* row = &value;
     auto findRow = [&](int rowId) { return settings_ui::findRow(rows, rowId); };
     switch (id) {
@@ -251,16 +283,29 @@ bool handleLyricCommand(int id, Row& value, std::vector<Row>& rows, SettingsStat
     case kIdCustomLocalLyricsEnabled:
         row->checked = !row->checked;
         state.customLocalLyricsEnabled = row->checked;
-        if (auto* path = findRow(kIdCustomLocalLyricsPath))
-            path->enabled = row->checked;
-        if (auto* persist = findRow(kIdQqLocalLyricsPersistOrder))
-            persist->enabled = state.customLocalLyricsEnabled || state.qqLocalLyricsEnabled;
+        updateLyricRows(rows, state);
         if (actions.onCustomLocalLyricsEnabled)
             actions.onCustomLocalLyricsEnabled(row->checked);
         break;
     case kIdCustomLocalLyricsPath:
         if (actions.onPickCustomLocalLyricsPath)
             actions.onPickCustomLocalLyricsPath();
+        break;
+    case kIdCustomLocalLyricsScope:
+        state.customLocalLyricsScope = std::clamp(row->selected, 0, 1);
+        updateLyricRows(rows, state);
+        if (actions.onCustomLocalLyricsScope)
+            actions.onCustomLocalLyricsScope(state.customLocalLyricsScope);
+        break;
+    case kIdCustomLocalLyricsPlayers:
+        if (option >= 0) {
+            if (static_cast<size_t>(option) < state.customLocalLyricsPlayers.size() &&
+                actions.onRemoveCustomLocalLyricsPlayer)
+                actions.onRemoveCustomLocalLyricsPlayer(option);
+        } else if (state.customLocalLyricsPlayers.size() < kMaxGenericSmtcRules &&
+                   actions.onAddCustomLocalLyricsPlayer) {
+            actions.onAddCustomLocalLyricsPlayer();
+        }
         break;
     case kIdQqLocalLyricsEnabled:
         row->checked = !row->checked;

@@ -353,7 +353,7 @@ void App::onSmtcChanged() {
         manualSearchDialog->setTargetSong(
             snap.title, snap.artist, snap.timelineStale ? 0 : snap.durationMs,
             snap.player, snap.player == SmtcPlayerType::NetEase ? snap.neteaseSongId : L"",
-            snap.album);
+            snap.album, snap.sourceAppUserModelId);
         manualSearchTrackKey = key;
     }
     const TrackChange change = playback_.updateTrack(snap);

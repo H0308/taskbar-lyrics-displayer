@@ -283,4 +283,43 @@ TEST_CASE("custom_local_lyric_index.single_level_matching_embedded_audio_and_ord
     EXPECT_TRUE(lyric_detail::readCustomLocalOrderOverride(orderPath));
     EXPECT_TRUE(lyric_detail::writeCustomLocalOrderOverride(orderPath, false));
     EXPECT_FALSE(lyric_detail::readCustomLocalOrderOverride(orderPath));
+
+    // 指定播放器范围匹配：内置播放器（含商店版/桌面版）、本地 EXE 与通用 SMTC 应用
+    std::vector<GenericSmtcAppRule> playerRules;
+    playerRules.push_back(lyric_detail::makeBuiltinPlayerRule(SmtcPlayerType::SaltPlayer));
+    GenericSmtcAppRule exeRule;
+    exeRule.processName = L"foobar2000.exe";
+    exeRule.displayName = L"foobar2000";
+    playerRules.push_back(exeRule);
+    GenericSmtcAppRule uwpRule;
+    uwpRule.sourceId = L"Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic";
+    uwpRule.packageFamilyName = L"Microsoft.ZuneMusic_8wekyb3d8bbwe";
+    uwpRule.displayName = L"媒体播放器";
+    playerRules.push_back(uwpRule);
+
+    EXPECT_TRUE(lyric_detail::matchesCustomLocalPlayerRules(
+        SmtcPlayerType::SaltPlayer, L"Sakawish.SaltPlayerforWindows_abc123!SaltPlayerforWindows",
+        {}, playerRules));
+    EXPECT_FALSE(lyric_detail::matchesCustomLocalPlayerRules(
+        SmtcPlayerType::QQMusic, L"QQMusic.exe", {}, playerRules));
+
+    AudioSessionTarget foobarTarget;
+    foobarTarget.processNames = {L"foobar2000.exe"};
+    EXPECT_TRUE(lyric_detail::matchesCustomLocalPlayerRules(
+        SmtcPlayerType::Generic, L"foobar2000.exe", foobarTarget, playerRules));
+
+    AudioSessionTarget uwpTarget;
+    uwpTarget.packageFamilyName = L"Microsoft.ZuneMusic_8wekyb3d8bbwe";
+    EXPECT_TRUE(lyric_detail::matchesCustomLocalPlayerRules(
+        SmtcPlayerType::Generic, L"Microsoft.ZuneMusic_8wekyb3d8bbwe!App", uwpTarget, playerRules));
+
+    LyricProvider provider;
+    provider.setCustomLocalLyricsConfig(true, root.path.wstring());
+    EXPECT_TRUE(provider.isCustomLocalEnabledFor(SmtcPlayerType::QQMusic, L"QQMusic.exe"));
+    provider.setCustomLocalLyricsScope(CustomLocalLyricsScope::SelectedPlayers, {});
+    EXPECT_FALSE(provider.isCustomLocalEnabledFor(SmtcPlayerType::QQMusic, L"QQMusic.exe"));
+    provider.setCustomLocalLyricsScope(CustomLocalLyricsScope::SelectedPlayers, playerRules);
+    EXPECT_TRUE(provider.isCustomLocalEnabledFor(SmtcPlayerType::SaltPlayer,
+                                                 L"Salt Player for Windows.exe"));
+    EXPECT_FALSE(provider.isCustomLocalEnabledFor(SmtcPlayerType::QQMusic, L"QQMusic.exe"));
 }

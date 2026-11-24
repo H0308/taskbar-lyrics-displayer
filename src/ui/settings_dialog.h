@@ -112,6 +112,8 @@ struct SettingsState {
     std::wstring qqLocalLyricsPath;
     bool customLocalLyricsEnabled = false;
     std::wstring customLocalLyricsPath;
+    int customLocalLyricsScope = 0; // 0 全部应用 1 仅指定播放器
+    std::vector<GenericSmtcAppRule> customLocalLyricsPlayers;
     bool genericSmtcEnabled = false;
     int genericSmtcFilterMode = 0; // 0 全部应用 1 仅白名单 2 排除黑名单
     std::vector<GenericSmtcAppRule> genericSmtcRules;
@@ -217,6 +219,9 @@ struct SettingsActions {
     std::function<void()> onPickQqLocalLyricsPath;
     std::function<void(bool)> onCustomLocalLyricsEnabled;
     std::function<void()> onPickCustomLocalLyricsPath;
+    std::function<void(int)> onCustomLocalLyricsScope;
+    std::function<void()> onAddCustomLocalLyricsPlayer;
+    std::function<void(int)> onRemoveCustomLocalLyricsPlayer;
     std::function<void(bool)> onGenericSmtcEnabled;
     std::function<void(int)> onGenericSmtcFilterMode;
     std::function<void()> onAddGenericSmtcApp;

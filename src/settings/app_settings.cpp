@@ -690,6 +690,10 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
     qqLocalLyricsPath_ = wideOf(j.value("qqLocalLyricsPath", std::string()));
     customLocalLyricsEnabled_ = j.value("customLocalLyricsEnabled", false);
     customLocalLyricsPath_ = wideOf(j.value("customLocalLyricsPath", std::string()));
+    customLocalLyricsScope_ =
+        j.value("customLocalLyricsScope", std::string("all")) == "selected"
+            ? CustomLocalLyricsScope::SelectedPlayers
+            : CustomLocalLyricsScope::All;
     genericSmtcEnabled_ = j.value("genericSmtcEnabled", false);
     {
         const std::string mode = j.value("genericSmtcFilterMode", std::string("all"));
@@ -719,6 +723,7 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
     };
     readRuleList("genericSmtcAllowList", genericSmtcAllowList_);
     readRuleList("genericSmtcBlockList", genericSmtcBlockList_);
+    readRuleList("customLocalLyricsPlayers", customLocalLyricsPlayers_);
 }
 
 nlohmann::json AppSettings::toJson() const {
@@ -937,6 +942,9 @@ nlohmann::json AppSettings::toJson() const {
     };
     writeRuleList("genericSmtcAllowList", genericSmtcAllowList_);
     writeRuleList("genericSmtcBlockList", genericSmtcBlockList_);
+    j["customLocalLyricsScope"] =
+        customLocalLyricsScope_ == CustomLocalLyricsScope::SelectedPlayers ? "selected" : "all";
+    writeRuleList("customLocalLyricsPlayers", customLocalLyricsPlayers_);
     j["logDirectory"] = utf8Of(logDirectory_);
     j["logRetentionDays"] = logRetentionDays_;
     j["frameRate"] = frameRate_;

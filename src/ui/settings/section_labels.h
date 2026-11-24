@@ -181,6 +181,7 @@ inline settings_icon::Kind iconForRow(int id) {
         return settings_icon::Kind::Refresh;
     case kIdIdleApps:
     case kIdGenericSmtcApps:
+    case kIdCustomLocalLyricsPlayers:
         return settings_icon::Kind::Apps;
     case kIdTickTickApiToken:
         return settings_icon::Kind::Api;
@@ -203,6 +204,8 @@ inline settings_icon::Kind iconForRow(int id) {
     case kIdQqLocalLyricsEnabled:
     case kIdCustomLocalLyricsEnabled:
         return settings_icon::Kind::LocalLyrics;
+    case kIdCustomLocalLyricsScope:
+        return settings_icon::Kind::Platform;
     case kIdQqLocalLyricsPath:
     case kIdCustomLocalLyricsPath:
         return settings_icon::Kind::Folder;

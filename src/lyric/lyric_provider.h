@@ -84,6 +84,7 @@ public:
     using FetchCallback = std::function<void(bool ok, const std::vector<LyricLine>& lines,
                                              const SongInfo& info)>;
     using SongInfoCallback = std::function<void(const SongInfo& info)>;
+    using SourceTargetResolver = std::function<AudioSessionTarget(const std::wstring&)>;
 
     LyricProvider();
     ~LyricProvider();
@@ -103,7 +104,8 @@ public:
     void requestAsync(const std::wstring& title, const std::wstring& artist, int64_t durationMs,
                       ReadyCallback cb, RequestSource source = RequestSource::Default,
                       bool persistOrder = false, const std::wstring& album = {},
-                      OrderPreference order = OrderPreference::Default);
+                      OrderPreference order = OrderPreference::Default,
+                      const std::wstring& sourceAppUserModelId = {});
 
     // 按网易云歌曲 ID 异步取歌词：优先 YRC，失败后回退网易云 LRC。
     // 曲目元数据用于手动覆盖、自定义本地歌词和原生未命中后的通用匹配。
@@ -111,14 +113,16 @@ public:
                              const std::wstring& artist, const std::wstring& album,
                              int64_t durationMs, ReadyCallback cb,
                              OrderPreference order = OrderPreference::Default,
-                             bool persistOrder = false);
+                             bool persistOrder = false,
+                             const std::wstring& sourceAppUserModelId = {});
 
     // 汽水优先搜索原生逐字/LRC，试听片段按原生的试听起点对齐。
     // 联网前合并切歌元数据事件，新请求使旧请求取消；手动覆盖、自定义本地和缓存立即返回。
     void requestSodaAsync(const std::wstring& title, const std::wstring& artist,
                             const std::wstring& album, int64_t durationMs, ReadyCallback cb,
                             OrderPreference order = OrderPreference::Default,
-                            bool persistOrder = false);
+                            bool persistOrder = false,
+                            const std::wstring& sourceAppUserModelId = {});
 
     // 仅按当前元数据查询 QQ songmid/albummid，不读取或替换当前歌词。
     void requestQqSongInfoAsync(const std::wstring& title, const std::wstring& artist,
@@ -126,7 +130,8 @@ public:
 
     // 手动搜索查询全部来源，原生候选优先显示。
     void searchCandidatesAsync(const std::wstring& title, const std::wstring& artist,
-                               SearchCallback cb, SmtcPlayerType player);
+                               SearchCallback cb, SmtcPlayerType player,
+                               const std::wstring& sourceAppUserModelId = {});
 
     // 按候选歌曲异步取歌词，不修改当前播放内容。
     void fetchLyricAsync(const SearchCandidate& cand, FetchCallback cb,
@@ -146,8 +151,19 @@ public:
     // 设置 QQ 版本顺序标记目录；只保存 *_qm.order.json，不保存歌词内容。
     void setQqLyricOrderDir(const std::wstring& dir);
 
-    // 设置自定义本地歌词目录（单目录不递归，支持 .lrc 与音频内嵌歌词，适用于所有播放器）。
+    // 设置自定义本地歌词目录（单目录不递归，支持 .lrc 与音频内嵌歌词）。
     void setCustomLocalLyricsConfig(bool enabled, const std::wstring& dir);
+
+    // 设置自定义本地歌词的生效范围（全部应用或仅指定播放器列表）。
+    void setCustomLocalLyricsScope(CustomLocalLyricsScope scope,
+                                   std::vector<GenericSmtcAppRule> players);
+
+    // 注入来源标识到进程/包族解析器，供指定播放器规则跨 AUMID 匹配。
+    void setSourceTargetResolver(SourceTargetResolver resolver);
+
+    // 判断当前播放会话是否处于自定义本地歌词生效范围内。
+    bool isCustomLocalEnabledFor(SmtcPlayerType player,
+                                 const std::wstring& sourceAppUserModelId) const;
 
     // 设置自定义本地歌词单曲版本顺序标记目录；只保存 *.order.json，不保存歌词内容。
     void setCustomLocalLyricOrderDir(const std::wstring& dir);

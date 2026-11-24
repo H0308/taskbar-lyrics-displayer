@@ -91,6 +91,12 @@ void App::dispatchThreadMessage(const MSG& msg) {
         customLocalLyricsPickerOpen_ = false;
         if (payload)
             applyCustomLocalLyricsPath(payload->path);
+    } else if (msg.message == kMsgCustomLocalPlayerExeReady) {
+        auto payload =
+            std::unique_ptr<IdleAppPayload>(reinterpret_cast<IdleAppPayload*>(msg.lParam));
+        customLocalPlayerExePickerOpen_ = false;
+        if (payload && !payload->path.empty())
+            addCustomLocalPlayerFromExe(payload->path);
     } else if (msg.message == kMsgIdleAppReady) {
         auto payload =
             std::unique_ptr<IdleAppPayload>(reinterpret_cast<IdleAppPayload*>(msg.lParam));
@@ -228,6 +234,9 @@ bool App::initialize(HINSTANCE inst, bool wantTaskbar) {
     }
 
     monitor.setSourceTargetResolver([](const std::wstring& sourceId) {
+        return platform_icon::resolveSourceAudioTarget(SmtcPlayerType::Generic, sourceId);
+    });
+    playback_.lyricProvider().setSourceTargetResolver([](const std::wstring& sourceId) {
         return platform_icon::resolveSourceAudioTarget(SmtcPlayerType::Generic, sourceId);
     });
     syncGenericSmtcFilterToMonitor();

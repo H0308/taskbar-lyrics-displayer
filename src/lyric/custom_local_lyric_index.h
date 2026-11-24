@@ -60,4 +60,12 @@ std::filesystem::path customLocalOrderPath(const std::wstring& orderDir, const s
 bool readCustomLocalOrderOverride(const std::filesystem::path& orderPath);
 bool writeCustomLocalOrderOverride(const std::filesystem::path& orderPath, bool onlineFirst);
 
+// 内置播放器规则标识（跨桌面版与商店版统一匹配）及指定播放器生效范围判定。
+std::wstring builtinPlayerRuleSourceId(SmtcPlayerType player);
+SmtcPlayerType parseBuiltinPlayerRuleSourceId(const std::wstring& sourceId);
+GenericSmtcAppRule makeBuiltinPlayerRule(SmtcPlayerType player);
+bool matchesCustomLocalPlayerRules(SmtcPlayerType player, const std::wstring& sourceId,
+                                   const AudioSessionTarget& target,
+                                   const std::vector<GenericSmtcAppRule>& rules);
+
 } // namespace lyric_detail

@@ -4,6 +4,7 @@
 #include "lyric/lrc_parser.h"
 #include "lyric/lyric_http.h"
 #include "lyric/lyric_matching.h"
+#include "media/player_source.h"
 
 #include <nlohmann/json.hpp>
 #include <taglib/audioproperties.h>
@@ -795,6 +796,83 @@ bool writeCustomLocalOrderOverride(const std::filesystem::path& orderPath, bool 
     } catch (...) {
         return false;
     }
+}
+
+std::wstring builtinPlayerRuleSourceId(SmtcPlayerType player) {
+    switch (player) {
+    case SmtcPlayerType::QQMusic:
+        return L"builtin:qqmusic";
+    case SmtcPlayerType::NetEase:
+        return L"builtin:netease";
+    case SmtcPlayerType::Soda:
+        return L"builtin:soda";
+    case SmtcPlayerType::Spotify:
+        return L"builtin:spotify";
+    case SmtcPlayerType::SaltPlayer:
+        return L"builtin:saltplayer";
+    default:
+        return {};
+    }
+}
+
+SmtcPlayerType parseBuiltinPlayerRuleSourceId(const std::wstring& sourceId) {
+    if (_wcsicmp(sourceId.c_str(), L"builtin:qqmusic") == 0)
+        return SmtcPlayerType::QQMusic;
+    if (_wcsicmp(sourceId.c_str(), L"builtin:netease") == 0)
+        return SmtcPlayerType::NetEase;
+    if (_wcsicmp(sourceId.c_str(), L"builtin:soda") == 0)
+        return SmtcPlayerType::Soda;
+    if (_wcsicmp(sourceId.c_str(), L"builtin:spotify") == 0)
+        return SmtcPlayerType::Spotify;
+    if (_wcsicmp(sourceId.c_str(), L"builtin:saltplayer") == 0)
+        return SmtcPlayerType::SaltPlayer;
+    return SmtcPlayerType::Unknown;
+}
+
+GenericSmtcAppRule makeBuiltinPlayerRule(SmtcPlayerType player) {
+    GenericSmtcAppRule rule;
+    rule.sourceId = builtinPlayerRuleSourceId(player);
+    if (const auto* def = player_source::find(player)) {
+        rule.displayName = def->displayName;
+        if (!def->processNames.empty())
+            rule.processName = def->processNames.front();
+    }
+    return rule;
+}
+
+bool matchesCustomLocalPlayerRules(SmtcPlayerType player, const std::wstring& sourceId,
+                                   const AudioSessionTarget& target,
+                                   const std::vector<GenericSmtcAppRule>& rules) {
+    const auto* builtinDef = player_source::find(player);
+    for (const auto& rule : rules) {
+        const SmtcPlayerType ruleBuiltin = parseBuiltinPlayerRuleSourceId(rule.sourceId);
+        if (ruleBuiltin != SmtcPlayerType::Unknown) {
+            if (player == ruleBuiltin)
+                return true;
+            continue;
+        }
+        if (!rule.sourceId.empty() && !sourceId.empty() &&
+            _wcsicmp(sourceId.c_str(), rule.sourceId.c_str()) == 0) {
+            return true;
+        }
+        if (!rule.packageFamilyName.empty() && !target.packageFamilyName.empty() &&
+            _wcsicmp(target.packageFamilyName.c_str(), rule.packageFamilyName.c_str()) == 0) {
+            return true;
+        }
+        if (!rule.processName.empty()) {
+            for (const auto& proc : target.processNames) {
+                if (_wcsicmp(proc.c_str(), rule.processName.c_str()) == 0)
+                    return true;
+            }
+            if (builtinDef) {
+                for (const wchar_t* proc : builtinDef->processNames) {
+                    if (_wcsicmp(proc, rule.processName.c_str()) == 0)
+                        return true;
+                }
+            }
+        }
+    }
+    return false;
 }
 
 } // namespace lyric_detail

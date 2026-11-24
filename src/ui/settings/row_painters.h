@@ -20,6 +20,7 @@ struct RowPaintContext {
     COLORREF floatingCardBackgroundColor = RGB(255, 255, 255);
     std::span<const IdleAppInfo> idleApps;
     std::span<const GenericSmtcAppRule> genericSmtcRules;
+    std::span<const GenericSmtcAppRule> customLocalLyricsPlayers;
     UINT dpi = 96;
     bool idleAppDragging = false;
     int idleAppDragIndex = -1;

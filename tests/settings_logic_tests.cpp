@@ -178,6 +178,11 @@ TEST_CASE("app_settings.json_roundtrip_and_legacy_migrations") {
     original.customLocalLyricsEnabled_ = true;
     original.qqLocalLyricsPersistOrder_ = true;
     original.customLocalLyricsPath_ = L"D:\\Music\\Lyrics";
+    original.customLocalLyricsScope_ = CustomLocalLyricsScope::SelectedPlayers;
+    original.customLocalLyricsPlayers_ = {
+        {L"builtin:saltplayer", L"Salt Player for Windows.exe", L"", L"椒盐音乐"},
+        {L"", L"foobar2000.exe", L"", L"foobar2000"},
+    };
 
     const nlohmann::json dumped = original.toJson();
     AppSettings loaded;
@@ -206,6 +211,10 @@ TEST_CASE("app_settings.json_roundtrip_and_legacy_migrations") {
     EXPECT_TRUE(loaded.customLocalLyricsEnabled_);
     EXPECT_TRUE(loaded.qqLocalLyricsPersistOrder_);
     EXPECT_EQ(loaded.customLocalLyricsPath_, std::wstring(L"D:\\Music\\Lyrics"));
+    EXPECT_EQ(loaded.customLocalLyricsScope_, CustomLocalLyricsScope::SelectedPlayers);
+    EXPECT_EQ(loaded.customLocalLyricsPlayers_.size(), 2u);
+    EXPECT_EQ(loaded.customLocalLyricsPlayers_[0].sourceId, std::wstring(L"builtin:saltplayer"));
+    EXPECT_EQ(loaded.customLocalLyricsPlayers_[1].processName, std::wstring(L"foobar2000.exe"));
 
     // 验证旧版字段迁移、越界钳制与欢迎语规则
     nlohmann::json legacy = {

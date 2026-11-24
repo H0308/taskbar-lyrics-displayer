@@ -230,7 +230,7 @@ std::vector<fluent::FluentMenuItem> App::buildMenuItems(bool fullTrayMenu,
         items.push_back(std::move(sources));
     }
     const bool customLocalAvailable =
-        settings_.customLocalLyricsEnabled_ && !settings_.customLocalLyricsPath_.empty();
+        playback_.lyricProvider().isCustomLocalEnabledFor(snap.player, snap.sourceAppUserModelId);
     const bool qqLocalAvailable = snap.player == SmtcPlayerType::QQMusic &&
                                   settings_.qqLocalLyricsEnabled_ &&
                                   !settings_.qqLocalLyricsPath_.empty();

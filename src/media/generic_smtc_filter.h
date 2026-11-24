@@ -11,6 +11,11 @@ enum class GenericSmtcFilterMode {
     BlockList = 2, // 排除黑名单内的通用 SMTC 应用
 };
 
+enum class CustomLocalLyricsScope {
+    All = 0,             // 全部播放器均优先使用自定义本地歌词
+    SelectedPlayers = 1, // 仅指定播放器列表内的应用使用自定义本地歌词
+};
+
 inline constexpr size_t kMaxGenericSmtcRules = 32;
 
 // 单条通用 SMTC 过滤规则（可来自自动发现的 SMTC 会话，或用户选择的本地 EXE）。

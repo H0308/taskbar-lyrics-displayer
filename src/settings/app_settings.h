@@ -142,6 +142,8 @@ struct AppSettings {
     std::wstring qqLocalLyricsPath_;
     bool customLocalLyricsEnabled_ = false;
     std::wstring customLocalLyricsPath_;
+    CustomLocalLyricsScope customLocalLyricsScope_ = CustomLocalLyricsScope::All;
+    std::vector<GenericSmtcAppRule> customLocalLyricsPlayers_;
     bool genericSmtcEnabled_ = false;
     GenericSmtcFilterMode genericSmtcFilterMode_ = GenericSmtcFilterMode::All;
     std::vector<GenericSmtcAppRule> genericSmtcAllowList_;
