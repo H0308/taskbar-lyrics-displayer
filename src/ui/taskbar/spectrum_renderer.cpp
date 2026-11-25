@@ -631,8 +631,9 @@ void SpectrumRenderer::drawSpectrum(float x, float h, float width) {
     const bool compact = context_.compactHeight > 0.0f && h > 6.0f;
     if (compact) {
         rt->GetTransform(&previous);
-        rt->PushAxisAlignedClip(D2D1::RectF(x, 2.0f, x + width, h - 2.0f),
-                                D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        rt->PushAxisAlignedClip(
+            D2D1::RectF(x - kSpectrumFxPadX, 2.0f, x + width + kSpectrumFxPadX, h - 2.0f),
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         rt->SetTransform(D2D1::Matrix3x2F::Scale(1.0f, (h - 6.0f) / h) *
                          D2D1::Matrix3x2F::Translation(0.0f, 3.0f) * previous);
     }

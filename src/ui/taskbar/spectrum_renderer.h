@@ -20,6 +20,7 @@ inline constexpr int kImmersiveSpectrumWideBarCount = 32;
 inline constexpr int kImmersiveSpectrumBarCount = 24;
 inline constexpr float kSpectrumBottomPadding = 1.0f;
 inline constexpr float kSpectrumBarRadius = 2.0f; // 轻微圆角，保持柱状感
+inline constexpr float kSpectrumFxPadX = 8.0f;    // 特效离屏缓冲左右留白，避免首尾柱边缘与辉光被裁剪
 } // namespace taskbar_detail
 struct SpectrumContext {
     ID2D1DeviceContext* target = nullptr; // 仅在当前同步调用期间借用
@@ -136,13 +137,16 @@ private:
             drawShape();
             return;
         }
-        if (!ensureSpectrumEffectResources(width, h)) {
+        const float padX = kSpectrumFxPadX;
+        const float paddedWidth = width + padX * 2.0f;
+        if (!ensureSpectrumEffectResources(paddedWidth, h)) {
             drawShape();
             return;
         }
-        // 独立上下文不改动外层歌词和转场的 target、变换与裁剪栈。
+        // 独立上下文不改动外层歌词和转场的 target、变换与裁剪栈；左右预留外扩区，
+        // 避免首尾频谱柱的抗锯齿边缘、辉光与火花在离屏位图和裁剪边界处被削平。
         spectrumFxContext_->SetTarget(spectrumFxFrame_.Get());
-        spectrumFxContext_->SetTransform(D2D1::Matrix3x2F::Translation(-x, 0.0f));
+        spectrumFxContext_->SetTransform(D2D1::Matrix3x2F::Translation(padX - x, 0.0f));
         spectrumFxContext_->BeginDraw();
         spectrumFxContext_->Clear(D2D1::ColorF(0, 0, 0, 0));
         auto* previousTarget = drawTargetOverride_;
@@ -156,9 +160,9 @@ private:
             requestFrame();
             return;
         }
-        const auto destination = D2D1::RectF(x, 0.0f, x + width, h);
-        const auto source = D2D1::RectF(0.0f, 0.0f, width, h);
-        const auto offset = D2D1::Point2F(x, 0.0f);
+        const auto destination = D2D1::RectF(x - padX, 0.0f, x + width + padX, h);
+        const auto source = D2D1::RectF(0.0f, 0.0f, paddedWidth, h);
+        const auto offset = D2D1::Point2F(x - padX, 0.0f);
         const ULONGLONG now = context_.nowMs != 0 ? context_.nowMs : monotonicNowMs();
         const bool audioActive = std::any_of(spectrumBands_.begin(), spectrumBands_.end(),
                                              [](float level) { return level > 0.01f; });
