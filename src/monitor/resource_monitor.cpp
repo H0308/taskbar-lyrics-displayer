@@ -43,27 +43,6 @@ uint64_t monotonicMilliseconds() {
             .count());
 }
 
-bool readNetworkTotals(uint64_t& received, uint64_t& sent) {
-    MIB_IF_TABLE2* table = nullptr;
-    if (GetIfTable2(&table) != NO_ERROR || !table)
-        return false;
-
-    received = 0;
-    sent = 0;
-    for (ULONG i = 0; i < table->NumEntries; ++i) {
-        const MIB_IF_ROW2& row = table->Table[i];
-        // 首版统计所有已连接的数据网卡，排除回环与隧道，避免本机流量和 VPN
-        // 封装流量被重复算入上下行。
-        if (row.OperStatus != IfOperStatusUp || row.Type == IF_TYPE_SOFTWARE_LOOPBACK ||
-            row.Type == IF_TYPE_TUNNEL)
-            continue;
-        received += row.InOctets;
-        sent += row.OutOctets;
-    }
-    FreeMibTable(table);
-    return true;
-}
-
 } // namespace
 
 struct ResourceMonitor::PerformanceCounters {
@@ -188,7 +167,8 @@ void ResourceMonitor::start() {
         return;
 
     haveCpuBaseline_ = false;
-    haveNetworkBaseline_ = false;
+    previousNetworkCounters_.clear();
+    previousNetworkTickMs_.reset();
     stopRequested_ = false;
     ResourceSnapshot empty;
     empty.revision = snapshot_.revision + 1;
@@ -235,6 +215,47 @@ void ResourceMonitor::run() {
     performanceCounters_.reset();
 }
 
+void ResourceMonitor::sampleNetwork(ResourceSnapshot& result) {
+    const uint64_t nowMs = monotonicMilliseconds();
+    MIB_IF_TABLE2* rawTable = nullptr;
+    if (GetIfTable2(&rawTable) != NO_ERROR || !rawTable)
+        return;
+    const std::unique_ptr<MIB_IF_TABLE2, decltype(&FreeMibTable)> table(rawTable, FreeMibTable);
+
+    std::unordered_map<uint64_t, NetworkCounters> currentCounters;
+    uint64_t receivedDelta = 0;
+    uint64_t sentDelta = 0;
+    for (ULONG i = 0; i < table->NumEntries; ++i) {
+        const MIB_IF_ROW2& row = table->Table[i];
+        // 筛选器接口可能重复上报其所属网卡的计数。
+        if (row.OperStatus != IfOperStatusUp || row.Type == IF_TYPE_SOFTWARE_LOOPBACK ||
+            row.Type == IF_TYPE_TUNNEL || row.InterfaceAndOperStatusFlags.FilterInterface)
+            continue;
+
+        const uint64_t luid = row.InterfaceLuid.Value;
+        const NetworkCounters counters{row.InOctets, row.OutOctets};
+        currentCounters.emplace(luid, counters);
+        const auto previous = previousNetworkCounters_.find(luid);
+        if (previous == previousNetworkCounters_.end())
+            continue;
+        if (counters.received >= previous->second.received)
+            receivedDelta += counters.received - previous->second.received;
+        if (counters.sent >= previous->second.sent)
+            sentDelta += counters.sent - previous->second.sent;
+    }
+
+    if (previousNetworkTickMs_ && nowMs > *previousNetworkTickMs_) {
+        const auto elapsedMs = static_cast<long double>(nowMs - *previousNetworkTickMs_);
+        result.downloadBytesPerSecond = static_cast<uint64_t>(
+            std::llround(static_cast<long double>(receivedDelta) * 1000.0L / elapsedMs));
+        result.uploadBytesPerSecond = static_cast<uint64_t>(
+            std::llround(static_cast<long double>(sentDelta) * 1000.0L / elapsedMs));
+        result.networkAvailable = true;
+    }
+    previousNetworkCounters_.swap(currentCounters);
+    previousNetworkTickMs_ = nowMs;
+}
+
 ResourceSnapshot ResourceMonitor::sample() {
     ResourceSnapshot result;
 
@@ -275,26 +296,7 @@ ResourceSnapshot ResourceMonitor::sample() {
         result.memoryAvailable = true;
     }
 
-    uint64_t received = 0;
-    uint64_t sent = 0;
-    const uint64_t nowMs = monotonicMilliseconds();
-    if (readNetworkTotals(received, sent)) {
-        if (haveNetworkBaseline_ && nowMs > previousNetworkTickMs_ &&
-            received >= previousNetworkIn_ && sent >= previousNetworkOut_) {
-            const uint64_t elapsedMs = nowMs - previousNetworkTickMs_;
-            result.downloadBytesPerSecond = static_cast<uint64_t>(std::llround(
-                static_cast<long double>(received - previousNetworkIn_) * 1000.0L /
-                static_cast<long double>(elapsedMs)));
-            result.uploadBytesPerSecond = static_cast<uint64_t>(std::llround(
-                static_cast<long double>(sent - previousNetworkOut_) * 1000.0L /
-                static_cast<long double>(elapsedMs)));
-            result.networkAvailable = true;
-        }
-        previousNetworkIn_ = received;
-        previousNetworkOut_ = sent;
-        previousNetworkTickMs_ = nowMs;
-        haveNetworkBaseline_ = true;
-    }
+    sampleNetwork(result);
 
     SYSTEM_POWER_STATUS powerStatus{};
     if (GetSystemPowerStatus(&powerStatus) && powerStatus.BatteryFlag != 128 &&

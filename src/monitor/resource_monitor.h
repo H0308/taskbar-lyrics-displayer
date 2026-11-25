@@ -4,7 +4,9 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
+#include <unordered_map>
 
 namespace system_monitor {
 
@@ -44,9 +46,14 @@ public:
 
 private:
     struct PerformanceCounters;
+    struct NetworkCounters {
+        uint64_t received;
+        uint64_t sent;
+    };
 
     void run();
     ResourceSnapshot sample();
+    void sampleNetwork(ResourceSnapshot& result);
 
     mutable std::mutex mutex_;
     std::condition_variable wake_;
@@ -60,10 +67,8 @@ private:
     uint64_t previousCpuKernel_ = 0;
     uint64_t previousCpuUser_ = 0;
 
-    bool haveNetworkBaseline_ = false;
-    uint64_t previousNetworkIn_ = 0;
-    uint64_t previousNetworkOut_ = 0;
-    uint64_t previousNetworkTickMs_ = 0;
+    std::unordered_map<uint64_t, NetworkCounters> previousNetworkCounters_;
+    std::optional<uint64_t> previousNetworkTickMs_;
 
     std::unique_ptr<PerformanceCounters> performanceCounters_;
 };
