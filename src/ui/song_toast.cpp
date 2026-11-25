@@ -82,6 +82,8 @@ struct SongToast::Impl {
     bool visible = false;
     bool entering = false;
     bool closing = false;
+    ULONGLONG closeStartMs = 0;
+    float closeTravelPx = 0.0f;
     bool themeDirty = true;
     bool materialNeedsApply = true;
     bool backdropDirty = true;
@@ -446,18 +448,16 @@ struct SongToast::Impl {
         if (width <= 0 || height <= 0)
             return false;
 
-        // 窗口已可见时先临时隐藏再抓取，避免把自己拍进背景图。
-        const bool restoreVisible = IsWindowVisible(hwnd) != FALSE;
-        if (restoreVisible)
-            ShowWindow(hwnd, SW_HIDE);
+        // 窗口可见时沿用卡片底色，下次弹出前再截取背景，避免为截图而临时隐藏窗口。
+        if (IsWindowVisible(hwnd)) {
+            hasBackdropLuminance = false;
+            return true;
+        }
         DwmFlush();
 
         HDC screenDc = GetDC(nullptr);
-        if (!screenDc) {
-            if (restoreVisible)
-                ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        if (!screenDc)
             return false;
-        }
 
         BITMAPINFO bitmapInfo{};
         bitmapInfo.bmiHeader.biSize = sizeof(bitmapInfo.bmiHeader);
@@ -484,8 +484,6 @@ struct SongToast::Impl {
         if (memoryDc)
             DeleteDC(memoryDc);
         ReleaseDC(nullptr, screenDc);
-        if (restoreVisible)
-            ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         if (!copied || !pixels) {
             if (dib)
                 DeleteObject(dib);
@@ -987,11 +985,26 @@ struct SongToast::Impl {
             if (visible && !layoutAndPosition())
                 return;
         }
-        if (visible && !closing) {
+        textDirty = true;
+        coverDirty = true;
+        sourceIconDirty = true;
+        if (visible) {
+            if (closing) {
+                KillTimer(hwnd, kCloseTimer);
+                closing = false;
+                const float t = std::min(1.0f, static_cast<float>(GetTickCount64() - closeStartMs) /
+                                                   kCloseAnimationMs);
+                const float progress = t * t * (3.0f - 2.0f * t);
+                entering = clientAnimations && progress > 0.0f &&
+                    renderer.animateRoot(0.0f, 0.0f, closeTravelPx * progress, 0.0f,
+                                         1.0f - progress, 1.0f, kEnterAnimationMs / 1000.0f);
+                if (entering)
+                    SetTimer(hwnd, kEnterTimer, kEnterAnimationMs, nullptr);
+                else
+                    renderer.resetRoot();
+                renderer.commit();
+            }
             KillTimer(hwnd, kAutoHideTimer);
-            textDirty = true;
-            coverDirty = true;
-            sourceIconDirty = true;
             if (clientAnimations && !entering) {
                 contentStartMs = GetTickCount64();
                 SetTimer(hwnd, kContentTimer, USER_TIMER_MINIMUM, nullptr);
@@ -1002,14 +1015,8 @@ struct SongToast::Impl {
             return;
         }
         killTimers();
-        if (visible)
-            hideImmediate();
-        textDirty = true;
-        coverDirty = true;
-        sourceIconDirty = true;
         backdropDirty = true;
         entering = clientAnimations;
-        closing = false;
         if (!layoutAndPosition() || !render()) {
             entering = false;
             return;
@@ -1058,6 +1065,8 @@ struct SongToast::Impl {
         }
         renderer.commit();
         SetTimer(hwnd, kCloseTimer, kCloseAnimationMs, nullptr);
+        closeStartMs = GetTickCount64();
+        closeTravelPx = travel;
     }
 
     void hideImmediate() {
@@ -1171,11 +1180,16 @@ struct SongToast::Impl {
         case WM_SETTINGCHANGE:
         case WM_THEMECHANGED:
             refreshClientAnimations();
-            releaseDrawingResources();
-            if (visible) {
-                backdropDirty = true;
-                render();
+            if (brushBackground && !themeDirty) {
+                const auto& p = fluent::palette(fluent::ThemeTarget::Window);
+                brushBackground->SetColor(cardFillColor());
+                brushStroke->SetColor(p.cardStroke);
+                brushText->SetColor(p.text);
+                brushSecondary->SetColor(p.textSecondary);
+                brushControl->SetColor(p.controlFill);
             }
+            if (visible)
+                render();
             return 0;
         case WM_PAINT: {
             PAINTSTRUCT ps{};

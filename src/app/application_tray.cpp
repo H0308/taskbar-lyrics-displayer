@@ -570,8 +570,9 @@ LRESULT CALLBACK App::trayWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     if (msg == WM_TIMER && wp == kTimerSongToastCover) {
-        KillTimer(h, kTimerSongToastCover);
-        app->songToastCoverWaitArmed_ = false;
+        if (!app->songToastCoverWaitArmed_)
+            return 0;
+        app->cancelSongToastCoverWait();
         // 等待封面超时：按当前媒体信息弹出（可能无封面）
         app->notifySongToast();
         return 0;
