@@ -13,6 +13,12 @@ const wchar_t* viewModeShortName(TaskbarViewMode mode) {
         return L"内嵌";
     }
 }
+
+bool isTaskbarWindowReady(HWND taskbar) {
+    RECT taskbarRect{};
+    return taskbar && IsWindow(taskbar) && GetWindowRect(taskbar, &taskbarRect) &&
+           taskbarRect.right > taskbarRect.left && taskbarRect.bottom > taskbarRect.top;
+}
 } // namespace
 
 MonitorTaskbarSettings App::monitorSettingsForDisplay(const TaskbarDisplayInfo& display) const {
@@ -135,8 +141,8 @@ bool App::anyHorizontalEmbeddedHostConfigured() const {
     return false;
 }
 
-std::vector<TaskbarDisplayInfo> App::desiredTaskbarDisplays(const SmtcSnapshot&) const {
-    auto displays = enumerateTaskbarDisplays();
+std::vector<TaskbarDisplayInfo> App::desiredTaskbarDisplaysFrom(
+    const std::vector<TaskbarDisplayInfo>& displays) const {
     if (displays.empty())
         return {};
     auto primary = std::find_if(displays.begin(), displays.end(),
@@ -155,7 +161,8 @@ std::vector<TaskbarDisplayInfo> App::desiredTaskbarDisplays(const SmtcSnapshot&)
         const MonitorTaskbarSettings profile = monitorSettingsForDisplay(display);
         if (!profile.enabled)
             continue;
-        if (profile.viewMode != TaskbarViewMode::AppBar && !display.taskbarWindow)
+        if (profile.viewMode != TaskbarViewMode::AppBar &&
+            !isTaskbarWindowReady(display.taskbarWindow))
             continue;
         selected.push_back(display);
     }
@@ -164,6 +171,26 @@ std::vector<TaskbarDisplayInfo> App::desiredTaskbarDisplays(const SmtcSnapshot&)
     if (selected.empty())
         return {*primary};
     return selected;
+}
+
+std::vector<TaskbarDisplayInfo> App::desiredTaskbarDisplays(const SmtcSnapshot&) const {
+    return desiredTaskbarDisplaysFrom(enumerateTaskbarDisplays());
+}
+
+bool App::hasMissingEnabledTaskbarDisplay(const std::vector<TaskbarDisplayInfo>& allDisplays) const {
+    auto isActive = [this](const std::wstring& deviceName) {
+        return std::find(activeTaskbarDisplayIds_.begin(), activeTaskbarDisplayIds_.end(),
+                         deviceName) != activeTaskbarDisplayIds_.end();
+    };
+    for (const auto& display : allDisplays) {
+        if (monitorSettingsForDisplay(display).enabled && !isActive(display.deviceName))
+            return true;
+    }
+    for (const auto& profile : settings_.monitorTaskbarSettings_) {
+        if (profile.enabled && !profile.deviceName.empty() && !isActive(profile.deviceName))
+            return true;
+    }
+    return false;
 }
 
 std::wstring App::taskbarDisplayLabel(const TaskbarDisplayInfo& display) const {
@@ -261,8 +288,10 @@ void App::applyMonitorEnabled(bool on) {
                                [on](MonitorTaskbarSettings& profile) { profile.enabled = on; }))
         return;
     settingsEditingMonitorId_ = targetId;
-    if (taskbarHost || taskbarPendingDisplayRebuild_)
+    if (taskbarHost || taskbarPendingDisplayRebuild_) {
+        taskbarMissingMonitorChecks_ = 0;
         syncTaskbarView(monitor.snapshot());
+    }
     logSettingBool(L"monitor-enabled", on);
     saveSettings();
     refreshSettingsDialog(true);
@@ -298,6 +327,7 @@ void App::applyMonitorSettingsToAll() {
             settings_.syncLegacyTaskbarFieldsFromMonitor(profile);
     }
     if (taskbarHost || taskbarPendingDisplayRebuild_) {
+        taskbarMissingMonitorChecks_ = 0;
         publishTaskbarAppearance();
         syncTaskbarView(monitor.snapshot());
         if (taskbarHost) {
@@ -417,6 +447,56 @@ void App::scheduleTaskbarDisplayRebuildRetry(bool allowOverlap) {
     if (trayHwnd)
         SetTimer(trayHwnd, kTimerTaskbarDisplayRebuildRetry, kTaskbarDisplayRebuildRetryMs,
                  nullptr);
+}
+
+void App::cancelMissingMonitorCheck() {
+    taskbarMissingMonitorChecks_ = 0;
+    if (trayHwnd)
+        KillTimer(trayHwnd, kTimerTaskbarMissingMonitorCheck);
+}
+
+void App::scheduleMissingMonitorCheck() {
+    if (shutdownRequested_ || !taskbarHost || isRenderMode(RenderMode::Stopped))
+        return;
+    if (taskbarMissingMonitorChecks_ >= kTaskbarMissingMonitorMaxChecks)
+        return;
+    if (trayHwnd)
+        SetTimer(trayHwnd, kTimerTaskbarMissingMonitorCheck, kTaskbarMissingMonitorCheckMs,
+                 nullptr);
+}
+
+void App::onMissingMonitorCheckTimer() {
+    if (trayHwnd)
+        KillTimer(trayHwnd, kTimerTaskbarMissingMonitorCheck);
+    if (shutdownRequested_ || !taskbarHost || isRenderMode(RenderMode::Stopped)) {
+        cancelMissingMonitorCheck();
+        return;
+    }
+    ++taskbarMissingMonitorChecks_;
+    const auto allDisplays = enumerateTaskbarDisplays();
+    const auto desired = desiredTaskbarDisplaysFrom(allDisplays);
+    std::vector<std::wstring> desiredIds;
+    desiredIds.reserve(desired.size());
+    for (const auto& display : desired)
+        desiredIds.push_back(display.deviceName);
+    if (desiredIds != activeTaskbarDisplayIds_) {
+        runtime_log::writef(
+            L"[display] missing taskbar display check=%d/%d triggered rebuild (active=%zu desired=%zu)",
+            taskbarMissingMonitorChecks_, kTaskbarMissingMonitorMaxChecks,
+            activeTaskbarDisplayIds_.size(), desiredIds.size());
+        requestTaskbarRebuild();
+        return;
+    }
+    if (!hasMissingEnabledTaskbarDisplay(allDisplays) ||
+        taskbarMissingMonitorChecks_ >= kTaskbarMissingMonitorMaxChecks) {
+        if (hasMissingEnabledTaskbarDisplay(allDisplays)) {
+            runtime_log::writef(L"[display] missing taskbar display check stopped after %d attempts",
+                                taskbarMissingMonitorChecks_);
+        }
+        cancelMissingMonitorCheck();
+        return;
+    }
+    scheduleMissingMonitorCheck();
 }
 
 void App::rebuildTaskbarIfPending() {
@@ -696,6 +776,7 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
         taskbarSpectrumSuppressedForNoSpace_ = false;
         cancelTaskbarAutoRestore();
         cancelTaskbarDisplayRebuildRetry();
+        cancelMissingMonitorCheck();
         forEachHost([](TaskbarHost* host) { host->setAllowOverlap(true); });
         const TaskbarPlacementStatus status = taskbarHost->refreshPlacement();
         if (status == TaskbarPlacementStatus::Unavailable) {
@@ -714,14 +795,38 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
         return TaskbarCreateResult::Created;
     }
 
+    const SmtcSnapshot snap = monitor.snapshot();
+    const auto allDisplays = enumerateTaskbarDisplays();
+    const auto displays = desiredTaskbarDisplaysFrom(allDisplays);
+    auto formatDisplaysSummary = [&] {
+        std::wstring summary;
+        for (size_t i = 0; i < allDisplays.size(); ++i) {
+            if (i > 0)
+                summary += L", ";
+            const auto& display = allDisplays[i];
+            const auto profile = monitorSettingsForDisplay(display);
+            summary += display.deviceName;
+            summary += L"(p=";
+            summary += display.primary ? L"1" : L"0";
+            summary += L",en=";
+            summary += profile.enabled ? L"1" : L"0";
+            summary += L",m=";
+            summary += std::to_wstring(static_cast<int>(profile.viewMode));
+            summary += L",tb=";
+            summary += display.taskbarWindow ? L"1" : L"0";
+            summary += L",ok=";
+            summary += isTaskbarWindowReady(display.taskbarWindow) ? L"1" : L"0";
+            summary += L")";
+        }
+        return summary;
+    };
     auto waitForTaskbar = [&] {
         scheduleTaskbarDisplayRebuildRetry(allowOverlap);
         updateTrayIcon();
-        runtime_log::writef(L"[taskbar] waiting for system taskbar");
+        runtime_log::writef(L"[taskbar] waiting for system taskbar displays=[%s]",
+                            formatDisplaysSummary().c_str());
         return TaskbarCreateResult::Pending;
     };
-    const SmtcSnapshot snap = monitor.snapshot();
-    const auto displays = desiredTaskbarDisplays(snap);
     if (displays.empty())
         return waitForTaskbar();
     auto systemTaskbarReady = [&] {
@@ -729,10 +834,7 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
             const auto profile = monitorSettingsForDisplay(display);
             if (profile.viewMode == TaskbarViewMode::AppBar)
                 return true;
-            RECT taskbarRect{};
-            const HWND taskbar = display.taskbarWindow;
-            if (taskbar && IsWindow(taskbar) && GetWindowRect(taskbar, &taskbarRect) &&
-                taskbarRect.right > taskbarRect.left && taskbarRect.bottom > taskbarRect.top)
+            if (isTaskbarWindowReady(display.taskbarWindow))
                 return true;
         }
         return false;
@@ -741,8 +843,6 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
         return waitForTaskbar();
     taskbarAllowOverlap_ = allowOverlap;
     activeTaskbarDisplayIds_.clear();
-    for (const auto& display : displays)
-        activeTaskbarDisplayIds_.push_back(display.deviceName);
 
     auto createHost = [&](const TaskbarDisplayInfo& display, bool primary) {
         auto host = std::make_unique<TaskbarHost>();
@@ -769,6 +869,7 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
         auto host = createHost(display, primaryHost);
         if (!host)
             continue;
+        activeTaskbarDisplayIds_.push_back(display.deviceName);
         if (primaryHost)
             taskbarHost = std::move(host);
         else
@@ -782,6 +883,21 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
             return waitForTaskbar();
         return TaskbarCreateResult::Failed;
     }
+    runtime_log::writef(L"[display] taskbar hosts ready: active=%zu/%zu displays=[%s]",
+                        activeTaskbarDisplayIds_.size(), allDisplays.size(),
+                        formatDisplaysSummary().c_str());
+    auto syncMissingMonitorCheck = [&] {
+        if (hasMissingEnabledTaskbarDisplay(allDisplays)) {
+            if (taskbarMissingMonitorChecks_ == 0) {
+                runtime_log::writef(
+                    L"[display] partial taskbar hosts active=%zu, scheduling missing-display check",
+                    activeTaskbarDisplayIds_.size());
+            }
+            scheduleMissingMonitorCheck();
+        } else {
+            cancelMissingMonitorCheck();
+        }
+    };
 
     forEachHost([&](TaskbarHost* host) {
         const auto profile = monitorSettingsForHost(host);
@@ -827,12 +943,14 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
             taskbarAutoClosedForNoSpace_ = false;
             taskbarSpectrumSuppressedForNoSpace_ = false;
             cancelTaskbarAutoRestore();
+            syncMissingMonitorCheck();
             updateTrayIcon();
             return TaskbarCreateResult::Created;
         }
         cancelTaskbarAutoRestore();
         runtime_log::writef(L"[taskbar] auto-hide reason=no-space");
         cancelTaskbarDisplayRebuildRetry();
+        syncMissingMonitorCheck();
         updateTrayIcon();
         return TaskbarCreateResult::NoSpace;
     }
@@ -850,6 +968,7 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
     taskbarAutoClosedForNoSpace_ = false;
     cancelTaskbarAutoRestore();
     cancelTaskbarDisplayRebuildRetry();
+    syncMissingMonitorCheck();
     // 宿主会在首次避让探测完成后自行解除显示抑制；强制开启仍重新提交当前帧，
     // 确保“开启”选项立即生效而不必等待下一次媒体事件。
     if (allowOverlap) {
@@ -864,6 +983,8 @@ TaskbarCreateResult App::createTaskbar(HINSTANCE inst, bool allowOverlap) {
 
 void App::destroyTaskbar() {
     taskbarRebuildPending_ = false;
+    if (trayHwnd)
+        KillTimer(trayHwnd, kTimerTaskbarMissingMonitorCheck);
     spectrum_.stop(); // 频谱只画在任务栏上，宿主销毁时捕获线程一并停
     taskbarAllowOverlap_ = false;
     taskbarSpectrumSuppressedForNoSpace_ = false;
@@ -921,6 +1042,7 @@ void App::toggleTaskbar() {
         taskbarManualOpenPending_ = false;
         cancelTaskbarAutoRestore();
         cancelTaskbarDisplayRebuildRetry();
+        cancelMissingMonitorCheck();
         destroyTaskbar();
     } else {
         bool anyHostNoSpace = false;
@@ -946,6 +1068,7 @@ void App::toggleTaskbar() {
         if (taskbarHost)
             destroyTaskbar();
         cancelTaskbarDisplayRebuildRetry();
+        cancelMissingMonitorCheck();
         if (isRenderMode(RenderMode::Stopped)) {
             message_dialog::showModal(
                 GetModuleHandleW(nullptr), trayHwnd, L"任务栏歌词提示",

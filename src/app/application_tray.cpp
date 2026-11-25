@@ -33,6 +33,8 @@ void App::destroyTray() {
         KillTimer(hwnd, kTimerIdleQuote);
         KillTimer(hwnd, kTimerTickTickStartupRetry);
         KillTimer(hwnd, kTimerTaskbarAutoRestore);
+        KillTimer(hwnd, kTimerTaskbarDisplayRebuildRetry);
+        KillTimer(hwnd, kTimerTaskbarMissingMonitorCheck);
         KillTimer(hwnd, kTimerFullscreenCheck);
         taskbarAutoRestorePending_ = false;
         idle_.resetTickTickStartupRetry();
@@ -601,6 +603,10 @@ LRESULT CALLBACK App::trayWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         app->requestTaskbarRebuild();
         return 0;
     }
+    if (msg == WM_TIMER && wp == kTimerTaskbarMissingMonitorCheck) {
+        app->onMissingMonitorCheckTimer();
+        return 0;
+    }
     if (msg == kMsgDialogClosed) {
         app->onDialogClosed(static_cast<DialogKind>(wp));
         return 0;
@@ -611,6 +617,7 @@ LRESULT CALLBACK App::trayWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     }
     if (msg == WM_DISPLAYCHANGE) {
         app->taskbarDisplayRebuildRetries_ = 0;
+        app->taskbarMissingMonitorChecks_ = 0;
         app->requestTaskbarRebuild();
         app->refreshSettingsDialog(true);
         return 0;
@@ -627,9 +634,26 @@ LRESULT CALLBACK App::trayWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         // Explorer 重启：通知区域被清空，托盘图标必须重新添加；
         // 任务栏歌词窗口可能已随 Shell_TrayWnd 一起被销毁，交给宿主重建/重附着
         app->updateTrayIcon();
-        if (app->taskbarHost)
+        if (app->taskbarHost) {
             app->forEachHost([](TaskbarHost* host) { host->onTaskbarCreated(); });
-        else if (app->taskbarPendingDisplayRebuild_ && !app->isRenderMode(RenderMode::Stopped)) {
+            if (!app->isRenderMode(RenderMode::Stopped)) {
+                const auto allDisplays = enumerateTaskbarDisplays();
+                const auto desired = app->desiredTaskbarDisplaysFrom(allDisplays);
+                const bool missingReady = std::any_of(
+                    desired.begin(), desired.end(), [app](const TaskbarDisplayInfo& display) {
+                        return std::find(app->activeTaskbarDisplayIds_.begin(),
+                                         app->activeTaskbarDisplayIds_.end(),
+                                         display.deviceName) == app->activeTaskbarDisplayIds_.end();
+                    });
+                if (missingReady) {
+                    app->taskbarMissingMonitorChecks_ = 0;
+                    app->requestTaskbarRebuild();
+                } else if (app->hasMissingEnabledTaskbarDisplay(allDisplays)) {
+                    app->taskbarMissingMonitorChecks_ = 0;
+                    app->scheduleMissingMonitorCheck();
+                }
+            }
+        } else if (app->taskbarPendingDisplayRebuild_ && !app->isRenderMode(RenderMode::Stopped)) {
             app->taskbarDisplayRebuildRetries_ = 0;
             app->requestTaskbarRebuild();
         } else if (app->taskbarAutoClosedForNoSpace_ && !app->isRenderMode(RenderMode::Stopped)) {

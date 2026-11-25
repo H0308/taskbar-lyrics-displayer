@@ -129,8 +129,9 @@ BOOL CALLBACK findTaskbarForDisplay(HWND window, LPARAM parameter) {
 
     wchar_t className[128]{};
     const int length = GetClassNameW(window, className, static_cast<int>(std::size(className)));
-    if (length <= 0 || (wcscmp(className, L"Shell_TrayWnd") != 0 &&
-                        wcscmp(className, L"Shell_SecondaryTrayWnd") != 0))
+    const bool isPrimaryClass = length > 0 && wcscmp(className, L"Shell_TrayWnd") == 0;
+    const bool isSecondaryClass = length > 0 && wcscmp(className, L"Shell_SecondaryTrayWnd") == 0;
+    if (!isPrimaryClass && !isSecondaryClass)
         return TRUE;
 
     DWORD processId = 0;
@@ -143,6 +144,11 @@ BOOL CALLBACK findTaskbarForDisplay(HWND window, LPARAM parameter) {
         enumeration->displays->begin(), enumeration->displays->end(),
         [monitor](const TaskbarDisplayInfo& display) { return display.monitor == monitor; });
     if (it == enumeration->displays->end())
+        return TRUE;
+
+    // 同一显示器同时命中两类任务栏窗口时（如启动或拓扑切换瞬间窗口矩形尚未落位），
+    // 主显示器优先保留 Shell_TrayWnd，副显示器优先保留 Shell_SecondaryTrayWnd。
+    if (it->taskbarWindow && ((it->primary && isSecondaryClass) || (!it->primary && isPrimaryClass)))
         return TRUE;
 
     it->taskbarWindow = window;
@@ -412,10 +418,32 @@ std::vector<TaskbarDisplayInfo> enumerateDisplays() {
                         reinterpret_cast<LPARAM>(&displayEnumeration));
 
     DWORD shellProcessId = 0;
-    if (const HWND primaryTaskbar = FindWindowW(L"Shell_TrayWnd", nullptr))
+    const HWND primaryTaskbar = FindWindowW(L"Shell_TrayWnd", nullptr);
+    if (primaryTaskbar)
         GetWindowThreadProcessId(primaryTaskbar, &shellProcessId);
     TaskbarWindowEnumeration taskbarEnumeration{&displays, shellProcessId};
     EnumWindows(findTaskbarForDisplay, reinterpret_cast<LPARAM>(&taskbarEnumeration));
+
+    // 若 Shell_TrayWnd 已有有效矩形，但瞬时未能通过 MonitorFromWindow 归属到任何显示器，
+    // 且主显示器仍缺任务栏窗口，则回退绑定到主显示器（不覆盖已成功绑定到副屏的合法布局）。
+    if (primaryTaskbar && IsWindow(primaryTaskbar)) {
+        const bool primaryTaskbarBound = std::any_of(
+            displays.begin(), displays.end(),
+            [primaryTaskbar](const TaskbarDisplayInfo& display) {
+                return display.taskbarWindow == primaryTaskbar;
+            });
+        auto primaryDisplay = std::find_if(
+            displays.begin(), displays.end(),
+            [](const TaskbarDisplayInfo& display) { return display.primary; });
+        RECT primaryRect{};
+        if (!primaryTaskbarBound && primaryDisplay != displays.end() &&
+            !primaryDisplay->taskbarWindow && GetWindowRect(primaryTaskbar, &primaryRect) &&
+            primaryRect.right > primaryRect.left && primaryRect.bottom > primaryRect.top) {
+            primaryDisplay->taskbarWindow = primaryTaskbar;
+            const UINT edge = queryTaskbarEdge(primaryTaskbar, primaryRect);
+            primaryDisplay->horizontalTaskbar = edge == ABE_TOP || edge == ABE_BOTTOM;
+        }
+    }
 
     std::stable_sort(displays.begin(), displays.end(), [](const auto& left, const auto& right) {
         return left.primary && !right.primary;

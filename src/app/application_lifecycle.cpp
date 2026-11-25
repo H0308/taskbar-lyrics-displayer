@@ -57,6 +57,7 @@ void App::requestQuit() {
     // 任务栏歌词窗口或探测线程可能在此期间继续存活。
     cancelTaskbarAutoRestore();
     cancelTaskbarDisplayRebuildRetry();
+    cancelMissingMonitorCheck();
     destroyTaskbar();
     closeUpdatePrompt();
     destroyTray();

@@ -86,9 +86,12 @@ constexpr UINT_PTR kTimerTaskbarAutoRestore = 7;
 constexpr UINT_PTR kTimerBackgroundSettingsSave = 8;
 constexpr UINT_PTR kTimerTaskbarDisplayRebuildRetry = 9;
 constexpr UINT_PTR kTimerFullscreenCheck = 10;
+constexpr UINT_PTR kTimerTaskbarMissingMonitorCheck = 11;
 constexpr UINT kTaskbarAutoRestoreMs = 1000;
 constexpr UINT kTaskbarDisplayRebuildRetryMs = 500;
 constexpr int kTaskbarDisplayRebuildMaxRetries = 6;
+constexpr UINT kTaskbarMissingMonitorCheckMs = 1000;
+constexpr int kTaskbarMissingMonitorMaxChecks = 12;
 constexpr UINT kSongToastCoverWaitMs = 350;
 constexpr UINT kBackgroundSettingsSaveDebounceMs = 300;
 constexpr UINT kIdleQuoteCheckMs = 60 * 1000;
@@ -225,6 +228,7 @@ private:
     bool taskbarPendingDisplayRebuild_ = false;
     bool taskbarRebuildAllowOverlap_ = false;
     int taskbarDisplayRebuildRetries_ = 0;
+    int taskbarMissingMonitorChecks_ = 0;
     // 任务栏空间不足时自动隐藏；宿主本身继续保留并后台探测空间变化。
     bool taskbarAutoClosedForNoSpace_ = false;
     bool taskbarSpectrumSuppressedForNoSpace_ = false;
@@ -314,7 +318,10 @@ private:
         }
     }
 
+    std::vector<TaskbarDisplayInfo> desiredTaskbarDisplaysFrom(
+        const std::vector<TaskbarDisplayInfo>& displays) const;
     std::vector<TaskbarDisplayInfo> desiredTaskbarDisplays(const SmtcSnapshot& snap) const;
+    bool hasMissingEnabledTaskbarDisplay(const std::vector<TaskbarDisplayInfo>& allDisplays) const;
 
     MonitorTaskbarSettings monitorSettingsForDisplay(const TaskbarDisplayInfo& display) const;
     MonitorTaskbarSettings monitorSettingsForDevice(const std::wstring& deviceName) const;
@@ -403,6 +410,12 @@ private:
     void cancelTaskbarDisplayRebuildRetry();
 
     void scheduleTaskbarDisplayRebuildRetry(bool allowOverlap);
+
+    void cancelMissingMonitorCheck();
+
+    void scheduleMissingMonitorCheck();
+
+    void onMissingMonitorCheckTimer();
 
     // 仅由最外层主消息循环调用；重建期间的新显示通知留到下一轮处理。
     void rebuildTaskbarIfPending();
