@@ -161,6 +161,26 @@ std::vector<fluent::FluentMenuItem> App::buildMenuItems(bool fullTrayMenu,
         fluent::FluentMenuItem viewMode;
         viewMode.text = L"展示模式";
         viewMode.icon = settings_icon::Kind::Display;
+        const auto displays = enumerateTaskbarDisplays();
+        if (displays.size() > 1) {
+            const auto compactDeviceName = [](std::wstring deviceName) {
+                if (deviceName.rfind(L"\\\\.\\", 0) == 0)
+                    deviceName.erase(0, 4);
+                return deviceName;
+            };
+            const auto selected = std::find_if(displays.begin(), displays.end(),
+                                               [&](const TaskbarDisplayInfo& display) {
+                                                   return !targetMonitorId.empty() &&
+                                                          display.deviceName == targetMonitorId;
+                                               });
+            if (selected != displays.end()) {
+                viewMode.rightText =
+                    selected->primary ? L"主显示器" : compactDeviceName(selected->deviceName);
+            } else {
+                viewMode.rightText =
+                    targetMonitorId.empty() ? L"主显示器" : compactDeviceName(targetMonitorId);
+            }
+        }
         auto addViewMode = [&targetProfile, &viewMode](int id, const wchar_t* text,
                                                        TaskbarViewMode mode,
                                                        bool enabled = true) {
