@@ -42,6 +42,7 @@ private:
     };
     const std::vector<Cue>& cues(const LyricLine& line, int lineIndex);
     bool ensureShapes(ID2D1DeviceContext* target);
+    bool ensureEdgeFade(ID2D1DeviceContext* target, D2D1_RECT_F viewport);
     bool ensureFlagBitmaps(ID2D1DeviceContext* target);
     void drawClouds(ID2D1DeviceContext* target, ID2D1SolidColorBrush* brush,
                     D2D1_RECT_F viewport, float age, float opacity, uint32_t seed);
@@ -80,5 +81,8 @@ private:
     Microsoft::WRL::ComPtr<ID2D1PathGeometry> sparkle_, wave_, butterflyWing_;
     Microsoft::WRL::ComPtr<ID2D1PathGeometry> flagStar_, bauhiniaPetal_, bauhiniaVein_;
     Microsoft::WRL::ComPtr<ID2D1PathGeometry> lotusPetal_, macauBridge_;
+    Microsoft::WRL::ComPtr<ID2D1Layer> edgeFadeLayer_;
+    Microsoft::WRL::ComPtr<ID2D1LinearGradientBrush> edgeFadeBrush_;
+    float edgeFadeStop_ = -1.0f;
     std::array<Microsoft::WRL::ComPtr<ID2D1Bitmap>, static_cast<size_t>(Flag::Count)> flagBitmaps_;
 };

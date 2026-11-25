@@ -90,7 +90,47 @@ void LyricEasterEggs::clear() {
     bauhiniaVein_.Reset();
     lotusPetal_.Reset();
     macauBridge_.Reset();
+    edgeFadeLayer_.Reset();
+    edgeFadeBrush_.Reset();
+    edgeFadeStop_ = -1.0f;
     flagBitmaps_ = {};
+}
+
+bool LyricEasterEggs::ensureEdgeFade(ID2D1DeviceContext* target, D2D1_RECT_F viewport) {
+    const float width = viewport.right - viewport.left;
+    if (!target || width <= 1.0f)
+        return false;
+    if (!edgeFadeLayer_ && FAILED(target->CreateLayer(edgeFadeLayer_.GetAddressOf())))
+        return false;
+    const float fadeWidth = std::min(22.0f, width * 0.12f);
+    const float fadeStop = std::clamp(fadeWidth / width, 0.0f, 0.45f);
+    if (fadeStop <= 0.0f)
+        return false;
+    if (!edgeFadeBrush_ || std::fabs(edgeFadeStop_ - fadeStop) > 0.002f) {
+        const D2D1_GRADIENT_STOP stops[] = {
+            {0.0f, D2D1::ColorF(D2D1::ColorF::White, 0.0f)},
+            {fadeStop, D2D1::ColorF(D2D1::ColorF::White, 1.0f)},
+            {1.0f - fadeStop, D2D1::ColorF(D2D1::ColorF::White, 1.0f)},
+            {1.0f, D2D1::ColorF(D2D1::ColorF::White, 0.0f)},
+        };
+        Microsoft::WRL::ComPtr<ID2D1GradientStopCollection> collection;
+        if (FAILED(target->CreateGradientStopCollection(
+                stops, static_cast<UINT32>(std::size(stops)), collection.GetAddressOf())) ||
+            !collection)
+            return false;
+        const auto properties = D2D1::LinearGradientBrushProperties(
+            D2D1::Point2F(viewport.left, 0.0f), D2D1::Point2F(viewport.right, 0.0f));
+        if (FAILED(target->CreateLinearGradientBrush(properties, collection.Get(),
+                                                     edgeFadeBrush_.ReleaseAndGetAddressOf()))) {
+            edgeFadeStop_ = -1.0f;
+            return false;
+        }
+        edgeFadeStop_ = fadeStop;
+    } else {
+        edgeFadeBrush_->SetStartPoint(D2D1::Point2F(viewport.left, 0.0f));
+        edgeFadeBrush_->SetEndPoint(D2D1::Point2F(viewport.right, 0.0f));
+    }
+    return edgeFadeLayer_ && edgeFadeBrush_;
 }
 
 bool LyricEasterEggs::ensureShapes(ID2D1DeviceContext* target) {
@@ -466,14 +506,12 @@ void LyricEasterEggs::draw(ID2D1DeviceContext* target, ID2D1SolidColorBrush* bru
                     now, static_cast<uint32_t>(cue.textOffset * 31 + lineIndex * 17)};
         }
     }
-    for (size_t kind = 0; kind < animations_.size(); ++kind) {
-        const auto& animation = animations_[kind];
-        if (!animation)
-            continue;
+    auto drawAmbientKind = [&](Kind kind) {
+        const auto& animation = animations_[static_cast<size_t>(kind)];
+        if (!animation || !ensureShapes(target))
+            return;
         const float age = static_cast<float>(now - animation->startedMs);
-        if (!ensureShapes(target))
-            break;
-        switch (static_cast<Kind>(kind)) {
+        switch (kind) {
         case Kind::Cloud:
             drawClouds(target, brush, viewport, age, 1.0f, animation->seed);
             break;
@@ -504,7 +542,31 @@ void LyricEasterEggs::draw(ID2D1DeviceContext* target, ID2D1SolidColorBrush* bru
         case Kind::Count:
             break;
         }
+    };
+    constexpr std::array<Kind, 6> edgeFadedKinds = {
+        Kind::Cloud, Kind::Rain, Kind::Snow, Kind::Wind, Kind::Sea, Kind::Butterflies,
+    };
+    const bool hasEdgeFaded =
+        std::any_of(edgeFadedKinds.begin(), edgeFadedKinds.end(), [&](Kind kind) {
+            return animations_[static_cast<size_t>(kind)].has_value();
+        });
+    if (hasEdgeFaded) {
+        // 横向穿越或可能擦边的氛围彩蛋通过左右透明渐隐遮罩柔和进出歌词区，
+        // 避免在裁剪边界处被硬切；贴角花朵、星星及居中前景地标留在遮罩之外。
+        const bool useEdgeFade = ensureEdgeFade(target, viewport);
+        if (useEdgeFade) {
+            target->PushLayer(
+                D2D1::LayerParameters1(viewport, nullptr, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                                       D2D1::Matrix3x2F::Identity(), 1.0f, edgeFadeBrush_.Get()),
+                edgeFadeLayer_.Get());
+        }
+        for (const Kind kind : edgeFadedKinds)
+            drawAmbientKind(kind);
+        if (useEdgeFade)
+            target->PopLayer();
     }
+    drawAmbientKind(Kind::Flowers);
+    drawAmbientKind(Kind::Stars);
     // 为本行所有地标预留位置，后唱到的城市不会让已显示的城市左右跳动。
     // 上一行尚未结束的动画也参与排布，不相互覆盖、不强行截断。
     using City = LyricCityLandmarks::City;
