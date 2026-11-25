@@ -2,6 +2,11 @@
 #include <algorithm>
 
 namespace media_popup_detail {
+bool IdlePageLayout::showsQuickHeader(const IdlePresentation& content) const {
+    return content.hasQuickPanel() &&
+           (content.showText || content.quickStartEnabled != content.todayTasksEnabled);
+}
+
 float IdlePageLayout::idleQuickExpandProgress(const IdlePresentation& content) const {
     if (!content.hasQuickPanel())
         return 0.0f;
@@ -111,7 +116,7 @@ IdleLayout IdlePageLayout::idleLayout(const IdlePresentation& content, float quo
     layout.headerTop = idleQuickHeaderTop(layout.collapsedHeaderTop, content);
     layout.expandButtonTop = idleQuickExpandButtonTop(layout.headerTop);
     const float progress = idleQuickExpandProgress(content);
-    layout.tabTop = content.showText ? idleQuickListTop(layout.headerTop) : layout.headerTop;
+    layout.tabTop = showsQuickHeader(content) ? idleQuickListTop(layout.headerTop) : layout.headerTop;
     layout.listTop = layout.tabTop + idleQuickTabContentOffset(progress, content);
     return layout;
 }

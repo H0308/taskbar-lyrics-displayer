@@ -10,22 +10,29 @@ void drawIdleQuickHeader(const PagePaintContext& context, ID2D1DeviceContext* rt
     if (!content.hasQuickPanel())
         return;
     drawIdleQuickExpandButton(context, rt, w, headerTop, content, updateHitTest);
-    if (!content.showText)
+    const auto layout = layoutFor(context, content);
+    if (!layout.showsQuickHeader(content))
         return;
+    auto& brushText = context.resources.brushText;
     auto& brushSecondary = context.resources.brushSecondary;
     auto& fmtIdleHeader = context.resources.fmtIdleHeader;
 
+    const bool reservePageArrowSlot =
+        idleReturnArrowVisible(content, context.state.playbackScene, context.state.available,
+                               context.state.idlePanelManual) ||
+        context.state.categoryTransition.active();
     const D2D1_RECT_F expandButton =
-        layoutFor(context, content).idleQuickExpandLocalRect(w, headerTop, content);
-    const float headerRight =
-        content.hasQuickPanel() && content.showText ? expandButton.left - 8.0f : w - 16.0f;
+        layout.idleQuickExpandLocalRect(w, headerTop, content);
+    const float headerRight = content.showText
+                                  ? expandButton.left - 8.0f
+                                  : (reservePageArrowSlot ? w - 52.0f : w - 16.0f);
     const wchar_t* title = !content.quickStartEnabled ? L"今日任务"
         : content.todayTasksEnabled ? L"快捷启动与今日任务" : L"快捷启动";
     drawText(rt, title,
              fmtIdleHeader,
              D2D1::RectF(kIdleQuickTitleLeftDip, headerTop, headerRight,
                          headerTop + kIdleQuickHeaderHeightDip),
-             brushSecondary);
+             content.showText ? brushSecondary : brushText);
 }
 
 void drawIdleQuoteText(const PagePaintContext& context, ID2D1DeviceContext* rt, float w,

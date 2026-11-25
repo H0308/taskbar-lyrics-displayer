@@ -24,6 +24,7 @@ class IdlePageLayout {
 public:
     IdlePageLayout(float progress, IdleQuickTab tab, bool reserveArrow)
         : progress_(progress), tab_(tab), reserveArrow_(reserveArrow) {}
+    bool showsQuickHeader(const IdlePresentation& content) const;
     float idleQuickExpandProgress(const IdlePresentation& content) const;
     float idleQuickHeaderTop(float collapsedTop, const IdlePresentation& content) const;
     float idleQuickExpandButtonTop(float headerTop) const;
