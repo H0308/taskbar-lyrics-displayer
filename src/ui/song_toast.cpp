@@ -82,7 +82,10 @@ struct SongToast::Impl {
     bool visible = false;
     bool entering = false;
     bool closing = false;
+    ULONGLONG closeStartMs = 0;
+    float closeTravelPx = 0.0f;
     bool themeDirty = true;
+    bool themeRefreshPending = false;
     bool materialNeedsApply = true;
     bool backdropDirty = true;
     bool coverDirty = true;
@@ -165,6 +168,9 @@ struct SongToast::Impl {
         KillTimer(hwnd, kDeviceIdleTimer);
         deviceReleaseAt = 0;
         contentStartMs = 0;
+        closeStartMs = 0;
+        closeTravelPx = 0.0f;
+        themeRefreshPending = false;
         scrollTimerRunning = false;
         entering = false;
         closing = false;
@@ -334,6 +340,17 @@ struct SongToast::Impl {
         return cardFill;
     }
 
+    void updateThemeBrushColors() {
+        if (!brushBackground || !brushStroke || !brushText || !brushSecondary || !brushControl)
+            return;
+        const auto& p = fluent::palette(fluent::ThemeTarget::Window);
+        brushBackground->SetColor(cardFillColor());
+        brushStroke->SetColor(p.cardStroke);
+        brushText->SetColor(p.text);
+        brushSecondary->SetColor(p.textSecondary);
+        brushControl->SetColor(p.controlFill);
+    }
+
     bool createResources() {
         if (!createTextFormats())
             return false;
@@ -446,11 +463,12 @@ struct SongToast::Impl {
         if (width <= 0 || height <= 0)
             return false;
 
-        // 窗口已可见时先临时隐藏再抓取，避免把自己拍进背景图。
+        // 窗口已可见时先临时隐藏并等待合成器移除旧画面，避免把自己拍进背景图。
         const bool restoreVisible = IsWindowVisible(hwnd) != FALSE;
-        if (restoreVisible)
+        if (restoreVisible) {
             ShowWindow(hwnd, SW_HIDE);
-        DwmFlush();
+            DwmFlush();
+        }
 
         HDC screenDc = GetDC(nullptr);
         if (!screenDc) {
@@ -801,6 +819,7 @@ struct SongToast::Impl {
         renderer.setDpi(dpi);
         if (!createResources())
             return false;
+        themeRefreshPending = false;
         captureBackdrop();
         if (hasBackdropLuminance)
             applyBackdropTextContrast(lastBackdropLuminance);
@@ -987,29 +1006,67 @@ struct SongToast::Impl {
             if (visible && !layoutAndPosition())
                 return;
         }
-        if (visible && !closing) {
+        textDirty = true;
+        coverDirty = true;
+        sourceIconDirty = true;
+        if (visible) {
+            const bool wasClosing = closing;
+            float resumeOffsetY = 0.0f;
+            float resumeOpacity = 1.0f;
+            UINT resumeDurationMs = 0;
+            if (wasClosing) {
+                KillTimer(hwnd, kCloseTimer);
+                closing = false;
+                const float t = std::clamp(
+                    static_cast<float>(GetTickCount64() - closeStartMs) /
+                        static_cast<float>(kCloseAnimationMs),
+                    0.0f, 1.0f);
+                const float progress = t * t * (3.0f - 2.0f * t);
+                closeStartMs = 0;
+                if (clientAnimations && progress > 0.0f) {
+                    resumeOffsetY = closeTravelPx * progress;
+                    resumeOpacity = 1.0f - progress;
+                    resumeDurationMs =
+                        std::max(1u, static_cast<UINT>(std::lround(kEnterAnimationMs * t)));
+                    entering = true;
+                }
+                closeTravelPx = 0.0f;
+            }
             KillTimer(hwnd, kAutoHideTimer);
-            textDirty = true;
-            coverDirty = true;
-            sourceIconDirty = true;
             if (clientAnimations && !entering) {
                 contentStartMs = GetTickCount64();
                 SetTimer(hwnd, kContentTimer, USER_TIMER_MINIMUM, nullptr);
             }
-            render();
+            const bool rendered = render();
+            if (!rendered) {
+                if (wasClosing) {
+                    hideImmediate();
+                } else {
+                    SetTimer(hwnd, kAutoHideTimer,
+                             static_cast<UINT>(std::clamp(durationSec, 1, 10)) * 1000, nullptr);
+                }
+                return;
+            }
+            if (wasClosing) {
+                if (entering &&
+                    renderer.animateRoot(0.0f, 0.0f, resumeOffsetY, 0.0f, resumeOpacity, 1.0f,
+                                         static_cast<float>(resumeDurationMs) / 1000.0f) &&
+                    renderer.commit()) {
+                    SetTimer(hwnd, kEnterTimer, resumeDurationMs, nullptr);
+                } else {
+                    entering = false;
+                    renderer.resetRoot();
+                    renderer.commit();
+                    updateScrollTimer();
+                }
+            }
             SetTimer(hwnd, kAutoHideTimer,
                      static_cast<UINT>(std::clamp(durationSec, 1, 10)) * 1000, nullptr);
             return;
         }
         killTimers();
-        if (visible)
-            hideImmediate();
-        textDirty = true;
-        coverDirty = true;
-        sourceIconDirty = true;
         backdropDirty = true;
         entering = clientAnimations;
-        closing = false;
         if (!layoutAndPosition() || !render()) {
             entering = false;
             return;
@@ -1021,6 +1078,7 @@ struct SongToast::Impl {
         const float travel = (placementTop ? -kEnterTravelDip : kEnterTravelDip) * scale();
         if (clientAnimations && !renderer.animateRoot(0.0f, 0.0f, travel, 0.0f, 0.0f, 1.0f,
                                   static_cast<float>(kEnterAnimationMs) / 1000.0f)) {
+            entering = false;
             renderer.resetRoot();
         }
         renderer.commit();
@@ -1052,12 +1110,14 @@ struct SongToast::Impl {
         // 原地轻微偏移 + 淡出；中上时向上收起，方向与入场一致。
         const float travel = (placementTop ? -kExitTravelDip : kExitTravelDip) * scale();
         if (!renderer.animateRoot(0.0f, 0.0f, 0.0f, travel, 1.0f, 0.0f,
-                                  static_cast<float>(kCloseAnimationMs) / 1000.0f)) {
+                                  static_cast<float>(kCloseAnimationMs) / 1000.0f) ||
+            !renderer.commit() ||
+            !SetTimer(hwnd, kCloseTimer, kCloseAnimationMs, nullptr)) {
             hideImmediate();
             return;
         }
-        renderer.commit();
-        SetTimer(hwnd, kCloseTimer, kCloseAnimationMs, nullptr);
+        closeStartMs = GetTickCount64();
+        closeTravelPx = travel;
     }
 
     void hideImmediate() {
@@ -1129,9 +1189,10 @@ struct SongToast::Impl {
             } else if (wp == kEnterTimer) {
                 KillTimer(hwnd, kEnterTimer);
                 entering = false;
-                // 入场期间 setMedia 只标记失效；结束后必须补交最新内容，
-                // 不能依赖文字溢出才会启动的滚动定时器刷新迟到封面。
-                if (visible && !closing && (coverDirty || sourceIconDirty || textDirty))
+                // 入场期间 setMedia 或主题刷新只标记失效；结束后必须补交最新内容，
+                // 不能依赖文字溢出才会启动的滚动定时器刷新迟到封面或主题色。
+                if (visible && !closing &&
+                    (coverDirty || sourceIconDirty || textDirty || themeRefreshPending))
                     render();
                 else
                     updateScrollTimer();
@@ -1171,11 +1232,12 @@ struct SongToast::Impl {
         case WM_SETTINGCHANGE:
         case WM_THEMECHANGED:
             refreshClientAnimations();
-            releaseDrawingResources();
-            if (visible) {
-                backdropDirty = true;
+            if (!themeDirty)
+                updateThemeBrushColors();
+            if (visible && !entering && !closing)
                 render();
-            }
+            else if (visible && entering)
+                themeRefreshPending = true;
             return 0;
         case WM_PAINT: {
             PAINTSTRUCT ps{};

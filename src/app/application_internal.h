@@ -629,7 +629,8 @@ private:
 
     void applyPresentationFrameToHost(TaskbarHost* host, const SmtcSnapshot& snap);
 
-    void publishPresentationFrame(const SmtcSnapshot& snap, PresentationUpdate update);
+    void publishPresentationFrame(const SmtcSnapshot& snap, PresentationUpdate update,
+                                  bool notifyNewSong = false);
 
     void armTaskbarAutoRestore();
 

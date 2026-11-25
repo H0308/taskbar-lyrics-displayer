@@ -226,21 +226,34 @@ void App::applyPresentationFrameToHost(TaskbarHost* host, const SmtcSnapshot& sn
     host->applyPresentationFrame(presentation_.frameForView(snap, playback_.state(), input));
 }
 
-void App::publishPresentationFrame(const SmtcSnapshot& snap, PresentationUpdate update) {
+void App::publishPresentationFrame(const SmtcSnapshot& snap, PresentationUpdate update,
+                                   bool notifyNewSong) {
+    if (notifyNewSong)
+        cancelSongToastCoverWait();
     // SMTC 状态/控制/封面事件只刷新帧字段；完整歌词仅在内容事务变化时复制。
     preparePresentationFrame(snap, update);
     forEachHost([&](TaskbarHost* host) { applyPresentationFrameToHost(host, snap); });
     // 设置窗口同步由状态变化显式声明，不再借用“歌词内容变化”的含义。
     if (update.refreshSettings)
         refreshSettingsDialog(true);
-    // 弹窗可见期间异步补齐封面等字段；隐藏时只缓存不渲染
-    if (songToast_)
-        songToast_->setMedia(presentation_.frame().media);
-    // 切歌时封面未到会短暂等待；封面在这帧补齐则立即弹出
-    if (songToastCoverWaitArmed_ && presentation_.frame().media.thumbnail &&
-        !presentation_.frame().media.thumbnail->empty()) {
+    const auto& media = presentation_.frame().media;
+    if (media.title.empty()) {
+        cancelSongToastCoverWait();
+        if (songToast_)
+            songToast_->setMedia(media);
+        return;
+    }
+    const bool hasCover = media.thumbnail && !media.thumbnail->empty();
+    if (notifyNewSong && !hasCover && trayHwnd)
+        songToastCoverWaitArmed_ =
+            SetTimer(trayHwnd, kTimerSongToastCover, kSongToastCoverWaitMs, nullptr) != 0;
+    if (songToastCoverWaitArmed_ && !hasCover)
+        return;
+    if (notifyNewSong || songToastCoverWaitArmed_) {
         cancelSongToastCoverWait();
         notifySongToast();
+    } else if (songToast_) {
+        songToast_->setMedia(media);
     }
 }
 
@@ -365,21 +378,14 @@ void App::onSmtcChanged() {
     const TrackChange change = playback_.updateTrack(snap);
     const bool trackChanged = change.trackChanged;
     const bool durationOnlyTrackUpdate = change.durationOnly;
-    const bool songIdentityChanged = change.songIdentityChanged;
-    publishPresentationFrame(snap, {.animateTransition = !trackChanged,
-                                    .lyricsChanged = trackChanged,
-                                    .durationOnlyUpdate = durationOnlyTrackUpdate,
-                                    .refreshSettings = mediaSessionChanged || trackChanged});
-    if (trackChanged && songIdentityChanged && settings_.songToastEnabled_ &&
-        !isMinimalRenderMode()) {
-        cancelSongToastCoverWait();
-        if (presentation_.frame().media.thumbnail &&
-            !presentation_.frame().media.thumbnail->empty())
-            notifySongToast();
-        else if (trayHwnd)
-            songToastCoverWaitArmed_ =
-                SetTimer(trayHwnd, kTimerSongToastCover, kSongToastCoverWaitMs, nullptr) != 0;
-    }
+    const bool notifyNewSong = trackChanged && change.songIdentityChanged &&
+                               settings_.songToastEnabled_ && !isMinimalRenderMode();
+    publishPresentationFrame(snap,
+                             {.animateTransition = !trackChanged,
+                              .lyricsChanged = trackChanged,
+                              .durationOnlyUpdate = durationOnlyTrackUpdate,
+                              .refreshSettings = mediaSessionChanged || trackChanged},
+                             notifyNewSong);
     tryExtractAlbumColor();
     updateRuntimeLogState(snap);
 }

@@ -713,6 +713,8 @@ void App::applyFloatingCardAutoTextContrast(bool on) {
 
 void App::applySongToastEnabled(bool on) {
     settings_.songToastEnabled_ = on;
+    if (!on)
+        cancelSongToastCoverWait();
     if (isMinimalRenderMode()) {
         cancelSongToastCoverWait();
         songToast_.reset();
