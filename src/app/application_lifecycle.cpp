@@ -122,6 +122,9 @@ void App::dispatchThreadMessage(const MSG& msg) {
     } else if (msg.message == kMsgTickTickTaskCompleteReady) {
         idle_.onTickTickTaskCompleteReady(std::unique_ptr<TickTickTaskCompletePayload>(
             reinterpret_cast<TickTickTaskCompletePayload*>(msg.lParam)));
+    } else if (msg.message == kMsgQuotaReady) {
+        quota_.onRefreshReady(std::unique_ptr<QuotaRefreshPayload>(
+            reinterpret_cast<QuotaRefreshPayload*>(msg.lParam)));
     } else if (msg.message == kMsgRequestQuit) {
         requestQuit();
     }
@@ -137,6 +140,9 @@ bool App::translateDialogMessage(MSG& msg) {
         return true;
     if (tickTickApiTokenDialog && tickTickApiTokenDialog->isOpen() &&
         IsDialogMessageW(tickTickApiTokenDialog->hwnd(), &msg))
+        return true;
+    if (quotaDeepSeekKeyDialog && quotaDeepSeekKeyDialog->isOpen() &&
+        IsDialogMessageW(quotaDeepSeekKeyDialog->hwnd(), &msg))
         return true;
     // 设置、手动搜索和选择字体使用窗口级自绘输入框，字符输入必须经过
     // TranslateMessage 生成 WM_CHAR，再由各自窗口处理；不能交给
@@ -246,6 +252,8 @@ bool App::initialize(HINSTANCE inst, bool wantTaskbar) {
     idle_.refreshIdleQuote(false);
     idle_.refreshTickTickTasks();
     refreshIdleWelcome();
+    // 任务栏宿主创建完成后再探测额度，首次结果可直接推送到各宿主与展示帧。
+    quota_.initialize();
     appVolume_.setChangedCallback(
         [this] { PostThreadMessageW(mainThread, kMsgAppVolumeChanged, 0, 0); });
 

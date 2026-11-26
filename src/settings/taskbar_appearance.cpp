@@ -59,17 +59,25 @@ TaskbarAppearance resolveTaskbarAppearance(const AppSettings& settings,
         monitor ? monitor->immersiveBackgroundBlur : settings.immersiveBackgroundBlur_;
     result.dockBackgroundBlur =
         monitor ? monitor->dockBackgroundBlur : settings.dockBackgroundBlur_;
-    result.dockResourceVisibility = monitor
-        ? DockResourceVisibility{monitor->embeddedResourceMonitor, monitor->dockResourceCpuUsage,
-                                 monitor->dockResourceMemoryUsage, monitor->dockResourceDownload,
-                                 monitor->dockResourceUpload, monitor->dockResourceGpuUsage,
-                                 monitor->dockResourceCpuFrequency, monitor->dockResourceSmallFont,
-                                 monitor->dockResourceHideLabels, monitor->dockResourcePlacement}
-        : DockResourceVisibility{settings.embeddedResourceMonitor_, settings.dockResourceCpuUsage_,
-                                 settings.dockResourceMemoryUsage_, settings.dockResourceDownload_,
-                                 settings.dockResourceUpload_, settings.dockResourceGpuUsage_,
-                                 settings.dockResourceCpuFrequency_, settings.dockResourceSmallFont_,
-                                 settings.dockResourceHideLabels_, settings.dockResourcePlacement_};
+    DockResourceVisibility statusVisibility =
+        monitor
+            ? DockResourceVisibility{
+                  monitor->embeddedResourceMonitor, monitor->dockResourceCpuUsage,
+                  monitor->dockResourceMemoryUsage, monitor->dockResourceDownload,
+                  monitor->dockResourceUpload, monitor->dockResourceGpuUsage,
+                  monitor->dockResourceCpuFrequency, monitor->dockResourceSmallFont,
+                  monitor->dockResourceHideLabels, monitor->dockResourcePlacement}
+            : DockResourceVisibility{
+                  settings.embeddedResourceMonitor_, settings.dockResourceCpuUsage_,
+                  settings.dockResourceMemoryUsage_, settings.dockResourceDownload_,
+                  settings.dockResourceUpload_, settings.dockResourceGpuUsage_,
+                  settings.dockResourceCpuFrequency_, settings.dockResourceSmallFont_,
+                  settings.dockResourceHideLabels_, settings.dockResourcePlacement_};
+    // 额度是账号级数据，不随显示器保存；显示开关与系统指标共用同一行布局。
+    statusVisibility.quotaEnabled = settings.quotaEnabled_;
+    statusVisibility.quotaCodex = settings.quotaCodexEnabled_;
+    statusVisibility.quotaDeepSeek = settings.quotaDeepSeekEnabled_;
+    result.dockResourceVisibility = statusVisibility;
     result.albumCoverVisible = settings.albumCoverVisible_;
     result.songTransitionEnabled = settings.songTransitionEnabled_;
     result.platformIconVisible = settings.platformIconVisible_;

@@ -70,6 +70,10 @@ struct AppSettings {
     IdleQuoteBackgroundScope idleQuoteBackgroundScope_ = IdleQuoteBackgroundScope::DailyQuote;
     std::wstring jinrishiciToken_;
     bool tickTickEnabled_ = false;
+    // AI 额度：Codex 读取本机登录文件，DeepSeek API Key 存放在 Windows 凭据管理器。
+    bool quotaEnabled_ = false;
+    bool quotaCodexEnabled_ = true;
+    bool quotaDeepSeekEnabled_ = true;
     std::vector<IdleAppInfo> idleApps_;
     std::string idleQuoteCacheSource_;
     std::string idleQuoteCachePeriod_;

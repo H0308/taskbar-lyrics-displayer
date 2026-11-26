@@ -471,6 +471,9 @@ void AppSettings::readJson(const nlohmann::json& j, bool hasTickTickToken,
     dockResourceDownload_ = j.value("dockResourceDownload", true);
     dockResourceUpload_ = j.value("dockResourceUpload", true);
     dockResourceCpuFrequency_ = j.value("dockResourceCpuFrequency", false);
+    quotaEnabled_ = j.value("quotaEnabled", false);
+    quotaCodexEnabled_ = j.value("quotaCodexEnabled", true);
+    quotaDeepSeekEnabled_ = j.value("quotaDeepSeekEnabled", true);
     monitorTaskbarSettings_.clear();
     if (j.contains("monitorTaskbarSettings") && j["monitorTaskbarSettings"].is_array()) {
         for (const auto& entry : j["monitorTaskbarSettings"]) {
@@ -823,6 +826,9 @@ nlohmann::json AppSettings::toJson() const {
     j.erase("dockResourceBattery");
     j.erase("dockResourceTemperature");
     j["dockResourceCpuFrequency"] = dockResourceCpuFrequency_;
+    j["quotaEnabled"] = quotaEnabled_;
+    j["quotaCodexEnabled"] = quotaCodexEnabled_;
+    j["quotaDeepSeekEnabled"] = quotaDeepSeekEnabled_;
     if (!monitorTaskbarSettings_.empty()) {
         nlohmann::json monitors = nlohmann::json::array();
         for (const auto& profile : monitorTaskbarSettings_) {

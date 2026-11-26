@@ -190,6 +190,13 @@ inline settings_icon::Kind iconForRow(int id) {
         return settings_icon::Kind::Disconnect;
     case kIdTickTickEnabled:
         return settings_icon::Kind::Apps;
+    case kIdQuotaEnabled:
+    case kIdQuotaCodexEnabled:
+    case kIdQuotaDeepSeekEnabled:
+    case kIdQuotaDeepSeekKey:
+        return settings_icon::Kind::Api;
+    case kIdQuotaRefresh:
+        return settings_icon::Kind::Refresh;
     case kIdDoubleLine:
     case kIdSecondaryOn:
         return settings_icon::Kind::DoubleLine;

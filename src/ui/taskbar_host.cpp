@@ -833,16 +833,32 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
     bool isAppBarView() const { return viewMode_ == TaskbarViewMode::AppBar; }
 
+    // 状态区 = 系统资源指标 + 应用层推送的 AI 额度行；额度行不依赖系统采样线程。
+    bool statusPanelHasSystemMetric() const { return resourcePanel_.visibility().hasAnyMetric(); }
+
+    bool statusPanelHasQuota() const {
+        return resourcePanel_.visibility().hasAnyQuota() &&
+               !resourcePanel_.quotaReadings().empty();
+    }
+
+    bool statusPanelHasContent() const {
+        return statusPanelHasSystemMetric() || statusPanelHasQuota();
+    }
+
+    // 内嵌模式下系统指标遵循“内嵌模式显示资源监视”；额度行只服从自己的开关。
+    bool embeddedStatusZoneEnabled() const {
+        return resourcePanel_.visibility().embeddedEnabled || statusPanelHasQuota();
+    }
+
     bool resourceMonitoringEnabled() const {
-        return resourcePanel_.visibility().hasAnyMetric() &&
+        return statusPanelHasContent() &&
                (isAppBarView() || (viewMode_ == TaskbarViewMode::Embedded &&
-                                   resourcePanel_.visibility().embeddedEnabled));
+                                   embeddedStatusZoneEnabled()));
     }
 
     bool embeddedResourceVisible() const {
-        return viewMode_ == TaskbarViewMode::Embedded &&
-               resourcePanel_.visibility().embeddedEnabled &&
-               resourcePanel_.visibility().hasAnyMetric() && !isVerticalTaskbar();
+        return viewMode_ == TaskbarViewMode::Embedded && embeddedStatusZoneEnabled() &&
+               statusPanelHasContent() && !isVerticalTaskbar();
     }
 
     bool embeddedResourceAtStart() const {
@@ -855,9 +871,8 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     }
 
     bool verticalResourceVisible() const {
-        return viewMode_ == TaskbarViewMode::Embedded &&
-               resourcePanel_.visibility().embeddedEnabled &&
-               resourcePanel_.visibility().hasAnyMetric() && isVerticalTaskbar();
+        return viewMode_ == TaskbarViewMode::Embedded && embeddedStatusZoneEnabled() &&
+               statusPanelHasContent() && isVerticalTaskbar();
     }
 
     bool verticalResourceOnly() const {
@@ -2761,6 +2776,32 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         requestFrameAndFlush();
     }
 
+    void applyQuotaReadings(std::vector<QuotaReading> readings) {
+        if (resourcePanel_.quotaReadings() == readings)
+            return;
+        const bool hadContent = statusPanelHasContent();
+        const float previousWidth = resourceZoneWidth();
+        resourcePanel_.setQuotaReadings(std::move(readings));
+        const bool hasContent = statusPanelHasContent();
+        if (hasContent)
+            updateResourceColumnWidths();
+        const bool widthChanged = resourceZoneWidth() != previousWidth;
+        if (widthChanged || hadContent != hasContent) {
+            resetLyricTransition();
+            clearImmersiveSongContentTransition();
+        }
+        requestInvalidation(toMask(RenderInvalidation::Layout) |
+                            toMask(RenderInvalidation::Text) |
+                            toMask(RenderInvalidation::Paint));
+        if (hasContent && !hadContent && resourceMonitoringEnabled())
+            startResourceMonitoring();
+        else if (!hasContent && hadContent)
+            stopResourceMonitoring();
+        if (isAppBarView() || viewMode_ == TaskbarViewMode::Embedded)
+            adjustPosition();
+        requestFrameAndFlush();
+    }
+
     void setSpectrumVisible(bool on) {
         if (spectrumVisible_ == on) {
             if (!on)
@@ -3170,7 +3211,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
     size_t dockResourcePageCount() const { return resourcePanel_.pageCount(); }
 
     float dockResourceZoneW(float hostW) const {
-        if (!isAppBarView() || !resourcePanel_.visibility().hasAnyMetric() || hostW <= 0.0f)
+        if (!isAppBarView() || !statusPanelHasContent() || hostW <= 0.0f)
             return 0.0f;
         return std::min(resourceZoneWidth(), std::max(1.0f, hostW - kDockResourceRightPadding));
     }
@@ -8499,6 +8540,12 @@ void TaskbarHost::setCloseCallback(std::function<void()> cb) {
 void TaskbarHost::applyPresentationFrame(const PresentationFrame& frame) {
     thread_->invoke([=, this]() mutable {
         impl_->applyPresentationFrame(frame);
+    });
+}
+
+void TaskbarHost::applyQuotaReadings(std::vector<QuotaReading> readings) {
+    thread_->invoke([this, readings = std::move(readings)]() mutable {
+        impl_->applyQuotaReadings(std::move(readings));
     });
 }
 

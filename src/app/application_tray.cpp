@@ -19,9 +19,11 @@ bool App::createTrayWindow(HINSTANCE inst) {
         return false;
     idle_.setTimerWindow(trayHwnd);
     playback_.setTimerWindow(trayHwnd);
+    quota_.setTimerWindow(trayHwnd);
     taskbarCreatedMsg_ = RegisterWindowMessageW(L"TaskbarCreated");
     updateTrayIcon();
     SetTimer(trayHwnd, kTimerIdleQuote, kIdleQuoteCheckMs, nullptr);
+    SetTimer(trayHwnd, kTimerQuotaRefresh, kQuotaCheckMs, nullptr);
     updateFullscreenCheckTimer();
     return true;
 }
@@ -36,8 +38,12 @@ void App::destroyTray() {
         KillTimer(hwnd, kTimerTaskbarDisplayRebuildRetry);
         KillTimer(hwnd, kTimerTaskbarMissingMonitorCheck);
         KillTimer(hwnd, kTimerFullscreenCheck);
+        KillTimer(hwnd, kTimerQuotaRefresh);
         taskbarAutoRestorePending_ = false;
         idle_.resetTickTickStartupRetry();
+        // 先停止额度工作线程，避免窗口销毁后仍有结果投递到主线程。
+        quota_.finish();
+        quota_.setTimerWindow(nullptr);
         idle_.setTimerWindow(nullptr);
         playback_.setTimerWindow(nullptr);
         // 先关闭可能打开的 Fluent 菜单（其窗口由托盘窗口所有）
@@ -607,6 +613,10 @@ LRESULT CALLBACK App::trayWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     }
     if (msg == WM_TIMER && wp == kTimerFullscreenCheck) {
         app->syncFullscreenRenderMode();
+        return 0;
+    }
+    if (msg == WM_TIMER && wp == kTimerQuotaRefresh) {
+        app->quota_.onTick();
         return 0;
     }
     if (msg == WM_TIMER && wp == kTimerTickTickStartupRetry) {

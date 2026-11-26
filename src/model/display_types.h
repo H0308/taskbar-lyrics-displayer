@@ -126,6 +126,7 @@ enum class ResourcePlacement {
 };
 
 // 复用 Dock 资源区；所有监控项均可独立开关，按启用顺序紧凑排列。
+// AI 额度行与系统指标共用同一状态区、分页、位置与字号设置。
 struct DockResourceVisibility {
     bool embeddedEnabled = false;
     bool cpuUsage = true;
@@ -137,8 +138,14 @@ struct DockResourceVisibility {
     bool smallFont = false; // 性能监测用小一号字，块与块之间更紧凑
     bool hideLabels = false; // 隐藏指标标签，常态仅显示数值，翻页或悬停时短暂提示
     ResourcePlacement placement = ResourcePlacement::End; // 仅内嵌模式生效，Dock 固定在右侧
+    bool quotaEnabled = false;   // 仅影响额度行；系统指标开关保持独立
+    bool quotaCodex = true;
+    bool quotaDeepSeek = true;
     constexpr bool hasAnyMetric() const noexcept {
         return cpuUsage || memoryUsage || download || upload || gpuUsage || cpuFrequency;
+    }
+    constexpr bool hasAnyQuota() const noexcept {
+        return quotaEnabled && (quotaCodex || quotaDeepSeek);
     }
     bool operator==(const DockResourceVisibility&) const = default;
 };

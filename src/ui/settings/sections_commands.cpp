@@ -473,6 +473,33 @@ void SettingsSections::onCommand(int id, int option) {
         if (actions.onDockResourceHideLabels)
             actions.onDockResourceHideLabels(row->checked);
         break;
+    case kIdQuotaEnabled:
+        row->checked = !row->checked;
+        state.quotaEnabled = row->checked;
+        updateQuotaRowsEnabled();
+        if (actions.onQuotaEnabled)
+            actions.onQuotaEnabled(row->checked);
+        break;
+    case kIdQuotaCodexEnabled:
+        row->checked = !row->checked;
+        state.quotaCodexEnabled = row->checked;
+        if (actions.onQuotaCodexEnabled)
+            actions.onQuotaCodexEnabled(row->checked);
+        break;
+    case kIdQuotaDeepSeekEnabled:
+        row->checked = !row->checked;
+        state.quotaDeepSeekEnabled = row->checked;
+        if (actions.onQuotaDeepSeekEnabled)
+            actions.onQuotaDeepSeekEnabled(row->checked);
+        break;
+    case kIdQuotaDeepSeekKey:
+        if (actions.onEditQuotaDeepSeekKey)
+            actions.onEditQuotaDeepSeekKey();
+        break;
+    case kIdQuotaRefresh:
+        if (actions.onQuotaRefresh)
+            actions.onQuotaRefresh();
+        break;
     case kIdTaskbarBackground:
         if (auto* opacity = findRow(kIdCoverBackgroundOpacity))
             opacity->enabled = row->selected == 1;

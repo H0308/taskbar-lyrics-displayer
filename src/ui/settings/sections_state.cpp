@@ -153,6 +153,12 @@ void SettingsSections::updateImmersiveRowsEnabled() {
     const bool anyResourceMetric = state.dockResourceCpuUsage || state.dockResourceMemoryUsage ||
                                    state.dockResourceDownload || state.dockResourceUpload ||
                                    state.dockResourceGpuUsage || state.dockResourceCpuFrequency;
+    // 额度行与系统指标共用状态区；仅开启额度时也要能调整位置、字号和标签。
+    const bool quotaStatusVisible =
+        state.quotaEnabled && (state.quotaCodexEnabled || state.quotaDeepSeekEnabled) &&
+        (state.quotaCodexLoginDetected || state.quotaDeepSeekKeyConfigured);
+    const bool statusExtrasEnabled =
+        resourceExtrasEnabled || (quotaStatusVisible && (appBarEnabled || embeddedResources));
     if (auto* row = findRow(kIdEmbeddedResourceMonitor)) {
         row->enabled = embeddedResources;
         row->hint =
@@ -164,12 +170,14 @@ void SettingsSections::updateImmersiveRowsEnabled() {
         row->showHint = true;
     }
     if (auto* row = findRow(kIdDockResourcePlacement))
-        row->enabled = embeddedResources && state.embeddedResourceMonitor && anyResourceMetric;
+        row->enabled =
+            (embeddedResources && state.embeddedResourceMonitor && anyResourceMetric) ||
+            (embeddedResources && quotaStatusVisible);
     syncResourceMetricsRow(resourceExtrasEnabled, appBarEnabled);
     if (auto* row = findRow(kIdDockResourceSmallFont))
-        row->enabled = resourceExtrasEnabled && anyResourceMetric;
+        row->enabled = statusExtrasEnabled && (anyResourceMetric || quotaStatusVisible);
     if (auto* row = findRow(kIdDockResourceHideLabels))
-        row->enabled = resourceExtrasEnabled && anyResourceMetric;
+        row->enabled = statusExtrasEnabled && (anyResourceMetric || quotaStatusVisible);
     updateMediaControlRowsEnabled();
     if (auto* row = findRow(kIdAlignment))
         row->enabled = state.anyHorizontalEmbeddedHostActive;
@@ -481,6 +489,50 @@ void SettingsSections::syncSongToastRows(const SettingsState& s) {
         row->enabled = !minimal && s.songToastEnabled && s.songToastPreviewAvailable;
 }
 
+void SettingsSections::updateQuotaRowsEnabled() {
+    const auto* enabledRow = findRow(kIdQuotaEnabled);
+    const bool enabled = enabledRow ? enabledRow->checked : state.quotaEnabled;
+    if (auto* row = findRow(kIdQuotaCodexEnabled))
+        row->enabled = enabled;
+    if (auto* row = findRow(kIdQuotaDeepSeekEnabled))
+        row->enabled = enabled;
+    if (auto* row = findRow(kIdQuotaDeepSeekKey))
+        row->enabled = enabled;
+    if (auto* row = findRow(kIdQuotaRefresh))
+        row->enabled = enabled;
+}
+
+void SettingsSections::syncQuotaRows(const SettingsState& s) {
+    if (auto* row = findRow(kIdQuotaEnabled)) {
+        row->checked = s.quotaEnabled;
+        row->hint =
+            !s.quotaCodexEnabled && !s.quotaDeepSeekEnabled
+                ? L"已开启额度显示，但未选择任何服务；开启 Codex 或 DeepSeek 后才会显示。"
+                : L"与资源监视共用任务栏状态区，位置、紧凑显示和隐藏标签沿用「展示模式 → "
+                  L"资源监视」。额度约每 5 分钟自动刷新一次，多页时可用滚轮切换。";
+        row->showHint = true;
+    }
+    if (auto* row = findRow(kIdQuotaCodexEnabled)) {
+        row->checked = s.quotaCodexEnabled;
+        if (!s.quotaCodexStatus.empty()) {
+            row->hint = s.quotaCodexStatus;
+            row->showHint = true;
+        }
+    }
+    if (auto* row = findRow(kIdQuotaDeepSeekEnabled)) {
+        row->checked = s.quotaDeepSeekEnabled;
+        if (!s.quotaDeepSeekStatus.empty()) {
+            row->hint = s.quotaDeepSeekStatus;
+            row->showHint = true;
+        }
+    }
+    if (auto* row = findRow(kIdQuotaDeepSeekKey))
+        row->controlText = s.quotaDeepSeekKeyConfigured ? L"已设置…" : L"设置…";
+    if (auto* row = findRow(kIdQuotaRefresh))
+        row->controlText = s.quotaRefreshing ? L"刷新中…" : L"立即刷新";
+    updateQuotaRowsEnabled();
+}
+
 void SettingsSections::syncThemeFontRows(const SettingsState& s) {
     if (auto* row = findRow(kIdUiFontSource))
         row->selected = static_cast<int>(s.uiFontSource);
@@ -557,6 +609,7 @@ void SettingsSections::update(const SettingsState& s) {
     syncPlayerRows(s);
     syncFloatingCardRows(s);
     syncSongToastRows(s);
+    syncQuotaRows(s);
     settings_ui::updateLyricRows(rows[kLyricsPage], s);
     updateImmersiveRowsEnabled();
 }

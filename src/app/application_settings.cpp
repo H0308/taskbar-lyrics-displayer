@@ -438,6 +438,50 @@ void App::applyDockResourcePlacement(int placement) {
     saveSettings();
 }
 
+void App::onQuotaUpdated() {
+    const std::vector<QuotaReading> readings = quota_.panelReadings();
+    forEachHost([&](TaskbarHost* host) { host->applyQuotaReadings(readings); });
+    // 额度是否存在决定空闲栏是否保留；从有到无或从无到有时必须重算展示帧。
+    const bool displayable = quota_.displayable();
+    if (displayable != quotaDisplayable_) {
+        quotaDisplayable_ = displayable;
+        publishPresentationFrame(monitor.snapshot(), {.lyricsChanged = true});
+    }
+    refreshSettingsDialog(true);
+}
+
+void App::applyQuotaEnabled(bool on) {
+    if (settings_.quotaEnabled_ == on)
+        return;
+    settings_.quotaEnabled_ = on;
+    logSettingBool(L"quota-enabled", on);
+    commitAppearanceSettings();
+    quota_.notifySettingsChanged();
+}
+
+void App::applyQuotaCodexEnabled(bool on) {
+    if (settings_.quotaCodexEnabled_ == on)
+        return;
+    settings_.quotaCodexEnabled_ = on;
+    logSettingBool(L"quota-codex", on);
+    commitAppearanceSettings();
+    quota_.notifySettingsChanged();
+}
+
+void App::applyQuotaDeepSeekEnabled(bool on) {
+    if (settings_.quotaDeepSeekEnabled_ == on)
+        return;
+    settings_.quotaDeepSeekEnabled_ = on;
+    logSettingBool(L"quota-deepseek", on);
+    commitAppearanceSettings();
+    quota_.notifySettingsChanged();
+}
+
+void App::refreshQuota() {
+    quota_.requestRefresh(true);
+    refreshSettingsDialog(true);
+}
+
 bool App::isRenderMode(RenderMode mode) const { return renderMode_ == static_cast<int>(mode); }
 
 bool App::isMinimalRenderMode() const { return isRenderMode(RenderMode::Minimal); }
@@ -895,6 +939,7 @@ void App::refreshThemeWindows() {
     refresh(idleAppNameDialog ? idleAppNameDialog->hwnd() : nullptr);
     refresh(idleWelcomeDialog ? idleWelcomeDialog->hwnd() : nullptr);
     refresh(tickTickApiTokenDialog ? tickTickApiTokenDialog->hwnd() : nullptr);
+    refresh(quotaDeepSeekKeyDialog ? quotaDeepSeekKeyDialog->hwnd() : nullptr);
     refresh(updatePromptHwnd_);
     if (songToast_)
         songToast_->refreshTheme();
@@ -1445,6 +1490,15 @@ SettingsState App::currentSettingsState() const {
     st.tickTickSyncing =
         idle_.state().tickTickTasksLoading_ || !idle_.state().tickTickCompletingTaskId_.empty();
     st.tickTickStatus = idle_.state().tickTickStatus_;
+    const QuotaSettingsState quotaState = quota_.settingsState();
+    st.quotaEnabled = settings_.quotaEnabled_;
+    st.quotaCodexEnabled = quotaState.codexEnabled;
+    st.quotaDeepSeekEnabled = quotaState.deepSeekEnabled;
+    st.quotaCodexLoginDetected = quotaState.codexLoginDetected;
+    st.quotaDeepSeekKeyConfigured = quotaState.deepSeekKeyConfigured;
+    st.quotaRefreshing = quotaState.refreshing;
+    st.quotaCodexStatus = quotaState.codexStatus;
+    st.quotaDeepSeekStatus = quotaState.deepSeekStatus;
     const auto displays = enumerateTaskbarDisplays();
     const std::wstring editingId = resolveEditingMonitorDeviceName(displays);
     const auto editingDisplayIt =
@@ -1730,6 +1784,11 @@ SettingsActions App::buildSettingsActions() {
     act.onTickTickConnect = [this] { idle_.connectTickTick(); };
     act.onTickTickRefresh = [this] { idle_.refreshTickTickTasks(); };
     act.onTickTickDisconnect = [this] { disconnectTickTick(); };
+    act.onQuotaEnabled = [this](bool on) { applyQuotaEnabled(on); };
+    act.onQuotaCodexEnabled = [this](bool on) { applyQuotaCodexEnabled(on); };
+    act.onQuotaDeepSeekEnabled = [this](bool on) { applyQuotaDeepSeekEnabled(on); };
+    act.onEditQuotaDeepSeekKey = [this] { editQuotaDeepSeekKey(); };
+    act.onQuotaRefresh = [this] { refreshQuota(); };
     act.onQqLocalLyricsEnabled = [this](bool on) { applyQqLocalLyricsEnabled(on); };
     act.onQqLocalLyricsPersistOrder = [this](bool on) { applyQqLocalLyricsPersistOrder(on); };
     act.onPickQqLocalLyricsPath = [this] { pickQqLocalLyricsPath(); };

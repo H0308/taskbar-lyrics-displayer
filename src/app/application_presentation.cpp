@@ -180,16 +180,18 @@ void App::refreshIdleWelcome() {
 
 IdleFrameInput App::buildIdleFrameInput(TaskbarViewMode effectiveMode,
                                         bool embeddedResourceMonitor,
-                                        bool hasResourceMetrics) const {
+                                        bool hasResourceMetrics, bool quotaVisible) const {
     IdleFrameInput input;
     input.presentation = idle_.currentIdlePresentation();
     input.summaryActive = idle_.state().startupTaskSummaryActive_;
     input.summaryPending = idle_.state().startupTaskSummaryPending_;
     input.tasksEnabled = idle_.tickTickEffectiveEnabled();
+    // 额度行与系统指标共用状态区；仅有额度时也要让空闲栏保持可见。
     input.resourcesVisible =
-        hasResourceMetrics &&
-        (effectiveMode == TaskbarViewMode::AppBar ||
-         (effectiveMode == TaskbarViewMode::Embedded && embeddedResourceMonitor));
+        quotaVisible ||
+        (hasResourceMetrics &&
+         (effectiveMode == TaskbarViewMode::AppBar ||
+          (effectiveMode == TaskbarViewMode::Embedded && embeddedResourceMonitor)));
     input.keepIdleVisible = effectiveMode == TaskbarViewMode::Immersive;
     if (input.summaryActive)
         input.summaryText = idle_.startupTaskSummaryText();
@@ -206,7 +208,7 @@ const PresentationFrame& App::preparePresentationFrame(const SmtcSnapshot& snap,
         display_rules::effectiveTaskbarViewMode(primaryProfile.viewMode, primaryVertical);
     const IdleFrameInput input =
         buildIdleFrameInput(effectiveMode, primaryProfile.embeddedResourceMonitor,
-                            primaryProfile.hasAnyResourceMetric());
+                            primaryProfile.hasAnyResourceMetric(), quota_.displayable());
     return presentation_.update(snap, settings_, playback_.state(), input, update);
 }
 
@@ -222,7 +224,7 @@ void App::applyPresentationFrameToHost(TaskbarHost* host, const SmtcSnapshot& sn
         display_rules::effectiveTaskbarViewMode(profile.viewMode, host->isVerticalTaskbar());
     const IdleFrameInput input =
         buildIdleFrameInput(effectiveMode, profile.embeddedResourceMonitor,
-                            profile.hasAnyResourceMetric());
+                            profile.hasAnyResourceMetric(), quota_.displayable());
     host->applyPresentationFrame(presentation_.frameForView(snap, playback_.state(), input));
 }
 
@@ -264,6 +266,7 @@ void App::syncHost(TaskbarHost* host) {
     if (presentation_.frame().frameRevision == 0) {
         preparePresentationFrame(snap, {.lyricsChanged = true});
     }
+    host->applyQuotaReadings(quota_.panelReadings());
     applyPresentationFrameToHost(host, snap);
 }
 

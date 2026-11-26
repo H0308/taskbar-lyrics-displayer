@@ -1,6 +1,7 @@
 #include "app/application_internal.h"
 #include "lyric/custom_local_lyric_index.h"
 #include "media/player_source.h"
+#include "quota/quota_provider.h"
 #include "ui/font_sizes.h"
 namespace lyrics_app {
 void App::refreshSettingsDialog(bool onlyWhenOpen) {
@@ -807,6 +808,47 @@ void App::editTickTickApiToken(bool enableAfterSave) {
     });
     tickTickApiTokenDialog = std::move(dialog);
     tickTickApiTokenDialog->show();
+}
+
+void App::editQuotaDeepSeekKey() {
+    if (quotaDeepSeekKeyDialog && quotaDeepSeekKeyDialog->isOpen()) {
+        SetForegroundWindow(quotaDeepSeekKeyDialog->hwnd());
+        return;
+    }
+    quotaDeepSeekKeyDialog.reset();
+
+    auto dialog = std::make_unique<IdleAppNameDialog>();
+    HWND parent = settingsDialog ? settingsDialog->hwnd() : trayHwnd;
+    if (!dialog->create(GetModuleHandleW(nullptr), parent, std::wstring(),
+                        L"设置 DeepSeek API Key",
+                        L"在 DeepSeek 开放平台创建 API Key 后粘贴；Key 保存在 Windows 凭据管理器，"
+                        L"不写入配置文件。留空并保存可清除。",
+                        L"输入 API Key", 256)) {
+        return;
+    }
+    dialog->setApplyCallback([this](const std::wstring& text) {
+        std::wstring key = text;
+        key.erase(std::remove_if(key.begin(), key.end(),
+                                 [](wchar_t character) { return iswspace(character) != 0; }),
+                  key.end());
+        if (key.empty()) {
+            quota_.clearDeepSeekKey();
+            return;
+        }
+        if (!QuotaProviderClient::validDeepSeekKey(key)) {
+            message_dialog::showModal(GetModuleHandleW(nullptr), trayHwnd, L"DeepSeek API Key",
+                                      L"API Key 不能包含空白字符或控制字符，请检查后重试。",
+                                      L"确定");
+            return;
+        }
+        if (!quota_.saveDeepSeekKey(key)) {
+            message_dialog::showModal(GetModuleHandleW(nullptr), trayHwnd, L"DeepSeek API Key",
+                                      L"无法把 API Key 保存到 Windows 凭据管理器，请检查系统权限后重试。",
+                                      L"确定");
+        }
+    });
+    quotaDeepSeekKeyDialog = std::move(dialog);
+    quotaDeepSeekKeyDialog->show();
 }
 
 void App::showSettingsError(const wchar_t* operation, const std::wstring& message) {

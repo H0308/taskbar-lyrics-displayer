@@ -34,6 +34,7 @@
 #include "settings/app_settings.h"
 #include "model/taskbar_appearance.h"
 #include "idle/idle_controller.h"
+#include "quota/quota_controller.h"
 #include "app/messages.h"
 #include "app/presentation_model.h"
 
@@ -87,6 +88,9 @@ constexpr UINT_PTR kTimerBackgroundSettingsSave = 8;
 constexpr UINT_PTR kTimerTaskbarDisplayRebuildRetry = 9;
 constexpr UINT_PTR kTimerFullscreenCheck = 10;
 constexpr UINT_PTR kTimerTaskbarMissingMonitorCheck = 11;
+// AI 额度只按分钟级检查是否到期，具体退避间隔由 QuotaController 决定。
+constexpr UINT_PTR kTimerQuotaRefresh = 12;
+constexpr UINT kQuotaCheckMs = 60 * 1000;
 constexpr UINT kTaskbarAutoRestoreMs = 1000;
 constexpr UINT kTaskbarDisplayRebuildRetryMs = 500;
 constexpr int kTaskbarDisplayRebuildMaxRetries = 6;
@@ -210,6 +214,7 @@ private:
         [this] { publishPresentationFrame(monitor.snapshot(), {.lyricsChanged = true}); },
         [this] { refreshSettingsDialog(); },
         [this] { return monitor.snapshot().sessionAlive; }};
+    QuotaController quota_{settings_, [this] { onQuotaUpdated(); }};
     AppVolumeController appVolume_;           // 当前音乐应用的独立音量（音量合成器中该应用的一格）
     AppVolumeState appVolumeState_;           // 最近推送给宿主的音量状态（去重用）
     uint64_t appVolumeRequestRevision_ = 0;    // 主线程最近处理的音量请求版本
@@ -248,6 +253,7 @@ private:
     std::unique_ptr<IdleAppNameDialog> idleAppNameDialog;
     std::unique_ptr<IdleAppNameDialog> idleWelcomeDialog;
     std::unique_ptr<IdleAppNameDialog> tickTickApiTokenDialog;
+    std::unique_ptr<IdleAppNameDialog> quotaDeepSeekKeyDialog;
     std::unique_ptr<SettingsDialog> settingsDialog;
     std::unique_ptr<RuntimeLogDialog> runtimeLogDialog;
     bool songToastCoverWaitArmed_ = false; // 切歌弹窗正在等待封面补齐
@@ -262,6 +268,8 @@ private:
     // 滴答清单今日任务：普通用户 API 口令由 TickTickProvider 保存在 Windows
     // 凭据管理器；这里只保留连接状态和当前展示快照。
     bool tickTickEnableAfterTokenSave_ = false;
+    // 额度区是否参与空闲栏显示；变化时才重建展示帧，避免每次额度刷新都重发整帧。
+    bool quotaDisplayable_ = false;
 
     bool backgroundBlurSettingsSavePending_ = false;
     bool immersiveBackgroundBlurLogPending_ = false;
@@ -622,7 +630,7 @@ private:
 
     IdleFrameInput buildIdleFrameInput(TaskbarViewMode effectiveMode,
                                        bool embeddedResourceMonitor,
-                                       bool hasResourceMetrics) const;
+                                       bool hasResourceMetrics, bool quotaVisible) const;
 
     const PresentationFrame& preparePresentationFrame(const SmtcSnapshot& snap,
                                                       PresentationUpdate update);
@@ -734,6 +742,13 @@ private:
     void applyTickTickEnabled(bool enabled);
     void disconnectTickTick();
     void editTickTickApiToken(bool enableAfterSave = false);
+    // AI 额度：额度结果只进入任务栏状态区与设置页，不改变外观配置。
+    void onQuotaUpdated();
+    void applyQuotaEnabled(bool on);
+    void applyQuotaCodexEnabled(bool on);
+    void applyQuotaDeepSeekEnabled(bool on);
+    void editQuotaDeepSeekKey();
+    void refreshQuota();
     void applyFontAppearance();
     void applyFontColors();
     COLORREF effectivePlayedColor() const;

@@ -24,7 +24,7 @@ float ResourcePanel::columnGap() const {
 }
 
 float ResourcePanel::width() const {
-    if (!dockResourceVisibility_.hasAnyMetric())
+    if (!hasAnyContent())
         return 0.0f;
     const float gap = columnGap();
     if (compact_) {
@@ -46,19 +46,43 @@ float ResourcePanel::width() const {
 
 std::vector<ResourcePanel::Reading> ResourcePanel::readings() const {
     std::vector<Reading> result;
+    result.reserve(quotaReadings_.size() + 6);
+    // CPU 与内存固定排在最前：第一页优先保留最常用的系统指标，额度紧随其后，
+    // 避免额度行占满整页把内存推到第二页。
     if (dockResourceVisibility_.cpuUsage)
-        result.push_back({L"CPU", resourceCpuText_});
+        result.push_back({L"CPU", resourceCpuText_, ReadingKind::Cpu});
     if (dockResourceVisibility_.memoryUsage)
-        result.push_back({L"内存", resourceMemoryText_});
+        result.push_back({L"内存", resourceMemoryText_, ReadingKind::Memory});
+    if (dockResourceVisibility_.hasAnyQuota()) {
+        for (const auto& quota : quotaReadings_)
+            result.push_back({quota.label, quota.value, ReadingKind::Quota});
+    }
     if (dockResourceVisibility_.upload)
-        result.push_back({L"上行", resourceUploadText_});
+        result.push_back({L"上行", resourceUploadText_, ReadingKind::Upload});
     if (dockResourceVisibility_.download)
-        result.push_back({L"下行", resourceDownloadText_});
+        result.push_back({L"下行", resourceDownloadText_, ReadingKind::Download});
     if (dockResourceVisibility_.gpuUsage)
-        result.push_back({L"GPU", resourceGpuText_});
+        result.push_back({L"GPU", resourceGpuText_, ReadingKind::Gpu});
     if (dockResourceVisibility_.cpuFrequency)
-        result.push_back({L"频率", resourceCpuFrequencyText_});
+        result.push_back({L"频率", resourceCpuFrequencyText_, ReadingKind::CpuFrequency});
     return result;
+}
+
+bool ResourcePanel::hasAnyContent() const {
+    return dockResourceVisibility_.hasAnyMetric() ||
+           (dockResourceVisibility_.hasAnyQuota() && !quotaReadings_.empty());
+}
+
+void ResourcePanel::setQuotaReadings(std::vector<QuotaReading> readings) {
+    if (quotaReadings_ == readings)
+        return;
+    quotaReadings_ = std::move(readings);
+    clampPage();
+}
+
+void ResourcePanel::clampPage() {
+    const size_t count = pageCount();
+    dockResourcePage_ = count == 0 ? 0 : std::min(dockResourcePage_, count - 1);
 }
 
 std::vector<ResourcePanel::DockResourceRow> ResourcePanel::rows() const {
@@ -216,11 +240,15 @@ void ResourcePanel::start() {
     resourceCpuFrequencyText_ = L"—";
     resourceSnapshotRevision_ = UINT64_MAX;
     nextResourceSnapshotPollMs_ = 0;
-    resourceMonitor_.start();
+    if (dockResourceVisibility_.hasAnyMetric() && !resourceMonitorRunning_) {
+        resourceMonitor_.start();
+        resourceMonitorRunning_ = true;
+    }
 }
 
 void ResourcePanel::stop() {
     resourceMonitor_.stop();
+    resourceMonitorRunning_ = false;
     nextResourceSnapshotPollMs_ = 0;
     clearTransientLabels();
 }
@@ -273,6 +301,12 @@ bool ResourcePanel::tickTransientLabels(ULONGLONG now, bool animate) {
 }
 
 bool ResourcePanel::refresh() {
+    if (!dockResourceVisibility_.hasAnyMetric())
+        return false;
+    if (!resourceMonitorRunning_) {
+        resourceMonitor_.start();
+        resourceMonitorRunning_ = true;
+    }
     const ULONGLONG now = monotonicNowMs();
     if (now < nextResourceSnapshotPollMs_)
         return false;
@@ -442,21 +476,30 @@ ResourcePanel::ColumnMetrics ResourcePanel::measureColumnMetrics(IDWriteFactory*
     const auto values = readings();
     if (values.empty())
         return result;
+    static constexpr const wchar_t* rateUnits[] = {L"B/s", L"KB/s", L"MB/s", L"GB/s", L"TB/s"};
+    std::vector<std::wstring> rateSamples;
+    for (size_t i = 0; i < std::size(rateUnits); ++i) {
+        if (i > 0)
+            rateSamples.push_back(decimalDigits + rateUnits[i]);
+        rateSamples.push_back(threeDigits + rateUnits[i]);
+    }
+    const std::vector<std::wstring> percentSamples{L"100%", twoDigits + L"%"};
+    const std::vector<std::wstring> frequencySamples{decimalDigits + L"GHz"};
+
     float verticalInlineWidth = 0.0f;
     float verticalStackedWidth = 0.0f;
     float verticalMinWidth = 0.0f;
     float verticalLineHeight = 0.0f;
-    size_t cellIndex = 0;
-    auto measureCell = [&](const std::vector<std::wstring>& samples) {
+    const bool hideLabels = dockResourceVisibility_.hideLabels;
+    for (size_t cellIndex = 0; cellIndex < values.size(); ++cellIndex) {
         const size_t indexInPage = cellIndex % 4;
         if (indexInPage == 0)
             result.pageColumnWidths.push_back({});
         float& columnWidth = result.pageColumnWidths.back()[indexInPage / 2];
-        const bool hideLabels = dockResourceVisibility_.hideLabels;
         const auto& reading = values[cellIndex];
-        const std::wstring label = reading.label;
-        const std::wstring prefix = label + L": ";
-        const float labelWidth = measureResourceTextWidth(dwrite, format, label, &verticalLineHeight);
+        const std::wstring prefix = reading.label + L": ";
+        const float labelWidth =
+            measureResourceTextWidth(dwrite, format, reading.label, &verticalLineHeight);
         verticalMinWidth = std::max(verticalMinWidth, labelWidth);
         verticalStackedWidth = std::max(verticalStackedWidth, labelWidth);
         if (hideLabels) {
@@ -464,7 +507,27 @@ ResourcePanel::ColumnMetrics ResourcePanel::measureColumnMetrics(IDWriteFactory*
             result.singleLineWidths[cellIndex % 2] =
                 std::max(result.singleLineWidths[cellIndex % 2], labelWidth);
         }
-        for (const auto& sample : samples) {
+
+        std::vector<std::wstring> quotaSamples;
+        const std::vector<std::wstring>* samples = &percentSamples;
+        switch (reading.kind) {
+        case ReadingKind::Upload:
+        case ReadingKind::Download:
+            samples = &rateSamples;
+            break;
+        case ReadingKind::CpuFrequency:
+            samples = &frequencySamples;
+            break;
+        case ReadingKind::Quota:
+            quotaSamples.push_back(reading.value);
+            if (!reading.value.empty() && reading.value.back() == L'%')
+                quotaSamples.push_back(L"100%");
+            samples = &quotaSamples;
+            break;
+        default:
+            break;
+        }
+        for (const auto& sample : *samples) {
             const float measured = measureResourceTextWidth(
                 dwrite, format, hideLabels ? sample : prefix + sample, &verticalLineHeight);
             columnWidth = std::max(columnWidth, measured);
@@ -472,35 +535,12 @@ ResourcePanel::ColumnMetrics ResourcePanel::measureColumnMetrics(IDWriteFactory*
                 std::max(result.singleLineWidths[cellIndex % 2], measured);
             verticalInlineWidth = std::max(
                 verticalInlineWidth, measureResourceTextWidth(
-                    dwrite, format, label + L" " + sample, &verticalLineHeight));
+                    dwrite, format, reading.label + L" " + sample, &verticalLineHeight));
             verticalStackedWidth = std::max(
                 verticalStackedWidth, measureResourceTextWidth(
                     dwrite, format, std::wstring(shortVerticalValue(sample))));
         }
-        ++cellIndex;
-    };
-    if (dockResourceVisibility_.cpuUsage)
-        measureCell({L"100%", twoDigits + L"%"});
-    if (dockResourceVisibility_.memoryUsage)
-        measureCell({L"100%", twoDigits + L"%"});
-    static constexpr const wchar_t* rateUnits[] = {L"B/s", L"KB/s", L"MB/s", L"GB/s", L"TB/s"};
-    auto measureRate = [&] {
-        std::vector<std::wstring> samples;
-        for (size_t i = 0; i < std::size(rateUnits); ++i) {
-            if (i > 0)
-                samples.push_back(decimalDigits + rateUnits[i]);
-            samples.push_back(threeDigits + rateUnits[i]);
-        }
-        measureCell(samples);
-    };
-    if (dockResourceVisibility_.upload)
-        measureRate();
-    if (dockResourceVisibility_.download)
-        measureRate();
-    if (dockResourceVisibility_.gpuUsage)
-        measureCell({L"100%", twoDigits + L"%"});
-    if (dockResourceVisibility_.cpuFrequency)
-        measureCell({decimalDigits + L"GHz"});
+    }
 
     for (auto& [left, right] : result.pageColumnWidths) {
         left = std::max(1.0f, std::ceil(left) + kResourceCellSafetyPadding);

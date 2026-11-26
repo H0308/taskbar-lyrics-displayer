@@ -411,6 +411,43 @@ void SettingsSections::createPerformanceRows() {
              state.fullscreenRenderModeEnabled, kRowH);
 }
 
+void SettingsSections::createQuotaRows() {
+    addHeader(kQuotaPage, L"AI 额度");
+    Row& quotaEnabled = addRow(
+        kQuotaPage, kIdQuotaEnabled, ControlKind::Toggle, L"在任务栏显示 AI 额度",
+        L"与资源监视共用任务栏状态区，位置、紧凑显示和隐藏标签沿用「展示模式 → 资源监视」。"
+        L"额度约每 5 分钟自动刷新一次，多页时可用滚轮切换。",
+        40.0f, kRowTallH);
+    quotaEnabled.checked = state.quotaEnabled;
+    addHeader(kQuotaPage, L"服务");
+    Row& codex = addRow(kQuotaPage, kIdQuotaCodexEnabled, ControlKind::Toggle, L"显示 Codex 额度",
+                        state.quotaCodexStatus.empty()
+                            ? L"读取本机 ~/.codex/auth.json 登录状态，查询 5 小时与每周剩余额度。"
+                            : state.quotaCodexStatus.c_str(),
+                        40.0f, kRowTallH);
+    codex.checked = state.quotaCodexEnabled;
+    Row& deepSeek = addRow(kQuotaPage, kIdQuotaDeepSeekEnabled, ControlKind::Toggle,
+                           L"显示 DeepSeek 余额",
+                           state.quotaDeepSeekStatus.empty()
+                               ? L"需要 DeepSeek API Key；余额包含充值金额与赠送金额。"
+                               : state.quotaDeepSeekStatus.c_str(),
+                           40.0f, kRowTallH);
+    deepSeek.checked = state.quotaDeepSeekEnabled;
+    addHeader(kQuotaPage, L"连接");
+    Row& deepSeekKey = addButton(
+        kQuotaPage, kIdQuotaDeepSeekKey, L"DeepSeek API Key",
+        L"在 DeepSeek 开放平台创建 API Key 后粘贴；Key 保存在 Windows 凭据管理器，不写入配置文件。"
+        L"留空并保存可清除。",
+        state.quotaDeepSeekKeyConfigured ? L"已设置…" : L"设置…", kRowTallH);
+    deepSeekKey.enabled = state.quotaEnabled;
+    Row& refresh = addButton(
+        kQuotaPage, kIdQuotaRefresh, L"刷新额度",
+        L"Codex 只读取本机登录文件并请求官方额度接口，不改写其他客户端配置；"
+        L"认证失败时不会自动重试，重新登录或重新设置 Key 后会立即刷新。",
+        L"立即刷新", kRowTallH);
+    refresh.enabled = state.quotaEnabled;
+}
+
 void SettingsSections::create() {
     createDisplayRows();
     createTaskbarModeRows();
@@ -421,6 +458,7 @@ void SettingsSections::create() {
     createFloatingCardRows();
     createSongToastRows();
     createPerformanceRows();
+    createQuotaRows();
     rows[kSpectrumPage] = settings_ui::createSpectrumRows(state);
     rows[kLyricsPage] = settings_ui::createLyricRows(state);
     updateProgressBackgroundRowsEnabled();

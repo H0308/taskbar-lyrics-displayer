@@ -30,6 +30,7 @@ public:
     void updateTickTickRows();
     void updateIdleQuoteSourceRow();
     void updateIdleRowsEnabled();
+    void updateQuotaRowsEnabled();
     void updateCompactLyricRows();
 
 private:
@@ -55,6 +56,7 @@ private:
     void createFloatingCardRows();
     void createSongToastRows();
     void createPerformanceRows();
+    void createQuotaRows();
     bool onIdleCommand(int id, Row* row, int option);
     bool onSpectrumCommand(int id, Row* row);
     bool onFloatingCardCommand(int id, Row* row);
@@ -68,6 +70,7 @@ private:
     void syncPlayerRows(const SettingsState& s);
     void syncFloatingCardRows(const SettingsState& s);
     void syncSongToastRows(const SettingsState& s);
+    void syncQuotaRows(const SettingsState& s);
     void syncThemeFontRows(const SettingsState& s);
 };
 } // namespace settings_ui

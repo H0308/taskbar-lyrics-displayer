@@ -1,7 +1,7 @@
 #pragma once
 
 namespace settings_ui {
-inline constexpr int kSettingsPageCount = 10;
+inline constexpr int kSettingsPageCount = 11;
 inline constexpr int kTaskbarModePage = 1;
 inline constexpr int kPerformancePage = 2;
 inline constexpr int kFloatingCardPage = 3;
@@ -10,7 +10,8 @@ inline constexpr int kPlayerPage = 5;
 inline constexpr int kSpectrumPage = 6;
 inline constexpr int kLyricsPage = 7;
 inline constexpr int kSongToastPage = 8;
-inline constexpr int kIdlePage = kSettingsPageCount - 1;
+inline constexpr int kIdlePage = 9;
+inline constexpr int kQuotaPage = 10;
 inline constexpr int kIdNav = 400;
 inline constexpr int kIdSettingsSearch = 4900;
 inline constexpr int kIdOpenDocs = 4901;
@@ -116,6 +117,11 @@ inline constexpr int kIdDockResourceHideLabels = 492;
 inline constexpr int kIdImmersiveBackgroundAdjustment = 479;
 inline constexpr int kIdDockBackgroundAdjustment = 480;
 inline constexpr int kIdContentScrollBar = 401;
+inline constexpr int kIdQuotaEnabled = 540;
+inline constexpr int kIdQuotaCodexEnabled = 541;
+inline constexpr int kIdQuotaDeepSeekEnabled = 542;
+inline constexpr int kIdQuotaDeepSeekKey = 543;
+inline constexpr int kIdQuotaRefresh = 544;
 inline constexpr int kIdIdleAppNames = 460;
 inline constexpr int kIdleAppNamesOption = -2;
 inline constexpr int kIdleAppEditOptionBase = 1000;

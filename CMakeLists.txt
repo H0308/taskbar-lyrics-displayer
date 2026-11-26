@@ -78,6 +78,7 @@ set(WINDOWS_TASKBAR_LYRICS_CORE_SOURCES
     src/media/playback_controller.cpp
     src/media/player_source.cpp
     src/media/track_identity.cpp
+    src/quota/quota_provider.cpp
     src/settings/app_settings.cpp
     src/settings/display_rules.cpp
     src/settings/settings_store.cpp
@@ -176,6 +177,7 @@ add_executable(WindowsTaskbarLyrics
     src/monitor/resource_monitor.cpp
     src/idle/idle_quote_provider.cpp
     src/idle/ticktick_provider.cpp
+    src/quota/quota_controller.cpp
     src/graphics/bitmap_renderer.cpp
     src/graphics/composition_renderer.cpp
     src/ui/media_control_icons.cpp
@@ -246,6 +248,7 @@ if(BUILD_TESTING)
         tests/soda_logic_tests.cpp
         tests/ui_text_and_controls_tests.cpp
         tests/update_and_markdown_tests.cpp
+        tests/quota_tests.cpp
     )
     target_link_libraries(WindowsTaskbarLyricsParserTests PRIVATE
         WindowsTaskbarLyricsCore

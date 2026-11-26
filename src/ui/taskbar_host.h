@@ -2,6 +2,7 @@
 
 #include "model/display_types.h"
 #include "model/taskbar_appearance.h"
+#include "quota/quota_types.h"
 #include "ui/spectrum_effects.h"
 #include "ui/lyric_effects.h"
 
@@ -47,6 +48,8 @@ public:
     void setCloseCallback(std::function<void()> cb);
     void applyAppearance(const TaskbarAppearance& appearance);
     void applyPresentationFrame(const PresentationFrame& frame) override;
+    // AI 额度行由应用层从额度快照推导；空列表表示当前不显示额度。
+    void applyQuotaReadings(std::vector<QuotaReading> readings);
     void applyPlaybackPatch(const PlaybackPatch& patch) override;
     void applySpectrumPatch(const SpectrumPatch& patch) override;
     void setControlCallback(std::function<void(MediaControl, uint64_t, int64_t)> cb) override;

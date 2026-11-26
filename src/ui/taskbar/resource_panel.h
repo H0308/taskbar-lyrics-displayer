@@ -1,6 +1,7 @@
 #pragma once
 #include "model/display_types.h"
 #include "monitor/resource_monitor.h"
+#include "quota/quota_types.h"
 #include <d2d1_1.h>
 #include <dwrite.h>
 #include <algorithm>
@@ -9,7 +10,8 @@
 #include <string_view>
 #include <vector>
 
-// 独占采样、展示文案、列宽和分页；绘图目标、字体和画刷只在 draw 调用期间借用。
+// 任务栏右侧状态区：系统资源采样、应用层推送的 AI 额度行、列宽与分页。
+// 绘图目标、字体和画刷只在 draw 调用期间借用；额度数据按值复制，不反向读取应用配置。
 class ResourcePanel {
 public:
     const DockResourceVisibility& visibility() const { return dockResourceVisibility_; }
@@ -17,6 +19,8 @@ public:
         dockResourceVisibility_ = value;
         if (!value.hideLabels)
             clearTransientLabels();
+        if (!value.hasAnyMetric() && resourceMonitorRunning_)
+            stop();
         resetPage();
     }
     void setLayout(bool compact, bool vertical) {
@@ -27,6 +31,12 @@ public:
         vertical_ = vertical;
     }
     void resetPage() { dockResourcePage_ = 0; }
+    // AI 额度行由应用层从额度快照推导；空列表表示不显示额度。
+    void setQuotaReadings(std::vector<QuotaReading> readings);
+    const std::vector<QuotaReading>& quotaReadings() const { return quotaReadings_; }
+    // 状态区是否有任何可绘制内容（系统指标或已启用的额度行）。
+    bool hasAnyContent() const;
+    void clampPage();
     void triggerTransientLabels(ULONGLONG now);
     void clearTransientLabels();
     bool transientLabelsFading(ULONGLONG now, bool animate) const;
@@ -47,9 +57,19 @@ public:
               float height, float width) const;
 
 private:
+    enum class ReadingKind {
+        Cpu,
+        Memory,
+        Upload,
+        Download,
+        Gpu,
+        CpuFrequency,
+        Quota,
+    };
     struct Reading {
-        const wchar_t* label;
-        const std::wstring& value;
+        std::wstring label;
+        std::wstring value;
+        ReadingKind kind = ReadingKind::Cpu;
     };
     struct DockResourceCell {
         std::wstring value;
@@ -77,6 +97,7 @@ private:
     static float measureResourceTextWidth(IDWriteFactory* dwrite, IDWriteTextFormat* format,
                                           const std::wstring& text, float* lineHeight = nullptr);
     system_monitor::ResourceMonitor resourceMonitor_;
+    std::vector<QuotaReading> quotaReadings_;
     uint64_t resourceSnapshotRevision_ = 0;
     ULONGLONG nextResourceSnapshotPollMs_ = 0;
     std::wstring resourceCpuText_ = L"—";
@@ -93,6 +114,7 @@ private:
     float verticalStackedWidth_ = 0.0f;
     float verticalMinWidth_ = 0.0f;
     float verticalLineHeight_ = 0.0f;
+    bool resourceMonitorRunning_ = false;
     bool compact_ = false;
     bool vertical_ = false;
     bool transientLabelActive_ = false;

@@ -32,6 +32,14 @@ struct SettingsState {
     bool tickTickConnecting = false;
     bool tickTickSyncing = false;
     std::wstring tickTickStatus;
+    bool quotaEnabled = false;
+    bool quotaCodexEnabled = true;
+    bool quotaDeepSeekEnabled = true;
+    bool quotaCodexLoginDetected = false;
+    bool quotaDeepSeekKeyConfigured = false;
+    bool quotaRefreshing = false;
+    std::wstring quotaCodexStatus;
+    std::wstring quotaDeepSeekStatus;
     bool songInfoVisible = true;
     bool albumCoverVisible = true;
     bool platformIconVisible = false;
@@ -138,6 +146,11 @@ struct SettingsActions {
     std::function<void(int)> onIdleQuoteBackground;
     std::function<void(int)> onIdleQuoteBackgroundScope;
     std::function<void()> onEditIdleWelcome;
+    std::function<void(bool)> onQuotaEnabled;
+    std::function<void(bool)> onQuotaCodexEnabled;
+    std::function<void(bool)> onQuotaDeepSeekEnabled;
+    std::function<void()> onEditQuotaDeepSeekKey;
+    std::function<void()> onQuotaRefresh;
     std::function<void(bool)> onTickTickEnabled;
     std::function<void()> onEditTickTickApiToken;
     std::function<void()> onTickTickConnect;

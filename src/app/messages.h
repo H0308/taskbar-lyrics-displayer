@@ -18,5 +18,7 @@ constexpr UINT kMsgRequestQuit = WM_APP + 14;
 constexpr UINT kMsgGenericSmtcAppReady = WM_APP + 15;
 constexpr UINT kMsgCustomLocalFolderReady = WM_APP + 16;
 constexpr UINT kMsgCustomLocalPlayerExeReady = WM_APP + 17;
+// AI 额度刷新结果（工作线程投递，主线程接管载荷所有权）
+constexpr UINT kMsgQuotaReady = WM_APP + 18;
 
 constexpr UINT_PTR kTimerTickTickStartupRetry = 6;
