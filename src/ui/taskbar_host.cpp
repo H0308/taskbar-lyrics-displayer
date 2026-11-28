@@ -135,6 +135,12 @@ constexpr float kLyricEdgeFadeDip = 18.0f;
 constexpr float kSongInfoDividerWidth = 1.0f;
 constexpr float kSongInfoDividerInset = 5.0f;
 constexpr float kCornerRadius = 8.0f;
+// 悬停填充不透明度：落在 WinUI 的 SubtleFillColorSecondary（浅 #09000000≈3.5%、
+// 深 #0FFFFFFF≈5.9%）到 ControlFillColorSecondary（深 #15FFFFFF≈8.2%）之间，
+// 也与 Windows 11 任务栏按钮自带的 hover 量级一致。
+constexpr float kHoverFillAlpha = 0.09f;
+// 按压时在悬停填充上加深的倍数，与内嵌控件按钮的按压反馈保持一致。
+constexpr float kPressedFillAlphaScale = 1.8f;
 constexpr float kVerticalMinLengthDip = 220.0f;
 
 constexpr float kLyricTransitionMs = 280.0f;         // 相邻歌词上下切换时长
@@ -2016,7 +2022,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         if (lightTheme_) {
             rt->CreateSolidColorBrush(D2D1::ColorF(0.96f, 0.96f, 0.96f, 0.01f),
                                       brushBg_.ReleaseAndGetAddressOf());
-            rt->CreateSolidColorBrush(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.09f),
+            rt->CreateSolidColorBrush(D2D1::ColorF(0.0f, 0.0f, 0.0f, kHoverFillAlpha),
                                       brushHover_.ReleaseAndGetAddressOf());
             rt->CreateSolidColorBrush(D2D1::ColorF(0.08f, 0.08f, 0.08f, 0.95f),
                                       brushText_.ReleaseAndGetAddressOf());
@@ -2029,7 +2035,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         } else {
             rt->CreateSolidColorBrush(D2D1::ColorF(0.12f, 0.12f, 0.12f, 0.01f),
                                       brushBg_.ReleaseAndGetAddressOf());
-            rt->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.09f),
+            rt->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, kHoverFillAlpha),
                                       brushHover_.ReleaseAndGetAddressOf());
             rt->CreateSolidColorBrush(D2D1::ColorF(1.00f, 1.00f, 1.00f, 0.95f),
                                       brushText_.ReleaseAndGetAddressOf());
@@ -4820,7 +4826,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
                     const auto color = brushHover_->GetColor();
                     auto fill = color;
                     if (immersiveControlPressed_ == i)
-                        fill.a = std::min(1.0f, color.a * 1.8f);
+                        fill.a = std::min(1.0f, color.a * kPressedFillAlphaScale);
                     brushHover_->SetColor(fill);
                     const float half = r + 4.0f;
                     const float corner = std::min(6.0f, half * 0.4f);
@@ -4876,7 +4882,7 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
         const auto color = brushHover_->GetColor();
         auto fill = color;
         if (pressed)
-            fill.a = std::min(1.0f, color.a * 1.8f);
+            fill.a = std::min(1.0f, color.a * kPressedFillAlphaScale);
         brushHover_->SetColor(fill);
         const float half = radius + 2.0f;
         const float corner = std::min(6.0f, half * 0.4f);
@@ -6807,8 +6813,15 @@ struct TaskbarHost::Impl : std::enable_shared_from_this<TaskbarHost::Impl> {
 
         if (!isExpandedView()) {
             rt->FillRoundedRectangle(bg, brushBg_.Get());
-            if (mouseOver_ && brushHover_.Get())
+            if (mouseOver_ && brushHover_.Get()) {
+                const auto color = brushHover_->GetColor();
+                auto fill = color;
+                if (drag_.pressed() && !drag_.dragging() && GetCapture() == hwnd)
+                    fill.a = std::min(1.0f, color.a * kPressedFillAlphaScale);
+                brushHover_->SetColor(fill);
                 rt->FillRoundedRectangle(bg, brushHover_.Get());
+                brushHover_->SetColor(color);
+            }
         }
 
         if (progressBackgroundActive() && brushProgressBg_.Get() && media.durationMs > 0) {
